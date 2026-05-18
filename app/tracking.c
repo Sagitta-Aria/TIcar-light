@@ -3,6 +3,7 @@
 #include "board_config.h"
 #include "gray.h"
 #include "motion.h"
+#include "route.h"
 
 static uint8_t g_trackingEnabled;
 
@@ -27,6 +28,8 @@ uint8_t Tracking_IsEnabled(void)
 void Tracking_Task(void)
 {
     int16_t error = 0;
+    uint16_t baseDuty;
+    uint16_t turnLimit;
 
     if (!g_trackingEnabled) {
         return;
@@ -44,11 +47,19 @@ void Tracking_Task(void)
         return;
     }
 
+    baseDuty = Route_GetBaseDuty();
+    turnLimit = Route_GetTurnLimit();
     {
         int16_t correction =
             (int16_t)((error * CAR_TRACK_TURN_GAIN) / GRAY_LINE_ERROR_SCALE);
-        int16_t left = (int16_t)(CAR_TRACK_BASE_DUTY + correction);
-        int16_t right = (int16_t)(CAR_TRACK_BASE_DUTY - correction);
+        if (correction > (int16_t)turnLimit) {
+            correction = (int16_t)turnLimit;
+        } else if (correction < -(int16_t)turnLimit) {
+            correction = -(int16_t)turnLimit;
+        }
+
+        int16_t left = (int16_t)(baseDuty + correction);
+        int16_t right = (int16_t)(baseDuty - correction);
         Motion_SetSpeed(left, right);
     }
 }

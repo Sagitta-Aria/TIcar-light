@@ -200,6 +200,11 @@ static void Gray_UpdateDigitalFromRaw(void)
     Gray_RebuildMask();
 }
 
+/*
+ * 作用：初始化灰度传感器模块。
+ * 使用场景：Board_Init 后、进入循迹前调用一次。
+ * 说明：会清掉滤波状态、加载默认阈值、重置校准数据并立即采样一次。
+ */
 void Gray_Init(void)
 {
     g_grayFilterReady = 0U;

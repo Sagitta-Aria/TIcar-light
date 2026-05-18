@@ -1,6 +1,8 @@
 #include "motion.h"
 
+#include "board_config.h"
 #include "motor.h"
+#include "speed_control.h"
 
 static int16_t Motion_ToSignedDuty(uint16_t duty)
 {
@@ -9,12 +11,20 @@ static int16_t Motion_ToSignedDuty(uint16_t duty)
 
 void Motion_Stop(void)
 {
+#if CAR_ENABLE_SPEED_CONTROL
+    SpeedControl_Stop();
+#else
     Motor_Stop();
+#endif
 }
 
 void Motion_SetSpeed(int16_t left, int16_t right)
 {
+#if CAR_ENABLE_SPEED_CONTROL
+    SpeedControl_SetTarget(left, right);
+#else
     Motor_SetSpeed(left, right);
+#endif
 }
 
 void Motion_Forward(uint16_t duty)

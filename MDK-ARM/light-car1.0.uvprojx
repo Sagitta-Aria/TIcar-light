@@ -417,6 +417,21 @@
               <FilePath>..\app\state_machine.c</FilePath>
             </File>
             <File>
+              <FileName>motor_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\app\motor_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>route.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\app\route.c</FilePath>
+            </File>
+            <File>
+              <FileName>speed_control.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\app\speed_control.c</FilePath>
+            </File>
+            <File>
               <FileName>app.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\app\app.h</FilePath>
@@ -435,6 +450,21 @@
               <FileName>state_machine.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\app\state_machine.h</FilePath>
+            </File>
+            <File>
+              <FileName>motor_test.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\app\motor_test.h</FilePath>
+            </File>
+            <File>
+              <FileName>route.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\app\route.h</FilePath>
+            </File>
+            <File>
+              <FileName>speed_control.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\app\speed_control.h</FilePath>
             </File>
           </Files>
         </Group>
