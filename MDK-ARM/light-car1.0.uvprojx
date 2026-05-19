@@ -407,9 +407,19 @@
               <FilePath>..\app\motion.c</FilePath>
             </File>
             <File>
+              <FileName>menu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\app\menu.c</FilePath>
+            </File>
+            <File>
               <FileName>tracking.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\app\tracking.c</FilePath>
+            </File>
+            <File>
+              <FileName>tracking_exception.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\app\tracking_exception.c</FilePath>
             </File>
             <File>
               <FileName>state_machine.c</FileName>
@@ -442,9 +452,19 @@
               <FilePath>..\app\motion.h</FilePath>
             </File>
             <File>
+              <FileName>menu.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\app\menu.h</FilePath>
+            </File>
+            <File>
               <FileName>tracking.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\app\tracking.h</FilePath>
+            </File>
+            <File>
+              <FileName>tracking_exception.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\app\tracking_exception.h</FilePath>
             </File>
             <File>
               <FileName>state_machine.h</FileName>

@@ -12,11 +12,48 @@
 /* CAR_TRACK_TURN_GAIN：根据循迹误差计算转向修正的增益。 */
 #define CAR_TRACK_TURN_GAIN             (220)
 
-/* CAR_TRACK_LOST_STOP：丢线时是否立刻停车。 */
+/* CAR_TRACK_LOST_HOLD_TICKS：刚丢线时先保持上一拍输出的循环次数。 */
+#define CAR_TRACK_LOST_HOLD_TICKS       (3U)
+
+/* CAR_TRACK_LOST_SEARCH_TICKS：进入温和搜线动作后的持续次数。 */
+#define CAR_TRACK_LOST_SEARCH_TICKS     (24U)
+
+/* CAR_TRACK_LOST_SEARCH_BASE_DUTY：搜线阶段的基础占空比。 */
+#define CAR_TRACK_LOST_SEARCH_BASE_DUTY (650U)
+
+/* CAR_TRACK_LOST_SEARCH_DELTA_DUTY：搜线阶段左右轮的差速幅度。 */
+#define CAR_TRACK_LOST_SEARCH_DELTA_DUTY (180U)
+
+/* CAR_TRACK_ADC_FAULT_STOP_TICKS：ADC 连续失败多少次后判定为异常停车。 */
+#define CAR_TRACK_ADC_FAULT_STOP_TICKS  (2U)
+
+/* CAR_TRACK_WIDE_LINE_ACTIVE_COUNT：认为进入路口/宽线的最小有效通道数。 */
+#define CAR_TRACK_WIDE_LINE_ACTIVE_COUNT (5U)
+
+/* CAR_TRACK_SEARCH_DEFAULT_LEFT：丢线后没有历史方向时默认向左搜线。 */
+#define CAR_TRACK_SEARCH_DEFAULT_LEFT   (1U)
+
+/* CAR_TRACK_LOST_STOP：丢线搜线超时后是否停车，1 停车，0 继续搜线。 */
 #define CAR_TRACK_LOST_STOP             (1U)
 
 /* CAR_APP_LOOP_DELAY_MS：主循环延时，避免空转过快。 */
 #define CAR_APP_LOOP_DELAY_MS           (10U)
+
+/* CAR_MENU_REFRESH_MS：菜单和监视页面的 OLED 刷新周期。 */
+#define CAR_MENU_REFRESH_MS             (100U)
+
+/* CAR_MENU_REFRESH_TICKS：把菜单刷新周期换算成 App_Task 调度次数。 */
+#define CAR_MENU_REFRESH_TICKS \
+    ((CAR_MENU_REFRESH_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
+        CAR_APP_LOOP_DELAY_MS)
+
+/* CAR_MENU_LINK_PRINT_MS：监视页面通过串口打印数据的周期。 */
+#define CAR_MENU_LINK_PRINT_MS          (200U)
+
+/* CAR_MENU_LINK_PRINT_TICKS：把串口打印周期换算成 App_Task 调度次数。 */
+#define CAR_MENU_LINK_PRINT_TICKS \
+    ((CAR_MENU_LINK_PRINT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
+        CAR_APP_LOOP_DELAY_MS)
 
 /* CAR_ENABLE_SPEED_CONTROL：1 表示启用编码器速度 PI 闭环，0 表示保持开环 PWM。 */
 #define CAR_ENABLE_SPEED_CONTROL        (1U)

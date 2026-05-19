@@ -4,17 +4,20 @@
 #include "gray.h"
 #include "motion.h"
 #include "route.h"
+#include "tracking_exception.h"
 
 static uint8_t g_trackingEnabled;
 
 void Tracking_Init(void)
 {
     g_trackingEnabled = 0U;
+    TrackingException_Init();
 }
 
 void Tracking_SetEnabled(uint8_t enabled)
 {
     g_trackingEnabled = enabled ? 1U : 0U;
+    TrackingException_Reset();
     if (!g_trackingEnabled) {
         Motion_Stop();
     }
@@ -28,38 +31,37 @@ uint8_t Tracking_IsEnabled(void)
 void Tracking_Task(void)
 {
     int16_t error = 0;
+    int16_t leftDuty = 0;
+    int16_t rightDuty = 0;
     uint16_t baseDuty;
+    uint8_t digitalMask = 0U;
+    uint8_t sampleOk;
     uint16_t turnLimit;
 
     if (!g_trackingEnabled) {
         return;
     }
 
+    baseDuty = Route_GetBaseDuty();
+    turnLimit = Route_GetTurnLimit();
+    sampleOk = Gray_Update();
+    if (sampleOk) {
+        digitalMask = Gray_GetDigitalMask();
+        if (digitalMask != 0U) {
+            (void)Gray_GetWeightedLineError(&error);
+        }
+    }
+
     /*
-     * 使用加权偏差做循迹修正。
-     * 这里适合正式跑线时使用，不适合做单点黑白测试。
-     * 如果当前没有任何通道压线，就让电机停住，避免盲跑。
+     * 异常处理器统一决定正常循迹、短暂保持、搜线或停车。
+     * 后续要接入状态机时，直接读取 TrackingException_GetState() 即可。
      */
-    if (!Gray_Update() || !Gray_GetWeightedLineError(&error)) {
-#if CAR_TRACK_LOST_STOP
+    if (TrackingException_Update(sampleOk, digitalMask, error, baseDuty,
+        turnLimit, &leftDuty, &rightDuty) ==
+        TRACKING_EXCEPTION_ACTION_STOP) {
         Motion_Stop();
-#endif
         return;
     }
 
-    baseDuty = Route_GetBaseDuty();
-    turnLimit = Route_GetTurnLimit();
-    {
-        int16_t correction =
-            (int16_t)((error * CAR_TRACK_TURN_GAIN) / GRAY_LINE_ERROR_SCALE);
-        if (correction > (int16_t)turnLimit) {
-            correction = (int16_t)turnLimit;
-        } else if (correction < -(int16_t)turnLimit) {
-            correction = -(int16_t)turnLimit;
-        }
-
-        int16_t left = (int16_t)(baseDuty + correction);
-        int16_t right = (int16_t)(baseDuty - correction);
-        Motion_SetSpeed(left, right);
-    }
+    Motion_SetSpeed(leftDuty, rightDuty);
 }

@@ -31,9 +31,11 @@ D:\Ti\mspm0_sdk_2_10_00_04
 ## Where to add code
 
 - Motor control: `hardware\motor.c`, higher-level speed helpers in `app\motion.c`.
+- OLED menu and debug pages: `app\menu.c`.
 - Motor direction confirmation: `app\motor_test.c`.
 - Route planner: `app\route.c`.
 - Encoder speed loop: `app\speed_control.c`.
+- Tracking exception handling: `app\tracking_exception.c`.
 - Car state transitions: `app\state_machine.c`.
 - Line tracking: `app\tracking.c`.
 - Gray sensor threshold or active level: `config\board_config.h`.
@@ -43,19 +45,19 @@ D:\Ti\mspm0_sdk_2_10_00_04
 
 ## Motor direction confirmation
 
-`CAR_ENABLE_MOTOR_TEST_MODE` is normally `0`, so the test module is kept as a reusable debug tool without changing normal tracking startup.
+Motor direction confirmation is available from the OLED menu:
 
-To enable it, temporarily set:
-
-```c
-#define CAR_ENABLE_MOTOR_TEST_MODE      (1U)
+```text
+2.Test -> Motor Dir
 ```
 
 Steps:
 
 1. Lift the car so both wheels are off the ground.
-2. Press Key 1 to run the next low-speed test step.
-3. Press Key 2 at any time to stop.
+2. Use Key 2 to move the menu cursor, and Key 1 to confirm.
+3. Inside `Motor Dir`, press Key 1 to run the next low-speed test step.
+4. Press Key 2 to return to the menu.
+5. Observe whether each step matches its name on the UART log:
 4. Observe whether each step matches its name on the UART log:
 
 ```text
@@ -67,7 +69,64 @@ both forward
 both reverse
 ```
 
-Each step runs for `CAR_MOTOR_TEST_RUN_MS` and then stops automatically. After the motor direction is confirmed, set `CAR_ENABLE_MOTOR_TEST_MODE` to `0` to restore Key 1 as the tracking start key.
+Each step runs for `CAR_MOTOR_TEST_RUN_MS` and then stops automatically.
+
+## OLED menu
+
+The car boots into the OLED menu. The OLED ASCII font is used, so screen labels are short English labels while code comments keep the Chinese meaning.
+
+Key mapping:
+
+- Key 1: confirm
+- Key 2: next item, wrapping from the last item back to the first
+
+Main menu:
+
+- `1.Calib`: gray sensor calibration
+- `2.Test`: test submenu
+- `3.Mission`: contest mission placeholder
+
+Test submenu:
+
+- `Motor Dir`: motor direction test
+- `Track Only`: pure gray tracking without route planner
+- `PID Data`: speed-loop PID data monitor
+- `Gray Data`: gray sensor data monitor
+- `Exchange`: vision UART placeholder
+- `Encoder`: encoder data monitor
+- `Back`: return to main menu
+
+Gray calibration method:
+
+1. Enter `1.Calib`.
+2. Move the gray sensor board across both the black line and the white background several times.
+3. The firmware continuously records each channel's minimum and maximum ADC values.
+4. Press Key 1 to apply thresholds. Each threshold becomes the midpoint between the sampled min and max.
+5. Press Key 2 to cancel and return to the menu.
+
+## State machine
+
+`state_machine.c` is the top-level task selector. `main.c` only starts the board and calls `App_Task()`, while the real car modes are selected here.
+
+Current states:
+
+- `INIT`
+- `IDLE`
+- `MENU`
+- `GRAY_CALIBRATION`
+- `TRACKING`
+- `TRACKING_TEST`
+- `MOTOR_TEST`
+- `PID_MONITOR`
+- `GRAY_MONITOR`
+- `EXCHANGE_MONITOR`
+- `ENCODER_MONITOR`
+- `MISSION`
+- `FINISHED`
+- `STOP`
+- `ERROR`
+
+Each state has an entry action and a periodic task. Some tasks are placeholders for now, such as `MISSION` and `EXCHANGE_MONITOR`, so future contest logic and vision-module parsing can be added without changing `main.c`.
 
 ## Route planner
 
