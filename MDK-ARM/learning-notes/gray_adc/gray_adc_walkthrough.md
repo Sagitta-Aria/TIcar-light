@@ -148,6 +148,52 @@ typedef struct {
 
 这两种写法都可以。原代码用的是更短的写法，适合这种字段很少、顺序很清楚的映射表。
 
+### 为什么 ADC 只有 0/1，MEM 名字却像 1~7
+
+这里最容易误会的是宏名：
+
+```c
+GRAY_ADC0_MEM_GRAY1
+GRAY_ADC1_MEM_GRAY2
+GRAY_ADC1_MEM_GRAY3
+```
+
+名字里的 `GRAY1`、`GRAY2`、`GRAY3` 指的是“第几路灰度传感器”，不是实际的 MEM 编号。
+
+真实 MEM 编号要看 `generated/ti_msp_dl_config.h`：
+
+```c
+#define GRAY_ADC0_MEM_GRAY1  DL_ADC12_MEM_IDX_0
+#define GRAY_ADC0_MEM_GRAY6  DL_ADC12_MEM_IDX_1
+#define GRAY_ADC0_MEM_GRAY7  DL_ADC12_MEM_IDX_2
+#define GRAY_ADC1_MEM_GRAY2  DL_ADC12_MEM_IDX_0
+#define GRAY_ADC1_MEM_GRAY3  DL_ADC12_MEM_IDX_1
+#define GRAY_ADC1_MEM_GRAY4  DL_ADC12_MEM_IDX_2
+#define GRAY_ADC1_MEM_GRAY5  DL_ADC12_MEM_IDX_3
+```
+
+所以实际关系是：
+
+| 灰度传感器 | 使用 ADC | 实际 MEM 槽 |
+| --- | --- | --- |
+| 灰度 1 | ADC0 | MEM0 |
+| 灰度 2 | ADC1 | MEM0 |
+| 灰度 3 | ADC1 | MEM1 |
+| 灰度 4 | ADC1 | MEM2 |
+| 灰度 5 | ADC1 | MEM3 |
+| 灰度 6 | ADC0 | MEM1 |
+| 灰度 7 | ADC0 | MEM2 |
+
+也就是说：
+
+```text
+ADC0/ADC1 是硬件 ADC 外设编号
+GRAY1~GRAY7 是灰度传感器编号
+MEM0/MEM1/MEM2... 是每个 ADC 自己的结果槽编号
+```
+
+MEM 编号不是全局从 1 到 7 排，而是每个 ADC 内部自己从 `MEM0` 开始排。
+
 也就是说：
 
 - 左边第 1 路用 ADC0
