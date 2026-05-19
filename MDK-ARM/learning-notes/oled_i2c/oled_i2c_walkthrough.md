@@ -140,3 +140,101 @@ txData[1] = dat;
 ```text
 I2C 给 OLED 发东西时，先发“这是什么”，再发“内容是什么”。
 ```
+
+## 7. 用 `OLED_DisPlay_On()` 对照理解
+
+代码：
+
+```c
+void OLED_DisPlay_On(void)
+{
+    OLED_WR_Byte(0x8D, OLED_CMD); /* 电荷泵使能 */
+    OLED_WR_Byte(0x14, OLED_CMD); /* 开启电荷泵 */
+    OLED_WR_Byte(0xAF, OLED_CMD); /* 点亮屏幕 */
+}
+```
+
+`OLED_WR_Byte()` 的函数定义是：
+
+```c
+void OLED_WR_Byte(uint8_t dat, uint8_t mode)
+```
+
+所以调用时参数是这样对应的：
+
+```text
+OLED_WR_Byte(0x8D, OLED_CMD)
+              |      |
+              |      +-> mode
+              +--------> dat
+```
+
+`mode` 不是数组。`mode` 是函数的第二个参数，用来表示这次写的是命令还是数据。
+
+在 `oled.h` 里：
+
+```c
+#define OLED_CMD  0
+#define OLED_DATA 1
+```
+
+所以：
+
+```c
+OLED_WR_Byte(0x8D, OLED_CMD);
+```
+
+等价于：
+
+```c
+OLED_WR_Byte(0x8D, 0);
+```
+
+进入函数内部以后：
+
+```c
+dat  = 0x8D
+mode = 0
+```
+
+于是：
+
+```c
+txData[0] = mode ? 0x40 : 0x00;
+txData[1] = dat;
+```
+
+会变成：
+
+```c
+txData[0] = 0x00;
+txData[1] = 0x8D;
+```
+
+也就是说，真正通过 I2C 发出去的是：
+
+```text
+0x00 0x8D
+```
+
+三行完整展开就是：
+
+| 原始调用 | dat | mode | 实际发送的两个字节 |
+| --- | --- | --- | --- |
+| `OLED_WR_Byte(0x8D, OLED_CMD)` | `0x8D` | `0` | `0x00 0x8D` |
+| `OLED_WR_Byte(0x14, OLED_CMD)` | `0x14` | `0` | `0x00 0x14` |
+| `OLED_WR_Byte(0xAF, OLED_CMD)` | `0xAF` | `0` | `0x00 0xAF` |
+
+第一个字节 `0x00` 告诉 OLED：
+
+```text
+后面这个字节是命令
+```
+
+第二个字节才是真正的命令内容：
+
+```text
+0x8D -> 准备配置电荷泵
+0x14 -> 开启电荷泵
+0xAF -> 打开显示
+```
