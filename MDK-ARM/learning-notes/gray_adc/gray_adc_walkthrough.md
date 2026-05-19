@@ -1,6 +1,6 @@
 # 灰度 ADC 代码讲解
 
-更新时间：2026-05-18
+更新时间：2026-05-19
 
 这份笔记只讲 `hardware/gray.c` 里和灰度传感器有关的核心点，方便你以后继续往这里加新理解，不把 `README.md` 塞满。
 
@@ -104,6 +104,49 @@ static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
     {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY7},
 };
 ```
+
+这个数组和结构体的关系是：
+
+```text
+g_grayMap 是一个数组
+数组里的每一项，都是一个 GrayAdcSlot 结构体
+每个 GrayAdcSlot 结构体里有 adc 和 mem 两个成员
+```
+
+你没看到 `.adc`、`.mem`，是因为这里用了 C 语言的“按成员顺序初始化”。
+
+结构体定义顺序是：
+
+```c
+typedef struct {
+    ADC12_Regs *adc;      /* 第 1 个成员 */
+    DL_ADC12_MEM_IDX mem; /* 第 2 个成员 */
+} GrayAdcSlot;
+```
+
+所以这一行：
+
+```c
+{PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY1}
+```
+
+等价于：
+
+```c
+{
+    .adc = PIN_GRAY_ADC0,
+    .mem = GRAY_ADC0_MEM_GRAY1
+}
+```
+
+也就是：
+
+```text
+第 1 个值填进 adc
+第 2 个值填进 mem
+```
+
+这两种写法都可以。原代码用的是更短的写法，适合这种字段很少、顺序很清楚的映射表。
 
 也就是说：
 
