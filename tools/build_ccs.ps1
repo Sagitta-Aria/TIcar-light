@@ -55,14 +55,14 @@ if ([string]::IsNullOrWhiteSpace($BuildDir)) {
 
 $ToolRoot = Join-Path $CcsDir "tools\compiler\ti-cgt-armllvm_4.0.4.LTS"
 $Compiler = Join-Path $ToolRoot "bin\tiarmclang.exe"
-$Startup = Join-Path $SdkDir "source\ti\devices\msp\m0p\startup_system_files\ticlang\startup_mspm0g350x_ticlang.c"
+$SdkStartup = Join-Path $SdkDir "source\ti\devices\msp\m0p\startup_system_files\ticlang\startup_mspm0g350x_ticlang.c"
+$ProjectStartup = Join-Path $ProjectDir "generated\startup_mspm0g350x_ticlang.c"
 $LinkerCmd = Join-Path $SdkDir "source\ti\devices\msp\m0p\linker_files\ticlang\mspm0g3507.cmd"
 
 Assert-DirExists $ProjectDir
 Assert-DirExists $SdkDir
 Assert-DirExists $ToolRoot
 Assert-FileExists $Compiler
-Assert-FileExists $Startup
 Assert-FileExists $LinkerCmd
 
 $sourceDirs = @("app", "hardware", "system", "generated") | ForEach-Object {
@@ -115,7 +115,10 @@ $sources = @()
 foreach ($dir in $sourceDirs) {
     $sources += Get-ChildItem -LiteralPath $dir -Filter *.c -File
 }
-$sources += Get-Item -LiteralPath $Startup
+if (-not (Test-Path -LiteralPath $ProjectStartup -PathType Leaf)) {
+    Assert-FileExists $SdkStartup
+    $sources += Get-Item -LiteralPath $SdkStartup
+}
 $sources = $sources | Sort-Object FullName
 
 $objects = @()
