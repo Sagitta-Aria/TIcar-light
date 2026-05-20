@@ -1,0 +1,35 @@
+# Keil build outputs
+Objects/
+Listings/
+
+# CCS / TI Arm Clang build outputs
+Debug/
+Release/
+*.out
+*_linkInfo.xml
+
+# Keil user/session files
+*.uvguix.*
+*.uvoptx
+*.scvd
+*.uvmpw
+
+# Temporary/editor files
+*.bak
+*.tmp
+*.log
+*.lst
+*.map
+*.dep
+*.crf
+*.o
+*.d
+*.lnp
+*.htm
+*.hex
+*.axf
+*.sct
+
+# Windows clutter
+Thumbs.db
+Desktop.ini
