@@ -129,15 +129,15 @@ extern "C" {
 #define GRAY_ADC0_MEM_GRAY1                                      DL_ADC12_MEM_IDX_0
 #define GRAY_ADC0_MEM_GRAY6                                      DL_ADC12_MEM_IDX_1
 #define GRAY_ADC0_MEM_GRAY7                                      DL_ADC12_MEM_IDX_2
+#define GRAY_ADC0_MEM_GRAY5                                      DL_ADC12_MEM_IDX_3
 #define GRAY_ADC1_MEM_GRAY2                                      DL_ADC12_MEM_IDX_0
 #define GRAY_ADC1_MEM_GRAY3                                      DL_ADC12_MEM_IDX_1
 #define GRAY_ADC1_MEM_GRAY4                                      DL_ADC12_MEM_IDX_2
-#define GRAY_ADC1_MEM_GRAY5                                      DL_ADC12_MEM_IDX_3
 #define GRAY_S1_IOMUX                                             (IOMUX_PINCM36)
 #define GRAY_S2_IOMUX                                             (IOMUX_PINCM37)
 #define GRAY_S3_IOMUX                                             (IOMUX_PINCM38)
 #define GRAY_S4_IOMUX                                             (IOMUX_PINCM39)
-#define GRAY_S5_IOMUX                                             (IOMUX_PINCM40)
+#define GRAY_S5_IOMUX                                             (IOMUX_PINCM60)
 #define GRAY_S6_IOMUX                                             (IOMUX_PINCM54)
 #define GRAY_S7_IOMUX                                             (IOMUX_PINCM55)
 

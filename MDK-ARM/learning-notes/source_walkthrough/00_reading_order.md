@@ -33,7 +33,7 @@ JQ8400     UART1 PB6/PB7
 Exchange   UART3 PB2/PB3
 电机 PWM   TIMA0 PA7/PA8
 电机方向   PB18/PB19/PB20/PB24
-灰度 7 路  PA14/PA15/PA16/PA17/PA18/PA24/PA25
+灰度 7 路  PA14/PA15/PA16/PA17/PA27/PA24/PA25
 编码器     PA12/PA13/PA22/PA23
 按键       PB9/PB8
 ```
@@ -164,4 +164,3 @@ flowchart TD
     I --> J["OLED/串口监视刷新"]
     J --> F
 ```
-

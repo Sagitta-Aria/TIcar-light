@@ -142,7 +142,7 @@ S1 -> ADC0 MEM0
 S2 -> ADC1 MEM0
 S3 -> ADC1 MEM1
 S4 -> ADC1 MEM2
-S5 -> ADC1 MEM3
+S5 -> ADC0 MEM3
 S6 -> ADC0 MEM1
 S7 -> ADC0 MEM2
 ```
@@ -344,4 +344,3 @@ GRAY_FILTER_SAMPLE_COUNT
 ```
 
 灰度传感器 7 路，ADC 最大 4095，默认阈值 2000，每次更新采 5 次求平均。
-

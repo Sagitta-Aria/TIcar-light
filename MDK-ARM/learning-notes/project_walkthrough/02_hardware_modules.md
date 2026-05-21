@@ -122,7 +122,7 @@ Encoder_GetRight();
 传感器 S2 -> ADC1 -> MEM0
 传感器 S3 -> ADC1 -> MEM1
 传感器 S4 -> ADC1 -> MEM2
-传感器 S5 -> ADC1 -> MEM3
+传感器 S5 -> ADC0 -> MEM3
 传感器 S6 -> ADC0 -> MEM1
 传感器 S7 -> ADC0 -> MEM2
 ```
@@ -190,10 +190,10 @@ DL_ADC12_getMemResult(g_grayMap[i].adc, g_grayMap[i].mem);
 GRAY_ADC0_MEM_GRAY1 -> DL_ADC12_MEM_IDX_0
 GRAY_ADC0_MEM_GRAY6 -> DL_ADC12_MEM_IDX_1
 GRAY_ADC0_MEM_GRAY7 -> DL_ADC12_MEM_IDX_2
+GRAY_ADC0_MEM_GRAY5 -> DL_ADC12_MEM_IDX_3
 GRAY_ADC1_MEM_GRAY2 -> DL_ADC12_MEM_IDX_0
 GRAY_ADC1_MEM_GRAY3 -> DL_ADC12_MEM_IDX_1
 GRAY_ADC1_MEM_GRAY4 -> DL_ADC12_MEM_IDX_2
-GRAY_ADC1_MEM_GRAY5 -> DL_ADC12_MEM_IDX_3
 ```
 
 也就是说，名字按传感器编号起，实际 MEM 槽在每个 ADC 内部从 0 开始排。
@@ -309,4 +309,3 @@ Link_SendString("state: tracking\r\n");
 ```
 
 菜单监视页也会周期性通过 Link 打印灰度、编码器、PID 数据。这个模块当前主要是发送，接收解析还没有正式实现。
-

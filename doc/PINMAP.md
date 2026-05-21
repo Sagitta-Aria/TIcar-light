@@ -33,7 +33,7 @@ TB6612 uses two PWM channels and four direction GPIOs.
 | S2 | PA15 | ADC1 MEM0 |
 | S3 | PA16 | ADC1 MEM1 |
 | S4 | PA17 | ADC1 MEM2 |
-| S5 | PA18 | ADC1 MEM3 |
+| S5 | PA27 | ADC0 MEM3 |
 | S6 | PA24 | ADC0 MEM1 |
 | S7 | PA25 | ADC0 MEM2 |
 
