@@ -3,8 +3,26 @@
 
 #include <stdint.h>
 
-/* CAR_MOTOR_PWM_MAX_COUNTS：电机 PWM 占空比上限，对应 PWM_PERIOD_COUNTS。 */
+/*
+ * CAR_ENABLE_PA14_DEBUG_LED：是否启用 PA14 状态灯。
+ * 1.1ccs 已把灰度 S1 迁到 PA15，PA14 固定作 LED，可用于观察主循环状态。
+ */
+#define CAR_ENABLE_PA14_DEBUG_LED       (1U)
+
+/* CAR_MOTOR_PWM_MAX_COUNTS：保留旧速度命令量程，1.1ccs 中会换算成步进脉冲频率。 */
 #define CAR_MOTOR_PWM_MAX_COUNTS        (4000U)
+
+/* CAR_STEPPER_MAX_COMMAND：步进电机速度命令最大值，沿用 0~4000 的旧量程。 */
+#define CAR_STEPPER_MAX_COMMAND         (4000U)
+
+/* CAR_STEPPER_MAX_STEPS_PER_TASK：每次 Motor_Task 单个电机最多补发多少个 STEP。 */
+#define CAR_STEPPER_MAX_STEPS_PER_TASK  (4U)
+
+/* CAR_STEPPER_PULSE_CYCLES：STEP 高电平保持时间，32MHz 下约 10us。 */
+#define CAR_STEPPER_PULSE_CYCLES        (320U)
+
+/* CAR_STEPPER_TEST_COMMAND：方向测试时的低速步进命令。 */
+#define CAR_STEPPER_TEST_COMMAND        (1200U)
 
 /* CAR_TRACK_BASE_DUTY：基础循迹时的默认电机占空比。 */
 #define CAR_TRACK_BASE_DUTY             (900)
@@ -55,8 +73,14 @@
     ((CAR_MENU_LINK_PRINT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
         CAR_APP_LOOP_DELAY_MS)
 
-/* CAR_ENABLE_SPEED_CONTROL：1 表示启用编码器速度 PI 闭环，0 表示保持开环 PWM。 */
-#define CAR_ENABLE_SPEED_CONTROL        (1U)
+/*
+ * CAR_ENABLE_SPEED_CONTROL：当前四步进方案不再使用外部编码器闭环。
+ * 闭环由步进驱动器内部完成，MCU 只输出 STEP/DIR。
+ */
+#define CAR_ENABLE_SPEED_CONTROL        (0U)
+
+/* CAR_ENABLE_ENCODER_INPUTS：PA12/PA13/PA22 已改作步进控制，编码器输入默认关闭。 */
+#define CAR_ENABLE_ENCODER_INPUTS       (0U)
 
 /* CAR_SPEED_CONTROL_PERIOD_MS：速度闭环控制周期，先用 20ms，实车再调。 */
 #define CAR_SPEED_CONTROL_PERIOD_MS     (20U)
@@ -138,11 +162,11 @@
 /* CAR_ENABLE_MOTOR_TEST_MODE：1 表示按键1进入电机方向确认，平时保持 0。 */
 #define CAR_ENABLE_MOTOR_TEST_MODE      (0U)
 
-/* CAR_MOTOR_TEST_DUTY：电机方向确认时使用的低速 PWM，占空比不要太高。 */
+/* CAR_MOTOR_TEST_DUTY：旧 PWM 测试量程保留项，1.1ccs 步进测试使用 CAR_STEPPER_TEST_COMMAND。 */
 #define CAR_MOTOR_TEST_DUTY             (700U)
 
 /* CAR_MOTOR_TEST_RUN_MS：每个方向测试步骤持续时间，到时自动停车。 */
-#define CAR_MOTOR_TEST_RUN_MS           (500U)
+#define CAR_MOTOR_TEST_RUN_MS           (800U)
 
 /* CAR_MOTOR_TEST_RUN_TICKS：把测试时间换算成 App_Task 调度次数。 */
 #define CAR_MOTOR_TEST_RUN_TICKS \

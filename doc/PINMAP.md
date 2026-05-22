@@ -1,46 +1,44 @@
-# light-car1.0 pin map
+# light-car1.1ccs Pin Map
 
-Primary source: `D:\激光循迹\Netlist_Schematic1_2026-05-16.tel`.
+Primary source: 地猛星 MSPM0G3507 最小系统板 H3/H5 排针和 `doc/PIN_ASSIGNMENT.md`。
 
 ## Communication
 
-| Module | Peripheral | MCU pins | Baud |
+| Module | Peripheral | MCU pins | Baud/Speed |
 | --- | --- | --- | --- |
 | OLED | I2C0 | PA0 SDA, PA1 SCL | 100 kHz |
 | JY61P | UART0 | PA28 TX, PA31 RX | 115200 |
 | JQ8400 | UART1 | PB6 TX, PB7 RX | 115200 |
-| Link / Exchange | UART3 | PB2 TX, PB3 RX | 115200 |
+| Link / feedback | UART3 | PB2 TX, PB3 RX | 115200 |
 
-## Motor driver
+## Stepper Drivers
 
-TB6612 uses two PWM channels and four direction GPIOs.
+| Motor | STEP | DIR | Notes |
+| --- | --- | --- | --- |
+| Chassis left | PA7 | PB18 | Closed-loop stepper driver, no EN |
+| Chassis right | PA8 | PA9 | Closed-loop stepper driver, no EN |
+| Gimbal 1 | PA12 | PA22 | Closed-loop stepper driver, no EN |
+| Gimbal 2 | PA13 | PB24 | Closed-loop stepper driver, no EN |
 
-| Signal | MCU pin | Function |
-| --- | --- | --- |
-| PWMA | PA7 | TIMA0_C1 |
-| PWMB | PA8 | TIMA0_C0 |
-| AIN1 | PB19 | GPIO output |
-| AIN2 | PB18 | GPIO output |
-| BIN1 | PB20 | GPIO output |
-| BIN2 | PB24 | GPIO output |
-| STBY | VCC | Always enabled |
-
-## Gray sensors
+## Gray Sensors
 
 | Sensor | MCU pin | ADC |
 | --- | --- | --- |
-| S1 | PA14 | ADC0 MEM0 |
-| S2 | PA15 | ADC1 MEM0 |
-| S3 | PA16 | ADC1 MEM1 |
-| S4 | PA17 | ADC1 MEM2 |
-| S5 | PA18 | ADC1 MEM3 |
-| S6 | PA24 | ADC0 MEM1 |
-| S7 | PA25 | ADC0 MEM2 |
+| S1 | PA15 | ADC1 MEM0 |
+| S2 | PA16 | ADC1 MEM1 |
+| S3 | PA17 | ADC1 MEM2 |
+| S4 | PA24 | ADC0 MEM0 |
+| S5 | PA25 | ADC0 MEM1 |
+| S6 | PA26 | ADC0 MEM2 |
+| S7 | PA27 | ADC0 MEM3 |
 
-## Encoders and keys
+## Keys And Reserved Pins
 
 | Signal | MCU pin |
 | --- | --- |
-| Left encoder A/B | PA12 / PA13 |
-| Right encoder A/B | PA22 / PA23 |
 | Key 1 / Key 2 | PB9 / PB8 |
+| Status LED | PA14 |
+| SWDIO / SWCLK | PA19 / PA20 |
+| VREF reserve | PA21 / PA23 |
+| BSL reserve | PA10 / PA11 / PA18 |
+| SPI Flash reserve | PB14 / PB15 / PB16 / PB17 |

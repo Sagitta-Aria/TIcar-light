@@ -6,12 +6,14 @@
 
 typedef enum {
     MOTOR_TEST_STEP_IDLE = 0,
-    MOTOR_TEST_STEP_LEFT_FORWARD,
-    MOTOR_TEST_STEP_LEFT_REVERSE,
-    MOTOR_TEST_STEP_RIGHT_FORWARD,
-    MOTOR_TEST_STEP_RIGHT_REVERSE,
-    MOTOR_TEST_STEP_BOTH_FORWARD,
-    MOTOR_TEST_STEP_BOTH_REVERSE,
+    MOTOR_TEST_STEP_CHASSIS_LEFT_FORWARD,
+    MOTOR_TEST_STEP_CHASSIS_LEFT_REVERSE,
+    MOTOR_TEST_STEP_CHASSIS_RIGHT_FORWARD,
+    MOTOR_TEST_STEP_CHASSIS_RIGHT_REVERSE,
+    MOTOR_TEST_STEP_GIMBAL_1_FORWARD,
+    MOTOR_TEST_STEP_GIMBAL_1_REVERSE,
+    MOTOR_TEST_STEP_GIMBAL_2_FORWARD,
+    MOTOR_TEST_STEP_GIMBAL_2_REVERSE,
     MOTOR_TEST_STEP_DONE
 } MotorTestStep;
 
@@ -20,52 +22,71 @@ static uint16_t g_motorTestTicks;
 static uint8_t g_motorTestRunning;
 
 /*
- * 作用：执行当前测试步骤的电机输出。
+ * 作用：执行单个步进电机方向测试。
+ * 使用场景：MotorTest_ApplyStep 根据当前步骤调用。
+ * 说明：只给一个电机输出低速 STEP，方便逐个核对接线和方向。
+ */
+static void MotorTest_RunOne(MotorId motor, MotorDir dir, const char *text)
+{
+    Motor_Stop();
+    Motor_Set(motor, dir, CAR_STEPPER_TEST_COMMAND);
+    Link_SendString(text);
+    Link_SendString("\r\n");
+}
+
+/*
+ * 作用：执行当前测试步骤的步进输出。
  * 使用场景：MotorTest_Start 和 MotorTest_Next 内部调用。
- * 不要用于：正式循迹或速度闭环，那里应该走 motion/tracking。
- * 说明：只用低速短时间输出，便于人工观察轮子方向。
+ * 不要用于：正式循迹或云台控制，正式控制应该走 motion/tracking 或后续 gimbal 模块。
  */
 static void MotorTest_ApplyStep(void)
 {
-    Motor_Stop();
-
     switch (g_motorTestStep) {
-    case MOTOR_TEST_STEP_LEFT_FORWARD:
-        Motor_Set(MOTOR_LEFT, MOTOR_FORWARD, CAR_MOTOR_TEST_DUTY);
-        Link_SendString("motor test: left forward\r\n");
+    case MOTOR_TEST_STEP_CHASSIS_LEFT_FORWARD:
+        MotorTest_RunOne(MOTOR_CHASSIS_LEFT, MOTOR_FORWARD,
+            "stepper test: chassis left forward");
         break;
 
-    case MOTOR_TEST_STEP_LEFT_REVERSE:
-        Motor_Set(MOTOR_LEFT, MOTOR_REVERSE, CAR_MOTOR_TEST_DUTY);
-        Link_SendString("motor test: left reverse\r\n");
+    case MOTOR_TEST_STEP_CHASSIS_LEFT_REVERSE:
+        MotorTest_RunOne(MOTOR_CHASSIS_LEFT, MOTOR_REVERSE,
+            "stepper test: chassis left reverse");
         break;
 
-    case MOTOR_TEST_STEP_RIGHT_FORWARD:
-        Motor_Set(MOTOR_RIGHT, MOTOR_FORWARD, CAR_MOTOR_TEST_DUTY);
-        Link_SendString("motor test: right forward\r\n");
+    case MOTOR_TEST_STEP_CHASSIS_RIGHT_FORWARD:
+        MotorTest_RunOne(MOTOR_CHASSIS_RIGHT, MOTOR_FORWARD,
+            "stepper test: chassis right forward");
         break;
 
-    case MOTOR_TEST_STEP_RIGHT_REVERSE:
-        Motor_Set(MOTOR_RIGHT, MOTOR_REVERSE, CAR_MOTOR_TEST_DUTY);
-        Link_SendString("motor test: right reverse\r\n");
+    case MOTOR_TEST_STEP_CHASSIS_RIGHT_REVERSE:
+        MotorTest_RunOne(MOTOR_CHASSIS_RIGHT, MOTOR_REVERSE,
+            "stepper test: chassis right reverse");
         break;
 
-    case MOTOR_TEST_STEP_BOTH_FORWARD:
-        Motor_Set(MOTOR_LEFT, MOTOR_FORWARD, CAR_MOTOR_TEST_DUTY);
-        Motor_Set(MOTOR_RIGHT, MOTOR_FORWARD, CAR_MOTOR_TEST_DUTY);
-        Link_SendString("motor test: both forward\r\n");
+    case MOTOR_TEST_STEP_GIMBAL_1_FORWARD:
+        MotorTest_RunOne(MOTOR_GIMBAL_1, MOTOR_FORWARD,
+            "stepper test: gimbal 1 forward");
         break;
 
-    case MOTOR_TEST_STEP_BOTH_REVERSE:
-        Motor_Set(MOTOR_LEFT, MOTOR_REVERSE, CAR_MOTOR_TEST_DUTY);
-        Motor_Set(MOTOR_RIGHT, MOTOR_REVERSE, CAR_MOTOR_TEST_DUTY);
-        Link_SendString("motor test: both reverse\r\n");
+    case MOTOR_TEST_STEP_GIMBAL_1_REVERSE:
+        MotorTest_RunOne(MOTOR_GIMBAL_1, MOTOR_REVERSE,
+            "stepper test: gimbal 1 reverse");
+        break;
+
+    case MOTOR_TEST_STEP_GIMBAL_2_FORWARD:
+        MotorTest_RunOne(MOTOR_GIMBAL_2, MOTOR_FORWARD,
+            "stepper test: gimbal 2 forward");
+        break;
+
+    case MOTOR_TEST_STEP_GIMBAL_2_REVERSE:
+        MotorTest_RunOne(MOTOR_GIMBAL_2, MOTOR_REVERSE,
+            "stepper test: gimbal 2 reverse");
         break;
 
     case MOTOR_TEST_STEP_IDLE:
     case MOTOR_TEST_STEP_DONE:
     default:
-        Link_SendString("motor test: stop\r\n");
+        Motor_Stop();
+        Link_SendString("stepper test: stop\r\n");
         break;
     }
 
@@ -83,7 +104,7 @@ void MotorTest_Start(void)
 {
     MotorTest_Init();
     g_motorTestRunning = 1U;
-    g_motorTestStep = MOTOR_TEST_STEP_LEFT_FORWARD;
+    g_motorTestStep = MOTOR_TEST_STEP_CHASSIS_LEFT_FORWARD;
     MotorTest_ApplyStep();
 }
 
@@ -102,10 +123,10 @@ uint8_t MotorTest_Next(void)
         return 1U;
     }
 
-    if (g_motorTestStep >= MOTOR_TEST_STEP_BOTH_REVERSE) {
+    if (g_motorTestStep >= MOTOR_TEST_STEP_GIMBAL_2_REVERSE) {
         g_motorTestStep = MOTOR_TEST_STEP_DONE;
         MotorTest_Stop();
-        Link_SendString("motor test: done\r\n");
+        Link_SendString("stepper test: done\r\n");
         return 0U;
     }
 
@@ -123,7 +144,7 @@ void MotorTest_Task(void)
     --g_motorTestTicks;
     if (g_motorTestTicks == 0U) {
         Motor_Stop();
-        Link_SendString("motor test: auto stop\r\n");
+        Link_SendString("stepper test: auto stop\r\n");
     }
 }
 
@@ -135,18 +156,22 @@ uint8_t MotorTest_IsRunning(void)
 const char *MotorTest_GetStepName(void)
 {
     switch (g_motorTestStep) {
-    case MOTOR_TEST_STEP_LEFT_FORWARD:
-        return "left_forward";
-    case MOTOR_TEST_STEP_LEFT_REVERSE:
-        return "left_reverse";
-    case MOTOR_TEST_STEP_RIGHT_FORWARD:
-        return "right_forward";
-    case MOTOR_TEST_STEP_RIGHT_REVERSE:
-        return "right_reverse";
-    case MOTOR_TEST_STEP_BOTH_FORWARD:
-        return "both_forward";
-    case MOTOR_TEST_STEP_BOTH_REVERSE:
-        return "both_reverse";
+    case MOTOR_TEST_STEP_CHASSIS_LEFT_FORWARD:
+        return "CL forward";
+    case MOTOR_TEST_STEP_CHASSIS_LEFT_REVERSE:
+        return "CL reverse";
+    case MOTOR_TEST_STEP_CHASSIS_RIGHT_FORWARD:
+        return "CR forward";
+    case MOTOR_TEST_STEP_CHASSIS_RIGHT_REVERSE:
+        return "CR reverse";
+    case MOTOR_TEST_STEP_GIMBAL_1_FORWARD:
+        return "G1 forward";
+    case MOTOR_TEST_STEP_GIMBAL_1_REVERSE:
+        return "G1 reverse";
+    case MOTOR_TEST_STEP_GIMBAL_2_FORWARD:
+        return "G2 forward";
+    case MOTOR_TEST_STEP_GIMBAL_2_REVERSE:
+        return "G2 reverse";
     case MOTOR_TEST_STEP_DONE:
         return "done";
     case MOTOR_TEST_STEP_IDLE:

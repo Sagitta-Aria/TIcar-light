@@ -12,6 +12,10 @@
 
 #define MENU_OLED_FONT_SIZE        (12U)
 #define MENU_OLED_MAX_CHARS        (21U)
+#define MENU_MONO_START_X          (6U)
+#define MENU_MONO_START_Y          (16U)
+#define MENU_MONO_LINE_STEP        (12U)
+#define MENU_MONO_MAX_CHARS        (18U)
 #define MENU_LINE_BUFFER_SIZE      (32U)
 #define MENU_LINK_BUFFER_SIZE      (128U)
 
@@ -181,6 +185,33 @@ static void Menu_ShowPaddedLine(uint8_t line, const char *text)
 }
 
 /*
+ * 作用：在 OLED 下半区显示一行菜单文字。
+ * 使用场景：双色 OLED 上方常为黄色区域，菜单页避开上方区域后显示更统一。
+ */
+static void Menu_ShowMonoLine(uint8_t index, const char *text)
+{
+    char padded[MENU_MONO_MAX_CHARS + 1U];
+    uint8_t i;
+    uint8_t y;
+
+    for (i = 0U; i < MENU_MONO_MAX_CHARS; ++i) {
+        padded[i] = ' ';
+    }
+    padded[MENU_MONO_MAX_CHARS] = '\0';
+
+    i = 0U;
+    while ((text != 0) && (text[i] != '\0') &&
+        (i < MENU_MONO_MAX_CHARS)) {
+        padded[i] = text[i];
+        ++i;
+    }
+
+    y = (uint8_t)(MENU_MONO_START_Y + (index * MENU_MONO_LINE_STEP));
+    OLED_ShowString(MENU_MONO_START_X, y, (u8 *)padded,
+        MENU_OLED_FONT_SIZE);
+}
+
+/*
  * 作用：刷新 5 行 OLED 文本。
  * 使用场景：菜单页、校准页、测试监视页。
  */
@@ -192,6 +223,26 @@ static void Menu_RenderLines(const char *line0, const char *line1,
     Menu_ShowPaddedLine(2U, line2);
     Menu_ShowPaddedLine(3U, line3);
     Menu_ShowPaddedLine(4U, line4);
+    OLED_Refresh();
+}
+
+/*
+ * 作用：刷新 4 行菜单文本，并避开 OLED 顶部黄区。
+ * 使用场景：主菜单和测试菜单这类长期停留页面。
+ */
+static void Menu_RenderMonoMenuLines(const char *line0, const char *line1,
+    const char *line2, const char *line3)
+{
+    Menu_ShowPaddedLine(0U, "");
+    Menu_ShowPaddedLine(1U, "");
+    Menu_ShowPaddedLine(2U, "");
+    Menu_ShowPaddedLine(3U, "");
+    Menu_ShowPaddedLine(4U, "");
+
+    Menu_ShowMonoLine(0U, line0);
+    Menu_ShowMonoLine(1U, line1);
+    Menu_ShowMonoLine(2U, line2);
+    Menu_ShowMonoLine(3U, line3);
     OLED_Refresh();
 }
 
@@ -222,7 +273,7 @@ static void Menu_RenderMainMenu(void)
     Menu_BuildItemLine(line3, (g_mainIndex == MENU_MAIN_MISSION),
         g_mainItems[MENU_MAIN_MISSION]);
 
-    Menu_RenderLines("Main Menu", line1, line2, line3, "K1 OK K2 Next");
+    Menu_RenderMonoMenuLines(line1, line2, line3, "K1 OK K2 Next");
 }
 
 static void Menu_RenderTestMenu(void)
@@ -237,7 +288,7 @@ static void Menu_RenderTestMenu(void)
     Menu_BuildItemLine(line1, 1U, g_testItems[index0]);
     Menu_BuildItemLine(line2, 0U, g_testItems[index1]);
     Menu_BuildItemLine(line3, 0U, g_testItems[index2]);
-    Menu_RenderLines("Test Menu", line1, line2, line3, "K1 OK K2 Next");
+    Menu_RenderMonoMenuLines(line1, line2, line3, "K1 OK K2 Next");
 }
 
 static void Menu_BuildPairLine(char line[MENU_LINE_BUFFER_SIZE],

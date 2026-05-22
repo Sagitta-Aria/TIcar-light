@@ -5,7 +5,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_initPower();
     SYSCFG_DL_GPIO_init();
     SYSCFG_DL_SYSCTL_init();
-    SYSCFG_DL_PWM_init();
     SYSCFG_DL_OLED_init();
     SYSCFG_DL_JY61P_init();
     SYSCFG_DL_JQ8400_init();
@@ -28,7 +27,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
 {
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
-    DL_TimerA_reset(PWM_INST);
     DL_I2C_reset(OLED_INST);
     DL_UART_Main_reset(JY61P_INST);
     DL_UART_Main_reset(JQ8400_INST);
@@ -38,7 +36,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
-    DL_TimerA_enablePower(PWM_INST);
     DL_I2C_enablePower(OLED_INST);
     DL_UART_Main_enablePower(JY61P_INST);
     DL_UART_Main_enablePower(JQ8400_INST);
@@ -53,19 +50,27 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_initPeripheralAnalogFunction(GPIO_HFXIN_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GPIO_HFXOUT_IOMUX);
 
-    DL_GPIO_initPeripheralOutputFunction(
-        GPIO_PWM_C0_IOMUX, GPIO_PWM_C0_IOMUX_FUNC);
-    DL_GPIO_initPeripheralOutputFunction(
-        GPIO_PWM_C1_IOMUX, GPIO_PWM_C1_IOMUX_FUNC);
-    DL_GPIO_enableOutput(GPIOA, GPIO_PWM_C0_PIN | GPIO_PWM_C1_PIN);
+    DL_GPIO_initDigitalOutput(STEPPER_CHASSIS_LEFT_STEP_IOMUX);
+    DL_GPIO_initDigitalOutput(STEPPER_CHASSIS_LEFT_DIR_IOMUX);
+    DL_GPIO_initDigitalOutput(STEPPER_CHASSIS_RIGHT_STEP_IOMUX);
+    DL_GPIO_initDigitalOutput(STEPPER_CHASSIS_RIGHT_DIR_IOMUX);
+    DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_1_STEP_IOMUX);
+    DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_1_DIR_IOMUX);
+    DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_2_STEP_IOMUX);
+    DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_2_DIR_IOMUX);
 
+    /*
+     * OLED I2C0 使用 PA0/PA1。
+     * HIZ1 使高电平为释放状态，配合上拉形成开漏 I2C 总线。
+     * 内部弱上拉只做兜底，实车仍建议在 SDA/SCL 上加 4.7k~10k 外部上拉。
+     */
     DL_GPIO_initPeripheralInputFunctionFeatures(
         GPIO_OLED_IOMUX_SDA, GPIO_OLED_IOMUX_SDA_FUNC,
-        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
         DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
     DL_GPIO_initPeripheralInputFunctionFeatures(
         GPIO_OLED_IOMUX_SCL, GPIO_OLED_IOMUX_SCL_FUNC,
-        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_NONE,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
         DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
     DL_GPIO_enableHiZ(GPIO_OLED_IOMUX_SDA);
     DL_GPIO_enableHiZ(GPIO_OLED_IOMUX_SCL);
@@ -91,11 +96,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S6_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S7_IOMUX);
 
-    DL_GPIO_initDigitalOutput(MOTOR_A_IN1_IOMUX);
-    DL_GPIO_initDigitalOutput(MOTOR_A_IN2_IOMUX);
-    DL_GPIO_initDigitalOutput(MOTOR_B_IN1_IOMUX);
-    DL_GPIO_initDigitalOutput(MOTOR_B_IN2_IOMUX);
-
     DL_GPIO_initDigitalInputFeatures(KEY_1_IOMUX,
         DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_DOWN,
         DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
@@ -103,41 +103,44 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
         DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_DOWN,
         DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
 
-    DL_GPIO_initDigitalInputFeatures(ENCODER_LEFT_A_IOMUX,
-        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_DOWN,
-        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
-    DL_GPIO_initDigitalInputFeatures(ENCODER_LEFT_B_IOMUX,
-        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_DOWN,
-        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
-    DL_GPIO_initDigitalInputFeatures(ENCODER_RIGHT_A_IOMUX,
-        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_DOWN,
-        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
-    DL_GPIO_initDigitalInputFeatures(ENCODER_RIGHT_B_IOMUX,
-        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_DOWN,
-        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_clearPins(STEPPER_CHASSIS_LEFT_STEP_PORT,
+        STEPPER_CHASSIS_LEFT_STEP_PIN);
+    DL_GPIO_clearPins(STEPPER_CHASSIS_LEFT_DIR_PORT,
+        STEPPER_CHASSIS_LEFT_DIR_PIN);
+    DL_GPIO_clearPins(STEPPER_CHASSIS_RIGHT_STEP_PORT,
+        STEPPER_CHASSIS_RIGHT_STEP_PIN | STEPPER_CHASSIS_RIGHT_DIR_PIN);
+    DL_GPIO_clearPins(STEPPER_GIMBAL_1_STEP_PORT,
+        STEPPER_GIMBAL_1_STEP_PIN | STEPPER_GIMBAL_1_DIR_PIN);
+    DL_GPIO_clearPins(STEPPER_GIMBAL_2_STEP_PORT,
+        STEPPER_GIMBAL_2_STEP_PIN);
+    DL_GPIO_clearPins(STEPPER_GIMBAL_2_DIR_PORT,
+        STEPPER_GIMBAL_2_DIR_PIN);
 
-    DL_GPIO_clearPins(MOTOR_DIR_PORT,
-        MOTOR_A_IN1_PIN | MOTOR_A_IN2_PIN | MOTOR_B_IN1_PIN | MOTOR_B_IN2_PIN);
-    DL_GPIO_enableOutput(MOTOR_DIR_PORT,
-        MOTOR_A_IN1_PIN | MOTOR_A_IN2_PIN | MOTOR_B_IN1_PIN | MOTOR_B_IN2_PIN);
+    DL_GPIO_enableOutput(STEPPER_CHASSIS_LEFT_STEP_PORT,
+        STEPPER_CHASSIS_LEFT_STEP_PIN);
+    DL_GPIO_enableOutput(STEPPER_CHASSIS_LEFT_DIR_PORT,
+        STEPPER_CHASSIS_LEFT_DIR_PIN);
+    DL_GPIO_enableOutput(STEPPER_CHASSIS_RIGHT_STEP_PORT,
+        STEPPER_CHASSIS_RIGHT_STEP_PIN | STEPPER_CHASSIS_RIGHT_DIR_PIN);
+    DL_GPIO_enableOutput(STEPPER_GIMBAL_1_STEP_PORT,
+        STEPPER_GIMBAL_1_STEP_PIN | STEPPER_GIMBAL_1_DIR_PIN);
+    DL_GPIO_enableOutput(STEPPER_GIMBAL_2_STEP_PORT,
+        STEPPER_GIMBAL_2_STEP_PIN);
+    DL_GPIO_enableOutput(STEPPER_GIMBAL_2_DIR_PORT,
+        STEPPER_GIMBAL_2_DIR_PIN);
 
     DL_GPIO_setLowerPinsPolarity(KEY_PORT,
         DL_GPIO_PIN_9_EDGE_RISE | DL_GPIO_PIN_8_EDGE_RISE);
     DL_GPIO_clearInterruptStatus(KEY_PORT, KEY_1_PIN | KEY_2_PIN);
     DL_GPIO_enableInterrupt(KEY_PORT, KEY_1_PIN | KEY_2_PIN);
 
-    DL_GPIO_setLowerPinsPolarity(ENCODER_PORT,
-        DL_GPIO_PIN_12_EDGE_RISE | DL_GPIO_PIN_13_EDGE_RISE);
-    DL_GPIO_setUpperPinsPolarity(ENCODER_PORT,
-        DL_GPIO_PIN_22_EDGE_RISE | DL_GPIO_PIN_23_EDGE_RISE);
-    DL_GPIO_clearInterruptStatus(ENCODER_PORT,
-        ENCODER_LEFT_A_PIN | ENCODER_LEFT_B_PIN |
-        ENCODER_RIGHT_A_PIN | ENCODER_RIGHT_B_PIN);
-    DL_GPIO_enableInterrupt(ENCODER_PORT,
-        ENCODER_LEFT_A_PIN | ENCODER_LEFT_B_PIN |
-        ENCODER_RIGHT_A_PIN | ENCODER_RIGHT_B_PIN);
 }
 
+/*
+ * 当前优先保证 J-Link 可重新接管，默认不启用 HFXT/SYSPLL。
+ * 如果后续确认板上 32-48MHz 外部晶振稳定，再恢复 PLL 高速时钟。
+ */
+#if SYSCFG_DL_ENABLE_HFXT_PLL
 static const DL_SYSCTL_SYSPLLConfig gSYSPLLConfig = {
     .inputFreq = DL_SYSCTL_SYSPLL_INPUT_FREQ_32_48_MHZ,
     .rDivClk2x = 1,
@@ -151,6 +154,112 @@ static const DL_SYSCTL_SYSPLLConfig gSYSPLLConfig = {
     .qDiv = 3,
     .pDiv = DL_SYSCTL_SYSPLL_PDIV_1
 };
+#endif
+
+#define SYSCFG_DL_SYSCTL_PLL_RETRY_MAX       (3U)
+#define SYSCFG_DL_SYSCTL_PLL_OFF_TIMEOUT     (100000U)
+#define SYSCFG_DL_SYSCTL_PLL_GOOD_TIMEOUT    (300000U)
+#define SYSCFG_DL_SYSCTL_HSCLK_TIMEOUT       (100000U)
+
+static volatile bool g_sysctlClockOk;
+
+bool SYSCFG_DL_SYSCTL_isClockOk(void)
+{
+    return g_sysctlClockOk;
+}
+
+/*
+ * 作用：等待时钟状态位达到期望值。
+ * 使用场景：PLL 关闭、PLL 锁定、HSCLK 切换确认。
+ * 说明：所有等待都带超时，避免晶振/PLL 异常时死等。
+ */
+static bool SYSCFG_DL_SYSCTL_waitClockStatus(uint32_t mask, uint32_t expected,
+    uint32_t timeout)
+{
+    while (timeout > 0U) {
+        if ((DL_SYSCTL_getClockStatus() & mask) == expected) {
+            return true;
+        }
+        --timeout;
+    }
+    return false;
+}
+
+/*
+ * 作用：按 TI DriverLib 的 PLL 配置流程写寄存器，但把等待改成超时等待。
+ * 使用场景：替代 DL_SYSCTL_configSYSPLL()，因为官方函数内部会一直等 PLL good。
+ */
+static bool SYSCFG_DL_SYSCTL_configSYSPLLTimeout(
+    const DL_SYSCTL_SYSPLLConfig *config)
+{
+    uint32_t ctlTemp;
+
+    DL_SYSCTL_disableSYSPLL();
+    if (!SYSCFG_DL_SYSCTL_waitClockStatus(DL_SYSCTL_CLK_STATUS_SYSPLL_OFF,
+        DL_SYSCTL_CLK_STATUS_SYSPLL_OFF,
+        SYSCFG_DL_SYSCTL_PLL_OFF_TIMEOUT)) {
+        return false;
+    }
+
+    DL_Common_updateReg(&SYSCTL->SOCLOCK.SYSPLLCFG0,
+        ((uint32_t)config->sysPLLRef), SYSCTL_SYSPLLCFG0_SYSPLLREF_MASK);
+    DL_Common_updateReg(&SYSCTL->SOCLOCK.SYSPLLCFG1,
+        ((uint32_t)config->pDiv), SYSCTL_SYSPLLCFG1_PDIV_MASK);
+
+    ctlTemp = DL_CORE_getInstructionConfig();
+    DL_CORE_configInstruction(DL_CORE_PREFETCH_ENABLED,
+        DL_CORE_CACHE_DISABLED, DL_CORE_LITERAL_CACHE_ENABLED);
+    SYSCTL->SOCLOCK.SYSPLLPARAM0 =
+        *(volatile uint32_t *)((uint32_t)config->inputFreq);
+    SYSCTL->SOCLOCK.SYSPLLPARAM1 =
+        *(volatile uint32_t *)((uint32_t)config->inputFreq + (uint32_t)0x4);
+    CPUSS->CTL = ctlTemp;
+
+    DL_Common_updateReg(&SYSCTL->SOCLOCK.SYSPLLCFG1,
+        ((config->qDiv << SYSCTL_SYSPLLCFG1_QDIV_OFS) &
+            SYSCTL_SYSPLLCFG1_QDIV_MASK),
+        SYSCTL_SYSPLLCFG1_QDIV_MASK);
+    DL_Common_updateReg(&SYSCTL->SOCLOCK.SYSPLLCFG0,
+        (((config->rDivClk2x << SYSCTL_SYSPLLCFG0_RDIVCLK2X_OFS) &
+             SYSCTL_SYSPLLCFG0_RDIVCLK2X_MASK) |
+            ((config->rDivClk1 << SYSCTL_SYSPLLCFG0_RDIVCLK1_OFS) &
+                SYSCTL_SYSPLLCFG0_RDIVCLK1_MASK) |
+            ((config->rDivClk0 << SYSCTL_SYSPLLCFG0_RDIVCLK0_OFS) &
+                SYSCTL_SYSPLLCFG0_RDIVCLK0_MASK) |
+            config->enableCLK2x | config->enableCLK1 | config->enableCLK0 |
+            (uint32_t)config->sysPLLMCLK),
+        (SYSCTL_SYSPLLCFG0_RDIVCLK2X_MASK |
+            SYSCTL_SYSPLLCFG0_RDIVCLK1_MASK |
+            SYSCTL_SYSPLLCFG0_RDIVCLK0_MASK |
+            SYSCTL_SYSPLLCFG0_ENABLECLK2X_MASK |
+            SYSCTL_SYSPLLCFG0_ENABLECLK1_MASK |
+            SYSCTL_SYSPLLCFG0_ENABLECLK0_MASK |
+            SYSCTL_SYSPLLCFG0_MCLK2XVCO_MASK));
+
+    DL_SYSCTL_enableSYSPLL();
+    return SYSCFG_DL_SYSCTL_waitClockStatus(SYSCTL_CLKSTATUS_SYSPLLGOOD_MASK,
+        DL_SYSCTL_CLK_STATUS_SYSPLL_GOOD,
+        SYSCFG_DL_SYSCTL_PLL_GOOD_TIMEOUT);
+}
+
+/*
+ * 作用：把 MCLK 切到 SYSPLL 所在的 HSCLK。
+ * 使用场景：PLL 已经锁定后切换正式系统时钟。
+ */
+static bool SYSCFG_DL_SYSCTL_switchMCLKToPLLTimeout(void)
+{
+    DL_SYSCTL_setHSCLKSource(DL_SYSCTL_HSCLK_SOURCE_SYSPLL);
+    if (!SYSCFG_DL_SYSCTL_waitClockStatus(SYSCTL_CLKSTATUS_HSCLKGOOD_MASK,
+        DL_SYSCTL_CLK_STATUS_HSCLK_GOOD,
+        SYSCFG_DL_SYSCTL_HSCLK_TIMEOUT)) {
+        return false;
+    }
+
+    SYSCTL->SOCLOCK.MCLKCFG |= SYSCTL_MCLKCFG_USEHSCLK_ENABLE;
+    return SYSCFG_DL_SYSCTL_waitClockStatus(SYSCTL_CLKSTATUS_HSCLKMUX_MASK,
+        DL_SYSCTL_CLK_STATUS_MCLK_SOURCE_HSCLK,
+        SYSCFG_DL_SYSCTL_HSCLK_TIMEOUT);
+}
 
 SYSCONFIG_WEAK bool SYSCFG_DL_SYSCTL_SYSPLL_init(void)
 {
@@ -185,6 +294,9 @@ SYSCONFIG_WEAK bool SYSCFG_DL_SYSCTL_SYSPLL_init(void)
     }
     sysoscCount = DL_SYSCTL_readFCC();
 
+    if ((pllCount == 0U) || (sysoscCount == 0U)) {
+        return false;
+    }
     ratio = (pllCount * 1000U) / sysoscCount;
     if ((1994U < ratio) && (ratio < 2006U)) {
         ratioOk = true;
@@ -194,62 +306,44 @@ SYSCONFIG_WEAK bool SYSCFG_DL_SYSCTL_SYSPLL_init(void)
 
 SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
 {
+#if SYSCFG_DL_ENABLE_HFXT_PLL
+    uint32_t retry;
+#endif
+
+    g_sysctlClockOk = false;
     DL_SYSCTL_setBORThreshold(DL_SYSCTL_BOR_THRESHOLD_LEVEL_0);
     DL_SYSCTL_setFlashWaitState(DL_SYSCTL_FLASH_WAIT_STATE_2);
     DL_SYSCTL_setSYSOSCFreq(DL_SYSCTL_SYSOSC_FREQ_BASE);
     DL_SYSCTL_disableHFXT();
     DL_SYSCTL_disableSYSPLL();
-    DL_SYSCTL_setHFCLKSourceHFXTParams(DL_SYSCTL_HFXT_RANGE_32_48_MHZ, 0, false);
-    DL_SYSCTL_configSYSPLL((DL_SYSCTL_SYSPLLConfig *) &gSYSPLLConfig);
+    DL_SYSCTL_setMCLKDivider(DL_SYSCTL_MCLK_DIVIDER_DISABLE);
 
-    while (SYSCFG_DL_SYSCTL_SYSPLL_init() == false) {
-        DL_SYSCTL_disableSYSPLL();
-        DL_SYSCTL_enableSYSPLL();
-        while ((DL_SYSCTL_getClockStatus() & SYSCTL_CLKSTATUS_SYSPLLGOOD_MASK) !=
-            DL_SYSCTL_CLK_STATUS_SYSPLL_GOOD) {
+#if SYSCFG_DL_ENABLE_HFXT_PLL
+    DL_SYSCTL_setHFCLKSourceHFXTParams(DL_SYSCTL_HFXT_RANGE_32_48_MHZ, 0, false);
+    for (retry = 0U; retry < SYSCFG_DL_SYSCTL_PLL_RETRY_MAX; ++retry) {
+        if (SYSCFG_DL_SYSCTL_configSYSPLLTimeout(&gSYSPLLConfig) &&
+            SYSCFG_DL_SYSCTL_SYSPLL_init()) {
+            DL_SYSCTL_setULPCLKDivider(DL_SYSCTL_ULPCLK_DIV_2);
+            if (SYSCFG_DL_SYSCTL_switchMCLKToPLLTimeout()) {
+                g_sysctlClockOk = true;
+                return;
+            }
         }
+        DL_SYSCTL_disableSYSPLL();
     }
-    DL_SYSCTL_setULPCLKDivider(DL_SYSCTL_ULPCLK_DIV_2);
-    DL_SYSCTL_setMCLKSource(SYSOSC, HSCLK, DL_SYSCTL_HSCLK_SOURCE_SYSPLL);
+
+    DL_SYSCTL_disableSYSPLL();
+#else
+    g_sysctlClockOk = true;
+#endif
 }
 
-static const DL_TimerA_ClockConfig gPWMClockConfig = {
-    .clockSel = DL_TIMER_CLOCK_BUSCLK,
-    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
-    .prescale = 0U
-};
-
-static const DL_TimerA_PWMConfig gPWMConfig = {
-    .pwmMode = DL_TIMER_PWM_MODE_EDGE_ALIGN_UP,
-    .period = PWM_PERIOD_COUNTS,
-    .isTimerWithFourCC = false,
-    .startTimer = DL_TIMER_STOP,
-};
-
+/*
+ * 1.1ccs 起电机改为闭环步进 DIR/STEP。
+ * PWM/TB6612 初始化保留空函数，避免旧代码链接名失效。
+ */
 SYSCONFIG_WEAK void SYSCFG_DL_PWM_init(void)
 {
-    DL_TimerA_setClockConfig(PWM_INST, (DL_TimerA_ClockConfig *) &gPWMClockConfig);
-    DL_TimerA_initPWMMode(PWM_INST, (DL_TimerA_PWMConfig *) &gPWMConfig);
-    DL_TimerA_setCounterControl(PWM_INST, DL_TIMER_CZC_CCCTL0_ZCOND,
-        DL_TIMER_CAC_CCCTL0_ACOND, DL_TIMER_CLC_CCCTL0_LCOND);
-
-    DL_TimerA_setCaptureCompareOutCtl(PWM_INST, DL_TIMER_CC_OCTL_INIT_VAL_LOW,
-        DL_TIMER_CC_OCTL_INV_OUT_DISABLED, DL_TIMER_CC_OCTL_SRC_FUNCVAL,
-        DL_TIMERA_CAPTURE_COMPARE_0_INDEX);
-    DL_TimerA_setCaptCompUpdateMethod(PWM_INST,
-        DL_TIMER_CC_UPDATE_METHOD_IMMEDIATE, DL_TIMERA_CAPTURE_COMPARE_0_INDEX);
-    DL_TimerA_setCaptureCompareValue(PWM_INST, 0U, DL_TIMER_CC_0_INDEX);
-
-    DL_TimerA_setCaptureCompareOutCtl(PWM_INST, DL_TIMER_CC_OCTL_INIT_VAL_LOW,
-        DL_TIMER_CC_OCTL_INV_OUT_DISABLED, DL_TIMER_CC_OCTL_SRC_FUNCVAL,
-        DL_TIMERA_CAPTURE_COMPARE_1_INDEX);
-    DL_TimerA_setCaptCompUpdateMethod(PWM_INST,
-        DL_TIMER_CC_UPDATE_METHOD_IMMEDIATE, DL_TIMERA_CAPTURE_COMPARE_1_INDEX);
-    DL_TimerA_setCaptureCompareValue(PWM_INST, 0U, DL_TIMER_CC_1_INDEX);
-
-    DL_TimerA_enableClock(PWM_INST);
-    DL_TimerA_setCCPDirection(PWM_INST,
-        DL_TIMER_CC0_OUTPUT | DL_TIMER_CC1_OUTPUT);
 }
 
 static const DL_I2C_ClockConfig gOLEDClockConfig = {
@@ -275,12 +369,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_OLED_init(void)
     DL_I2C_enableController(OLED_INST);
 }
 
-static const DL_UART_Main_ClockConfig gUART40MClockConfig = {
-    .clockSel = DL_UART_MAIN_CLOCK_BUSCLK,
-    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
-};
-
-static const DL_UART_Main_ClockConfig gUART80MClockConfig = {
+static const DL_UART_Main_ClockConfig gUART32MClockConfig = {
     .clockSel = DL_UART_MAIN_CLOCK_BUSCLK,
     .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
 };
@@ -297,36 +386,36 @@ static const DL_UART_Main_Config gUARTConfig = {
 SYSCONFIG_WEAK void SYSCFG_DL_JY61P_init(void)
 {
     DL_UART_Main_setClockConfig(
-        JY61P_INST, (DL_UART_Main_ClockConfig *) &gUART40MClockConfig);
+        JY61P_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
     DL_UART_Main_init(JY61P_INST, (DL_UART_Main_Config *) &gUARTConfig);
     DL_UART_Main_setOversampling(JY61P_INST, DL_UART_OVERSAMPLING_RATE_16X);
     DL_UART_Main_setBaudRateDivisor(
-        JY61P_INST, JY61P_IBRD_40_MHZ_115200_BAUD,
-        JY61P_FBRD_40_MHZ_115200_BAUD);
+        JY61P_INST, JY61P_IBRD_32_MHZ_115200_BAUD,
+        JY61P_FBRD_32_MHZ_115200_BAUD);
     DL_UART_Main_enable(JY61P_INST);
 }
 
 SYSCONFIG_WEAK void SYSCFG_DL_JQ8400_init(void)
 {
     DL_UART_Main_setClockConfig(
-        JQ8400_INST, (DL_UART_Main_ClockConfig *) &gUART40MClockConfig);
+        JQ8400_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
     DL_UART_Main_init(JQ8400_INST, (DL_UART_Main_Config *) &gUARTConfig);
     DL_UART_Main_setOversampling(JQ8400_INST, DL_UART_OVERSAMPLING_RATE_16X);
     DL_UART_Main_setBaudRateDivisor(
-        JQ8400_INST, JQ8400_IBRD_40_MHZ_115200_BAUD,
-        JQ8400_FBRD_40_MHZ_115200_BAUD);
+        JQ8400_INST, JQ8400_IBRD_32_MHZ_115200_BAUD,
+        JQ8400_FBRD_32_MHZ_115200_BAUD);
     DL_UART_Main_enable(JQ8400_INST);
 }
 
 SYSCONFIG_WEAK void SYSCFG_DL_Exchange_init(void)
 {
     DL_UART_Main_setClockConfig(
-        Exchange_INST, (DL_UART_Main_ClockConfig *) &gUART80MClockConfig);
+        Exchange_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
     DL_UART_Main_init(Exchange_INST, (DL_UART_Main_Config *) &gUARTConfig);
     DL_UART_Main_setOversampling(Exchange_INST, DL_UART_OVERSAMPLING_RATE_16X);
     DL_UART_Main_setBaudRateDivisor(
-        Exchange_INST, Exchange_IBRD_80_MHZ_115200_BAUD,
-        Exchange_FBRD_80_MHZ_115200_BAUD);
+        Exchange_INST, Exchange_IBRD_32_MHZ_115200_BAUD,
+        Exchange_FBRD_32_MHZ_115200_BAUD);
     DL_UART_Main_enable(Exchange_INST);
 }
 
@@ -342,22 +431,27 @@ SYSCONFIG_WEAK void SYSCFG_DL_GRAY_ADC0_init(void)
         (DL_ADC12_ClockConfig *) &gADCClockConfig);
     DL_ADC12_initSeqSample(GRAY_ADC0_INST, DL_ADC12_REPEAT_MODE_DISABLED,
         DL_ADC12_SAMPLING_SOURCE_AUTO, DL_ADC12_TRIG_SRC_SOFTWARE,
-        ADC12_CTL2_STARTADD_ADDR_00, ADC12_CTL2_ENDADD_ADDR_02,
+        ADC12_CTL2_STARTADD_ADDR_00, ADC12_CTL2_ENDADD_ADDR_03,
         DL_ADC12_SAMP_CONV_RES_12_BIT,
         DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED);
     DL_ADC12_setSampleTime0(GRAY_ADC0_INST, 39);
-    DL_ADC12_configConversionMem(GRAY_ADC0_INST, GRAY_ADC0_MEM_GRAY1,
-        DL_ADC12_INPUT_CHAN_12, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
-        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
-        DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
-        DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
-    DL_ADC12_configConversionMem(GRAY_ADC0_INST, GRAY_ADC0_MEM_GRAY6,
+    DL_ADC12_configConversionMem(GRAY_ADC0_INST, GRAY_ADC0_MEM_GRAY4,
         DL_ADC12_INPUT_CHAN_3, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
         DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
         DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
         DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
-    DL_ADC12_configConversionMem(GRAY_ADC0_INST, GRAY_ADC0_MEM_GRAY7,
+    DL_ADC12_configConversionMem(GRAY_ADC0_INST, GRAY_ADC0_MEM_GRAY5,
         DL_ADC12_INPUT_CHAN_2, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
+        DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+        DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
+    DL_ADC12_configConversionMem(GRAY_ADC0_INST, GRAY_ADC0_MEM_GRAY6,
+        DL_ADC12_INPUT_CHAN_1, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
+        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
+        DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
+        DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
+    DL_ADC12_configConversionMem(GRAY_ADC0_INST, GRAY_ADC0_MEM_GRAY7,
+        DL_ADC12_INPUT_CHAN_0, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
         DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
         DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_TRIGGER_NEXT,
         DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
@@ -369,27 +463,22 @@ SYSCONFIG_WEAK void SYSCFG_DL_GRAY_ADC1_init(void)
         (DL_ADC12_ClockConfig *) &gADCClockConfig);
     DL_ADC12_initSeqSample(GRAY_ADC1_INST, DL_ADC12_REPEAT_MODE_DISABLED,
         DL_ADC12_SAMPLING_SOURCE_AUTO, DL_ADC12_TRIG_SRC_SOFTWARE,
-        ADC12_CTL2_STARTADD_ADDR_00, ADC12_CTL2_ENDADD_ADDR_03,
+        ADC12_CTL2_STARTADD_ADDR_00, ADC12_CTL2_ENDADD_ADDR_02,
         DL_ADC12_SAMP_CONV_RES_12_BIT,
         DL_ADC12_SAMP_CONV_DATA_FORMAT_UNSIGNED);
     DL_ADC12_setSampleTime0(GRAY_ADC1_INST, 39);
-    DL_ADC12_configConversionMem(GRAY_ADC1_INST, GRAY_ADC1_MEM_GRAY2,
+    DL_ADC12_configConversionMem(GRAY_ADC1_INST, GRAY_ADC1_MEM_GRAY1,
         DL_ADC12_INPUT_CHAN_0, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
         DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
         DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
         DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
-    DL_ADC12_configConversionMem(GRAY_ADC1_INST, GRAY_ADC1_MEM_GRAY3,
+    DL_ADC12_configConversionMem(GRAY_ADC1_INST, GRAY_ADC1_MEM_GRAY2,
         DL_ADC12_INPUT_CHAN_1, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
         DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
         DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
         DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
-    DL_ADC12_configConversionMem(GRAY_ADC1_INST, GRAY_ADC1_MEM_GRAY4,
+    DL_ADC12_configConversionMem(GRAY_ADC1_INST, GRAY_ADC1_MEM_GRAY3,
         DL_ADC12_INPUT_CHAN_2, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
-        DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
-        DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_AUTO_NEXT,
-        DL_ADC12_WINDOWS_COMP_MODE_DISABLED);
-    DL_ADC12_configConversionMem(GRAY_ADC1_INST, GRAY_ADC1_MEM_GRAY5,
-        DL_ADC12_INPUT_CHAN_3, DL_ADC12_REFERENCE_VOLTAGE_VDDA,
         DL_ADC12_SAMPLE_TIMER_SOURCE_SCOMP0, DL_ADC12_AVERAGING_MODE_DISABLED,
         DL_ADC12_BURN_OUT_SOURCE_DISABLED, DL_ADC12_TRIGGER_MODE_TRIGGER_NEXT,
         DL_ADC12_WINDOWS_COMP_MODE_DISABLED);

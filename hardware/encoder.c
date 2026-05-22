@@ -5,6 +5,9 @@
 static volatile int32_t g_leftCount;
 static volatile int32_t g_rightCount;
 
+/* 单次 GPIOA 中断最多处理的编码器边沿数，防止噪声把 CPU 困在 ISR。 */
+#define ENCODER_IRQ_SERVICE_LIMIT    (16U)
+
 void Encoder_Init(void)
 {
     Encoder_Reset();
@@ -31,6 +34,7 @@ void Encoder_HandleGPIOInterrupt(void)
 {
     DL_GPIO_IIDX pending;
     uint32_t state;
+    uint8_t serviceCount = 0U;
 
     do {
         pending = DL_GPIO_getPendingInterrupt(PIN_ENCODER_PORT);
@@ -54,5 +58,7 @@ void Encoder_HandleGPIOInterrupt(void)
         default:
             break;
         }
-    } while (pending != DL_GPIO_IIDX_NO_INTR);
+        ++serviceCount;
+    } while ((pending != DL_GPIO_IIDX_NO_INTR) &&
+        (serviceCount < ENCODER_IRQ_SERVICE_LIMIT));
 }

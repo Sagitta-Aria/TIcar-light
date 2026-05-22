@@ -4,6 +4,9 @@
 
 static volatile KeyEvent g_keyEvent = KEY_EVENT_NONE;
 
+/* 单次 GPIOB 中断最多处理的按键事件数，避免抖动异常时长时间停在 ISR。 */
+#define KEY_IRQ_SERVICE_LIMIT    (8U)
+
 static uint32_t Key_PinFromId(KeyId key)
 {
     return (key == KEY_ID_1) ? PIN_KEY_1 : PIN_KEY_2;
@@ -30,6 +33,7 @@ KeyEvent Key_PopEvent(void)
 void Key_HandleGPIOInterrupt(void)
 {
     DL_GPIO_IIDX pending;
+    uint8_t serviceCount = 0U;
 
     do {
         pending = DL_GPIO_getPendingInterrupt(PIN_KEY_PORT);
@@ -43,5 +47,7 @@ void Key_HandleGPIOInterrupt(void)
         default:
             break;
         }
-    } while (pending != DL_GPIO_IIDX_NO_INTR);
+        ++serviceCount;
+    } while ((pending != DL_GPIO_IIDX_NO_INTR) &&
+        (serviceCount < KEY_IRQ_SERVICE_LIMIT));
 }

@@ -132,9 +132,9 @@ foreach ($source in $sources) {
     }
 }
 
-$output = Join-Path $BuildDir "light-car1.0ccs.out"
-$map = Join-Path $BuildDir "light-car1.0ccs.map"
-$linkInfo = Join-Path $BuildDir "light-car1.0ccs_linkInfo.xml"
+$output = Join-Path $BuildDir "light-car1.1ccs.out"
+$map = Join-Path $BuildDir "light-car1.1ccs.map"
+$linkInfo = Join-Path $BuildDir "light-car1.1ccs_linkInfo.xml"
 
 $linkArgs = @(
     "-march=thumbv6m",

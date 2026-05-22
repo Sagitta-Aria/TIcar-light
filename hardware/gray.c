@@ -9,11 +9,11 @@ typedef struct {
 
 /* g_grayMap：把从左到右的 7 路传感器映射到对应 ADC 和 MEM 槽位。 */
 static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
-    {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY1},
+    {PIN_GRAY_ADC1, GRAY_ADC1_MEM_GRAY1},
     {PIN_GRAY_ADC1, GRAY_ADC1_MEM_GRAY2},
     {PIN_GRAY_ADC1, GRAY_ADC1_MEM_GRAY3},
-    {PIN_GRAY_ADC1, GRAY_ADC1_MEM_GRAY4},
-    {PIN_GRAY_ADC1, GRAY_ADC1_MEM_GRAY5},
+    {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY4},
+    {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY5},
     {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY6},
     {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY7},
 };
@@ -77,6 +77,7 @@ static uint8_t Gray_WaitDone(ADC12_Regs *adc)
 
     while (DL_ADC12_isConversionStarted(adc)) {
         if (timeout == 0U) {
+            DL_ADC12_stopConversion(adc);
             return 0U;
         }
         --timeout;

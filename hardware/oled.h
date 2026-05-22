@@ -111,6 +111,35 @@ void Send_Byte(u8 dat);
 void OLED_WR_Byte(u8 dat,u8 mode);
 
 /**
+ * @brief 查询 OLED I2C 是否已经发生通信错误
+ *
+ * @return 0：正常；非 0：发生过超时、NACK 或总线错误
+ *
+ * @note 这个状态用于 Board 层报错亮灯。发生错误后，
+ *       OLED 写入函数会直接返回，避免总线异常时死等。
+ */
+uint8_t OLED_HasError(void);
+
+/**
+ * @brief 尝试恢复 OLED I2C 总线
+ *
+ * @return 1：bus clear 和 OLED 重新初始化成功；0：SCL/SDA 仍异常
+ *
+ * @note 恢复流程会临时把 PA0/PA1 切成 GPIO 开漏输出，手动打 9 个 SCL
+ *       脉冲并生成 STOP，然后切回 I2C0。该函数带内部重入保护，不会无限
+ *       递归调用 OLED_Init()。
+ */
+uint8_t OLED_TryRecover(void);
+
+/**
+ * @brief 清除 OLED I2C 错误标志并复位当前传输状态
+ *
+ * @note 一般只在 OLED/I2C 已经初始化后调用。
+ *       如果线还没接好，下一次写入仍会重新置错误标志。
+ */
+void OLED_ClearError(void);
+
+/**
  * @brief 打开 OLED 显示
  *
  * @note 通常会使能电荷泵并点亮屏幕。

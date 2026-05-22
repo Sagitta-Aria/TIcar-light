@@ -5,9 +5,258 @@
 #define OLED_I2C_ADDRESS       (0x3CU)
 #define OLED_WIDTH             (128U)
 #define OLED_HEIGHT            (64U)
+#define OLED_I2C_WAIT_TIMEOUT_COUNT  (100000U)
+#define OLED_I2C_IDLE_GRACE_COUNT    (16U)
+#define OLED_I2C_BUS_CLEAR_PULSES    (9U)
+#define OLED_I2C_BUS_CLEAR_WAIT_COUNT (10000U)
+#define OLED_I2C_BUS_CLEAR_DELAY_CYCLES (320U)
+#define OLED_I2C_LINE_PINS \
+    (GPIO_OLED_SDA_PIN | GPIO_OLED_SCL_PIN)
+#define OLED_I2C_ERROR_STATUS        (DL_I2C_CONTROLLER_STATUS_ERROR | \
+    DL_I2C_CONTROLLER_STATUS_ARBITRATION_LOST)
 
 u8 OLED_GRAM[144][8];
 extern void delay_ms(uint32_t ms);
+static volatile uint8_t g_oledError;
+static uint8_t g_oledInitActive;
+static uint8_t g_oledRecoverActive;
+
+/*
+ * 作用：给 I2C bus clear 提供很短的 GPIO 时序间隔。
+ * 使用场景：手动拉低/释放 SCL、SDA 时，保证外部上拉和 OLED 有反应时间。
+ */
+static void OLED_BusClearDelay(void)
+{
+    delay_cycles(OLED_I2C_BUS_CLEAR_DELAY_CYCLES);
+}
+
+/*
+ * 作用：把 PA0/PA1 临时切成 GPIO 开漏输出，并释放到高电平。
+ * 使用场景：I2C 控制器异常后，手动打 SCL 脉冲释放被卡住的从机。
+ */
+static void OLED_ConfigBusClearGPIO(void)
+{
+    DL_GPIO_setPins(GPIO_OLED_SDA_PORT, OLED_I2C_LINE_PINS);
+    DL_GPIO_initDigitalOutputFeatures(GPIO_OLED_IOMUX_SDA,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_DRIVE_STRENGTH_LOW, DL_GPIO_HIZ_ENABLE);
+    DL_GPIO_initDigitalOutputFeatures(GPIO_OLED_IOMUX_SCL,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_DRIVE_STRENGTH_LOW, DL_GPIO_HIZ_ENABLE);
+    DL_GPIO_enableOutput(GPIO_OLED_SDA_PORT, OLED_I2C_LINE_PINS);
+    OLED_BusClearDelay();
+}
+
+/*
+ * 作用：把 PA0/PA1 切回 I2C0 复用功能。
+ * 使用场景：bus clear 完成后重新启用硬件 I2C 控制器。
+ */
+static void OLED_ConfigPeripheralPins(void)
+{
+    DL_GPIO_initPeripheralInputFunctionFeatures(
+        GPIO_OLED_IOMUX_SDA, GPIO_OLED_IOMUX_SDA_FUNC,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_initPeripheralInputFunctionFeatures(
+        GPIO_OLED_IOMUX_SCL, GPIO_OLED_IOMUX_SCL_FUNC,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_enableHiZ(GPIO_OLED_IOMUX_SDA);
+    DL_GPIO_enableHiZ(GPIO_OLED_IOMUX_SCL);
+}
+
+/*
+ * 作用：等待某根 I2C 线被上拉释放为高电平。
+ * 使用场景：判断 SCL 是否仍被外设拉低，避免 bus clear 自己死等。
+ */
+static uint8_t OLED_WaitLineHigh(uint32_t pin)
+{
+    uint32_t timeout = OLED_I2C_BUS_CLEAR_WAIT_COUNT;
+
+    while (timeout > 0U) {
+        if ((DL_GPIO_readPins(GPIO_OLED_SDA_PORT, pin) & pin) != 0U) {
+            return 1U;
+        }
+        --timeout;
+    }
+    return 0U;
+}
+
+/*
+ * 作用：执行 I2C bus clear。
+ * 使用场景：OLED/I2C 超时、NACK 或仲裁丢失后，手动发送 9 个 SCL 脉冲，
+ *          再生成一个 STOP，尽量把被卡住的 OLED 从机释放出来。
+ */
+static uint8_t OLED_BusClear(void)
+{
+    uint8_t index;
+
+    OLED_ConfigBusClearGPIO();
+    DL_GPIO_setPins(GPIO_OLED_SDA_PORT, OLED_I2C_LINE_PINS);
+    if (OLED_WaitLineHigh(GPIO_OLED_SCL_PIN) == 0U) {
+        return 0U;
+    }
+
+    for (index = 0U; index < OLED_I2C_BUS_CLEAR_PULSES; ++index) {
+        DL_GPIO_clearPins(GPIO_OLED_SCL_PORT, GPIO_OLED_SCL_PIN);
+        OLED_BusClearDelay();
+        DL_GPIO_setPins(GPIO_OLED_SCL_PORT, GPIO_OLED_SCL_PIN);
+        if (OLED_WaitLineHigh(GPIO_OLED_SCL_PIN) == 0U) {
+            return 0U;
+        }
+        OLED_BusClearDelay();
+    }
+
+    /* 生成 STOP：SDA 低 -> SCL 高 -> SDA 高。 */
+    DL_GPIO_clearPins(GPIO_OLED_SDA_PORT, GPIO_OLED_SDA_PIN);
+    OLED_BusClearDelay();
+    DL_GPIO_setPins(GPIO_OLED_SCL_PORT, GPIO_OLED_SCL_PIN);
+    if (OLED_WaitLineHigh(GPIO_OLED_SCL_PIN) == 0U) {
+        return 0U;
+    }
+    OLED_BusClearDelay();
+    DL_GPIO_setPins(GPIO_OLED_SDA_PORT, GPIO_OLED_SDA_PIN);
+    OLED_BusClearDelay();
+
+    return ((DL_GPIO_readPins(GPIO_OLED_SDA_PORT, OLED_I2C_LINE_PINS) &
+        OLED_I2C_LINE_PINS) == OLED_I2C_LINE_PINS) ? 1U : 0U;
+}
+
+/*
+ * 作用：复位当前 OLED I2C 传输状态。
+ * 使用场景：I2C 等待超时、NACK、仲裁丢失后释放控制器，避免继续卡在同一次传输。
+ */
+static void OLED_ResetTransfer(void)
+{
+    DL_I2C_resetControllerTransfer(OLED_INST);
+    DL_I2C_startFlushControllerTXFIFO(OLED_INST);
+    DL_I2C_stopFlushControllerTXFIFO(OLED_INST);
+    DL_I2C_startFlushControllerRXFIFO(OLED_INST);
+    DL_I2C_stopFlushControllerRXFIFO(OLED_INST);
+}
+
+/*
+ * 作用：记录 OLED/I2C 错误并复位本次传输。
+ * 使用场景：OLED 未接好、SCL/SDA 松动、地址无应答或总线异常。
+ * 说明：这里不直接重入 OLED_Init，恢复动作由 OLED_WR_Byte 统一触发。
+ */
+static void OLED_SetError(void)
+{
+    g_oledError = 1U;
+    OLED_ResetTransfer();
+}
+
+/*
+ * 作用：等待 I2C 状态达到期望值。
+ * 使用场景：OLED_WR_Byte 中等待控制器空闲。
+ * 说明：所有等待都带超时，不能写死循环。
+ */
+static uint8_t OLED_WaitStatus(uint32_t mask, uint32_t expected)
+{
+    uint32_t timeout = OLED_I2C_WAIT_TIMEOUT_COUNT;
+    uint32_t status;
+
+    while (timeout > 0U) {
+        status = DL_I2C_getControllerStatus(OLED_INST);
+        if ((status & OLED_I2C_ERROR_STATUS) != 0U) {
+            OLED_SetError();
+            return 0U;
+        }
+        if ((status & mask) == expected) {
+            return 1U;
+        }
+        --timeout;
+    }
+
+    OLED_SetError();
+    return 0U;
+}
+
+/*
+ * 作用：等待一次 OLED I2C 发送结束。
+ * 使用场景：OLED_WR_Byte 启动传输后等待 STOP 完成。
+ * 说明：即使 OLED 线松，也只会置错误标志，不会把程序卡死。
+ */
+static uint8_t OLED_WaitTransferDone(void)
+{
+    uint32_t timeout = OLED_I2C_WAIT_TIMEOUT_COUNT;
+    uint32_t idleGrace = OLED_I2C_IDLE_GRACE_COUNT;
+    uint32_t status;
+    uint8_t sawBusy = 0U;
+
+    while (timeout > 0U) {
+        status = DL_I2C_getControllerStatus(OLED_INST);
+        if ((status & OLED_I2C_ERROR_STATUS) != 0U) {
+            OLED_SetError();
+            return 0U;
+        }
+        if ((status & (DL_I2C_CONTROLLER_STATUS_BUSY |
+            DL_I2C_CONTROLLER_STATUS_BUSY_BUS)) != 0U) {
+            sawBusy = 1U;
+        }
+        if ((status & DL_I2C_CONTROLLER_STATUS_IDLE) != 0U) {
+            if (sawBusy != 0U) {
+                return 1U;
+            }
+            if (idleGrace == 0U) {
+                return 1U;
+            }
+            --idleGrace;
+        }
+        --timeout;
+    }
+
+    OLED_SetError();
+    return 0U;
+}
+
+uint8_t OLED_HasError(void)
+{
+    return g_oledError;
+}
+
+/*
+ * 作用：对 OLED I2C 总线做一次有限恢复。
+ * 使用场景：等待超时、NACK、SCL/SDA 被拉住后，先手动 bus clear，
+ *          再恢复 I2C 控制器和 OLED 初始化序列。
+ * 返回值：1 表示恢复成功，0 表示总线仍异常。
+ */
+uint8_t OLED_TryRecover(void)
+{
+    uint8_t recovered;
+
+    if (g_oledRecoverActive != 0U) {
+        return 0U;
+    }
+
+    g_oledRecoverActive = 1U;
+    OLED_ResetTransfer();
+    DL_I2C_disableController(OLED_INST);
+
+    recovered = OLED_BusClear();
+    OLED_ConfigPeripheralPins();
+    SYSCFG_DL_OLED_init();
+
+    if (recovered != 0U) {
+        g_oledError = 0U;
+        if (g_oledInitActive == 0U) {
+            OLED_Init();
+            recovered = (g_oledError == 0U) ? 1U : 0U;
+        }
+    }
+
+    if (recovered == 0U) {
+        g_oledError = 1U;
+    }
+    g_oledRecoverActive = 0U;
+    return recovered;
+}
+
+void OLED_ClearError(void)
+{
+    g_oledError = 0U;
+    OLED_ResetTransfer();
+}
 
 //反显函数
 void OLED_ColorTurn(u8 i)
@@ -31,28 +280,58 @@ void OLED_DisplayTurn(u8 i)
 	}
 }
 
-void OLED_WR_Byte(uint8_t dat, uint8_t mode)
+/*
+ * 作用：只尝试发送一次 OLED 字节，不在内部递归恢复。
+ * 使用场景：OLED_WR_Byte 的正常发送和恢复后的单次重试。
+ */
+static uint8_t OLED_WriteByteOnce(uint8_t dat, uint8_t mode)
 {
     uint8_t txData[2];
+
+    if (g_oledError != 0U) {
+        return 0U;
+    }
     
     // 控制字节: 0x00为命令, 0x40为数据
     txData[0] = mode ? 0x40 : 0x00; 
     txData[1] = dat;
 
-    // 1. 等待 I2C 彻底空闲
-    while (!(DL_I2C_getControllerStatus(OLED_INST) & DL_I2C_CONTROLLER_STATUS_IDLE));
+    // 1. 等待 I2C 彻底空闲，带超时保护
+    if (!OLED_WaitStatus(DL_I2C_CONTROLLER_STATUS_IDLE,
+        DL_I2C_CONTROLLER_STATUS_IDLE)) {
+        return 0U;
+    }
     
     // 2. 将 2 个字节填入发送 FIFO
-    DL_I2C_fillControllerTXFIFO(OLED_INST, txData, 2);
+    if (DL_I2C_fillControllerTXFIFO(OLED_INST, txData, 2) != 2U) {
+        OLED_SetError();
+        return 0U;
+    }
     
     // 3. 启动传输
     DL_I2C_startControllerTransfer(OLED_INST, OLED_I2C_ADDRESS, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
     
-    // 4. 等待总线变为 BUSY 状态 (确保硬件状态机已经启动，比 delay 更可靠)
-    while (!(DL_I2C_getControllerStatus(OLED_INST) & DL_I2C_CONTROLLER_STATUS_BUSY_BUS));
-    
-    // 5. 再次等待 I2C 回到空闲状态 (代表本次传输真正完成)
-    while (!(DL_I2C_getControllerStatus(OLED_INST) & DL_I2C_CONTROLLER_STATUS_IDLE));
+    // 4. 等待 I2C 回到空闲状态，代表本次传输结束
+    return OLED_WaitTransferDone();
+}
+
+void OLED_WR_Byte(uint8_t dat, uint8_t mode)
+{
+    if (g_oledError != 0U) {
+        return;
+    }
+
+    if (OLED_WriteByteOnce(dat, mode) != 0U) {
+        return;
+    }
+
+    if (g_oledRecoverActive != 0U) {
+        return;
+    }
+
+    if (OLED_TryRecover() != 0U) {
+        (void)OLED_WriteByteOnce(dat, mode);
+    }
 }
 
 //开启OLED显示 
@@ -75,13 +354,21 @@ void OLED_DisPlay_Off(void)
 void OLED_Refresh(void)
 {
 	u8 i,n;
+    if (g_oledError != 0U) {
+        return;
+    }
 	for(i=0;i<8;i++)
 	{
 	   OLED_WR_Byte(0xb0+i,OLED_CMD); //设置行起始地址
 	   OLED_WR_Byte(0x00,OLED_CMD);   //设置低列起始地址
 	   OLED_WR_Byte(0x10,OLED_CMD);   //设置高列起始地址
 	   for(n=0;n<128;n++)
+       {
+         if (g_oledError != 0U) {
+             return;
+         }
 		 OLED_WR_Byte(OLED_GRAM[n][i],OLED_DATA);
+       }
 	}
 }
 
@@ -278,6 +565,9 @@ void OLED_ShowChinese(u8 x,u8 y,u8 num,u8 size1)
 //配置写入数据的起始位置
 void OLED_WR_BP(u8 x,u8 y)
 {
+    if (g_oledError != 0U) {
+        return;
+    }
 	OLED_WR_Byte(0xb0+y,OLED_CMD);//设置行起始地址
 	OLED_WR_Byte(((x&0xf0)>>4)|0x10,OLED_CMD);
 	OLED_WR_Byte((x&0x0f)|0x01,OLED_CMD);
@@ -295,6 +585,9 @@ void OLED_ShowPicture(u8 x0,u8 y0,u8 x1,u8 y1,u8 BMP[])
 		 OLED_WR_BP(x0,y);
 		 for(x=x0;x<x1;x++)
 		 {
+             if (g_oledError != 0U) {
+                 return;
+             }
 			 OLED_WR_Byte(BMP[j],OLED_DATA);
 			 j++;
 		 }
@@ -304,8 +597,10 @@ void OLED_ShowPicture(u8 x0,u8 y0,u8 x1,u8 y1,u8 BMP[])
 //OLED的初始化
 void OLED_Init(void)
 {
+    g_oledInitActive = 1U;
 	// 4针OLED没有RST引脚，直接延时等待屏幕内部RC电路上电复位完成
 	delay_ms(100);
+    OLED_ClearError();
 	
 	OLED_WR_Byte(0xAE,OLED_CMD);//--turn off oled panel
 	OLED_WR_Byte(0x00,OLED_CMD);//---set low column address
@@ -336,4 +631,5 @@ void OLED_Init(void)
 	OLED_WR_Byte(0xA6,OLED_CMD);// Disable Inverse Display On (0xa6/a7) 
 	OLED_WR_Byte(0xAF,OLED_CMD);
 	OLED_Clear();
+    g_oledInitActive = 0U;
 }

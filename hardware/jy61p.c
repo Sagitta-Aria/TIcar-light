@@ -7,6 +7,11 @@
 #define JY61P_FRAME_ANGLE             (0x53U)
 #define JY61P_FRAME_LENGTH            (11U)
 #define JY61P_CHECKSUM_LENGTH         (10U)
+#define JY61P_UART_TX_TIMEOUT_COUNT   (100000U)
+
+/* 单次 UART0 中断最多服务的中断源和字节数，避免串口噪声长期占住 CPU。 */
+#define JY61P_IRQ_SERVICE_LIMIT       (16U)
+#define JY61P_IRQ_RX_DRAIN_LIMIT      (64U)
 
 /* g_jy61pYawDeg：当前缓存的航向角。 */
 static volatile int16_t g_jy61pYawDeg;
@@ -19,6 +24,24 @@ static uint8_t g_jy61pFrame[JY61P_FRAME_LENGTH];
 
 /* g_jy61pFrameIndex：当前已经接收到的数据帧位置。 */
 static uint8_t g_jy61pFrameIndex;
+
+/*
+ * 作用：带超时发送 JY61P 串口数据。
+ * 使用场景：后续配置 JY61P 输出频率或校准命令。
+ * 说明：避免外设异常时永久停在串口发送等待里。
+ */
+static uint8_t JY61P_TrySendByte(uint8_t data)
+{
+    uint32_t timeout = JY61P_UART_TX_TIMEOUT_COUNT;
+
+    while (timeout > 0U) {
+        if (DL_UART_Main_transmitDataCheck(JY61P_INST, data)) {
+            return 1U;
+        }
+        --timeout;
+    }
+    return 0U;
+}
 
 /*
  * 作用：检查 JY61P 数据帧校验和。
@@ -115,20 +138,27 @@ void JY61P_HandleUARTInterrupt(void)
 {
     uint8_t data;
     DL_UART_IIDX pending;
+    uint8_t serviceCount = 0U;
+    uint8_t rxCount;
 
     do {
         pending = DL_UART_Main_getPendingInterrupt(JY61P_INST);
         if (pending == DL_UART_MAIN_IIDX_RX) {
-            while (DL_UART_Main_receiveDataCheck(JY61P_INST, &data)) {
+            rxCount = 0U;
+            while ((rxCount < JY61P_IRQ_RX_DRAIN_LIMIT) &&
+                DL_UART_Main_receiveDataCheck(JY61P_INST, &data)) {
                 JY61P_ParseByte(data);
+                ++rxCount;
             }
         }
-    } while (pending != DL_UART_MAIN_IIDX_NO_INTERRUPT);
+        ++serviceCount;
+    } while ((pending != DL_UART_MAIN_IIDX_NO_INTERRUPT) &&
+        (serviceCount < JY61P_IRQ_SERVICE_LIMIT));
 }
 
 void JY61P_SendByte(uint8_t data)
 {
-    DL_UART_transmitDataBlocking(JY61P_INST, data);
+    (void)JY61P_TrySendByte(data);
 }
 
 void JY61P_SendBytes(const uint8_t *data, uint16_t length)
@@ -139,7 +169,9 @@ void JY61P_SendBytes(const uint8_t *data, uint16_t length)
         return;
     }
     for (i = 0U; i < length; ++i) {
-        JY61P_SendByte(data[i]);
+        if (!JY61P_TrySendByte(data[i])) {
+            return;
+        }
     }
 }
 
