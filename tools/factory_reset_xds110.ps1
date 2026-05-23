@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not $ConfirmFactoryReset) {
-    throw "DSSM Factory Reset 会重置 NONMAIN。确认要执行时请显式添加 -ConfirmFactoryReset。"
+    throw "DSSM Factory Reset changes NONMAIN. Add -ConfirmFactoryReset only after explicit confirmation."
 }
 
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
@@ -22,7 +22,7 @@ if (-not (Test-Path -LiteralPath $Dss -PathType Leaf)) {
     throw "DSS not found: $Dss"
 }
 
-Write-Host "准备执行 DSSM Factory Reset。此操作会重置 NONMAIN，请勿断开 XDS110 或板子供电。"
+Write-Host "Running DSSM Factory Reset. Do not unplug XDS110 or power during this step."
 $oldValue = $env:MSPM0_ALLOW_FACTORY_RESET
 $env:MSPM0_ALLOW_FACTORY_RESET = "YES"
 try {
