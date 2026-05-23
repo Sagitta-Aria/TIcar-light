@@ -15,7 +15,7 @@
 - 模块函数用 `Module_Action()`，例如 `Motor_Set()`、`OLED_TryRecover()`、`Board_ReportError()`。
 - 内部静态函数用同一模块前缀，例如 `Motor_TaskOne()`。
 - 全局静态变量用 `g_` 前缀，例如 `g_boardErrors`。
-- 宏按模块分组并全大写，例如 `CAR_STEPPER_MAX_COMMAND`。
+- 宏按模块分组并全大写，例如 `CAR_MOTOR_COMMAND_MAX`。
 - 枚举值带模块语义，例如 `MOTOR_CHASSIS_LEFT`、`BOARD_ERROR_CLOCK`。
 
 ## 硬件等待规则
@@ -30,14 +30,15 @@
 - 新函数前优先写中文短注释，说明“作用、使用场景、限制”。
 - 不解释显而易见的赋值。
 - 对引脚冲突、下载风险、硬件副作用要明确写注释。
-- 对兼容旧接口的代码要写清楚，例如 `Motor_SetSpeed()` 只是兼容左右轮命令。
+- 对硬件副作用要写清楚，例如 `Motor_Set()` 会直接改变对应步进驱动器的方向和 STEP 调度。
 
 ## 1.1ccs 的电机框架
 
-- 上层仍然可以用旧的左右轮命令接口。
-- 底层已经换成四个 `STEP/DIR` 闭环步进驱动器。
+- 电机层只描述四个 `STEP/DIR` 闭环步进驱动器，不保留历史电机方案命名。
+- 单电机接口用 `Motor_Set(motor, dir, command)`；底盘左右联动接口用 `Motor_SetChassisCommand(leftCommand, rightCommand)`。
+- `command` 表示步进速度命令，范围由 `CAR_MOTOR_COMMAND_MAX` 统一限制。
 - `Motor_Task()` 是当前的软件步进调度点。
-- 方向反相、加速度曲线、高速同步和驱动器反馈闭环，后续应在 `hardware/motor.c` 或新建 `app/motion.c` 中模块化实现。
+- 方向反相、加速度曲线、高速同步和驱动器反馈闭环，后续应继续在 `hardware/motor.c`、`app/motion.c` 或独立速度模块中分层实现。
 
 ## 生成层维护
 

@@ -11,7 +11,7 @@ TI CCS / TI Arm Clang version of the MSPM0G3507 laser tracking car firmware.
 D:\Ti\light-car1.0ccs
 ```
 
-但 GitHub 版本线已经升级为 `1.1ccs`。这一版面向地猛星 MSPM0G3507 最小系统板，重点改动是把旧 TB6612 直流电机方案切到四个闭环步进驱动器的 `STEP/DIR` 方案。
+但 GitHub 版本线已经升级为 `1.1ccs`。这一版面向地猛星 MSPM0G3507 最小系统板，当前电机控制采用四个闭环步进驱动器的 `STEP/DIR` 方案。
 
 ## 当前结构
 
@@ -112,4 +112,4 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 
 ## GitHub 分支说明
 
-`1.1ccs` 是当前最新 CCS 版本线；`keil1.0` 保留旧 Keil 工程；`main` 仍是旧默认入口时会显得版本很老。GitHub 仓库默认分支建议改成 `1.1ccs`。
+`1.1ccs` 是当前最新 CCS 版本线；`keil1.0` 保留 Keil 版本线；`main` 若仍指向早期内容，打开仓库首页会显得版本很老。GitHub 仓库默认分支建议改成 `1.1ccs`。

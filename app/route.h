@@ -33,8 +33,8 @@ RouteStage Route_GetStage(void);
 /* Route_GetStageName：返回状态名称，便于串口调试。 */
 const char *Route_GetStageName(RouteStage stage);
 
-/* Route_GetBaseDuty：返回当前推荐的基础巡航占空比。 */
-uint16_t Route_GetBaseDuty(void);
+/* Route_GetBaseCommand：返回当前推荐的基础底盘速度命令。 */
+uint16_t Route_GetBaseCommand(void);
 
 /* Route_GetTurnLimit：返回当前允许的最大转向修正。 */
 uint16_t Route_GetTurnLimit(void);

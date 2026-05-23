@@ -77,7 +77,7 @@ static void Board_LogErrorChange(uint32_t errors)
 }
 
 /*
- * 作用：清掉 OLED 旧启动内容，尤其避免顶部黄色区域残留标题。
+ * 作用：清掉 OLED 启动探针内容，尤其避免顶部黄色区域残留标题。
  * 使用场景：每次刷新启动探针页前调用。
  */
 static void Board_ClearBootArea(void)
@@ -369,8 +369,8 @@ void Board_Init(void)
     /*
      * 剩余外设在系统时钟就绪后统一拉起。
      * 这样 UART/I2C/ADC 的频率配置都按正式工作时钟来生效。
+     * 步进 STEP/DIR GPIO 已在 SYSCFG_DL_GPIO_init() 中完成。
      */
-    SYSCFG_DL_PWM_init();
     Board_ShowBootStep("OK Stepper GPIO", "RUN UART", "WAIT ADC",
         "WAIT Drivers");
 

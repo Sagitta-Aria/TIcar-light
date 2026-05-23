@@ -612,7 +612,7 @@ void OLED_Init(void)
 	OLED_WR_Byte(0xC8,OLED_CMD);//Set COM/Row Scan Direction   0xc0上下反置 0xc8正常
 	OLED_WR_Byte(0xA6,OLED_CMD);//--set normal display
 	OLED_WR_Byte(0xA8,OLED_CMD);//--set multiplex ratio(1 to 64)
-	OLED_WR_Byte(0x3f,OLED_CMD);//--1/64 duty
+	OLED_WR_Byte(0x3f,OLED_CMD);//--1/64 multiplex ratio
 	OLED_WR_Byte(0xD3,OLED_CMD);//-set display offset	Shift Mapping RAM Counter (0x00~0x3F)
 	OLED_WR_Byte(0x00,OLED_CMD);//-not offset
 	OLED_WR_Byte(0xd5,OLED_CMD);//--set display clock divide ratio/oscillator frequency

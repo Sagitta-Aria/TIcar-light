@@ -5,7 +5,7 @@
 
 /*
  * MotorId：四个闭环步进驱动器的逻辑编号。
- * 左右底盘优先保留在前两个编号，便于旧循迹代码继续沿用 left/right 语义。
+ * 底盘左右电机放在前两个编号，云台两个电机放在后两个编号。
  */
 typedef enum {
     MOTOR_CHASSIS_LEFT = 0,
@@ -14,10 +14,6 @@ typedef enum {
     MOTOR_GIMBAL_2 = 3,
     MOTOR_COUNT = 4
 } MotorId;
-
-/* 兼容旧代码：旧工程只认左右两个电机名。 */
-#define MOTOR_LEFT              MOTOR_CHASSIS_LEFT
-#define MOTOR_RIGHT             MOTOR_CHASSIS_RIGHT
 
 typedef enum {
     MOTOR_COAST = 0,
@@ -28,7 +24,6 @@ typedef enum {
 
 /*
  * Motor_Init：初始化四个步进驱动器的 STEP/DIR 管脚和内部调度状态。
- * 不要用于：还想保留 TB6612 PWM 的旧工程路径。
  */
 void Motor_Init(void);
 
@@ -40,15 +35,15 @@ void Motor_Task(void);
 
 /*
  * Motor_Set：设置单个电机的方向和速度命令。
- * 速度命令沿用旧工程 0~4000 的量程，实际会被换算成 STEP 发脉冲节奏。
+ * 速度命令使用 0~CAR_MOTOR_COMMAND_MAX 的量程，实际会换算成 STEP 发脉冲节奏。
  */
 void Motor_Set(MotorId motor, MotorDir dir, uint16_t command);
 
 /*
- * Motor_SetSpeed：继续保留旧的左右轮接口，便于 motion/speed_control 复用。
- * 现在它只驱动底盘左右两个步进电机。
+ * Motor_SetChassisCommand：设置底盘左右两个步进电机的有符号速度命令。
+ * 使用场景：循迹、路线和速度闭环统一从这里驱动底盘。
  */
-void Motor_SetSpeed(int16_t left, int16_t right);
+void Motor_SetChassisCommand(int16_t leftCommand, int16_t rightCommand);
 
 /*
  * Motor_SetAllStop：停止四个步进电机并清掉积累的步进调度量。
@@ -56,9 +51,7 @@ void Motor_SetSpeed(int16_t left, int16_t right);
  */
 void Motor_SetAllStop(void);
 
-/*
- * Motor_Stop：兼容旧接口，等价于 Motor_SetAllStop。
- */
+/* Motor_Stop：停止四个步进电机。 */
 void Motor_Stop(void);
 
 /*

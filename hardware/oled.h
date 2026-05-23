@@ -58,7 +58,7 @@ void OLED_DisplayTurn(u8 i);
  * @note 该函数通常用于软件模拟 I2C（GPIO 模拟时序）中，
  *       表示主机发起一次新的 I2C 通信。
  *       在你当前这份代码里 OLED_WR_Byte() 使用的是 MSPM0 硬件 I2C，
- *       所以这个函数可能是旧版接口保留，当前未实际使用。
+ *       所以这个函数只作为软 I2C 迁移辅助，当前未实际使用。
  */
 void I2C_Start(void);
 

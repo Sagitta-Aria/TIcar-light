@@ -12,7 +12,7 @@ void SpeedControl_SetTarget(int16_t left, int16_t right);
 /* SpeedControl_Stop：清空速度目标、积分和输出，并立即停车。 */
 void SpeedControl_Stop(void);
 
-/* SpeedControl_Task：周期读取编码器并刷新左右电机 PWM。 */
+/* SpeedControl_Task：周期读取编码器并刷新左右底盘电机命令。 */
 void SpeedControl_Task(void);
 
 /* SpeedControl_GetLeftActual：读取左轮最近一个控制周期的编码器增量。 */
@@ -21,10 +21,10 @@ int16_t SpeedControl_GetLeftActual(void);
 /* SpeedControl_GetRightActual：读取右轮最近一个控制周期的编码器增量。 */
 int16_t SpeedControl_GetRightActual(void);
 
-/* SpeedControl_GetLeftOutput：读取左轮最近一次闭环输出 PWM。 */
+/* SpeedControl_GetLeftOutput：读取左轮最近一次闭环输出命令。 */
 int16_t SpeedControl_GetLeftOutput(void);
 
-/* SpeedControl_GetRightOutput：读取右轮最近一次闭环输出 PWM。 */
+/* SpeedControl_GetRightOutput：读取右轮最近一次闭环输出命令。 */
 int16_t SpeedControl_GetRightOutput(void);
 
 #endif

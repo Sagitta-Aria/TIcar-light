@@ -31,9 +31,9 @@ uint8_t Tracking_IsEnabled(void)
 void Tracking_Task(void)
 {
     int16_t error = 0;
-    int16_t leftDuty = 0;
-    int16_t rightDuty = 0;
-    uint16_t baseDuty;
+    int16_t leftCommand = 0;
+    int16_t rightCommand = 0;
+    uint16_t baseCommand;
     uint8_t digitalMask = 0U;
     uint8_t sampleOk;
     uint16_t turnLimit;
@@ -42,7 +42,7 @@ void Tracking_Task(void)
         return;
     }
 
-    baseDuty = Route_GetBaseDuty();
+    baseCommand = Route_GetBaseCommand();
     turnLimit = Route_GetTurnLimit();
     sampleOk = Gray_Update();
     if (sampleOk) {
@@ -56,12 +56,12 @@ void Tracking_Task(void)
      * 异常处理器统一决定正常循迹、短暂保持、搜线或停车。
      * 后续要接入状态机时，直接读取 TrackingException_GetState() 即可。
      */
-    if (TrackingException_Update(sampleOk, digitalMask, error, baseDuty,
-        turnLimit, &leftDuty, &rightDuty) ==
+    if (TrackingException_Update(sampleOk, digitalMask, error, baseCommand,
+        turnLimit, &leftCommand, &rightCommand) ==
         TRACKING_EXCEPTION_ACTION_STOP) {
         Motion_Stop();
         return;
     }
 
-    Motion_SetSpeed(leftDuty, rightDuty);
+    Motion_SetChassisCommand(leftCommand, rightCommand);
 }

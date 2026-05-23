@@ -32,11 +32,8 @@
  */
 #define CAR_ENABLE_PA14_DEBUG_LED       (1U)
 
-/* CAR_MOTOR_PWM_MAX_COUNTS：保留旧速度命令量程，1.1ccs 中会换算成步进脉冲频率。 */
-#define CAR_MOTOR_PWM_MAX_COUNTS        (4000U)
-
-/* CAR_STEPPER_MAX_COMMAND：步进电机速度命令最大值，沿用 0~4000 的旧量程。 */
-#define CAR_STEPPER_MAX_COMMAND         (4000U)
+/* CAR_MOTOR_COMMAND_MAX：步进速度命令最大值，0~4000 会换算成 STEP 脉冲节奏。 */
+#define CAR_MOTOR_COMMAND_MAX           (4000U)
 
 /* CAR_STEPPER_MAX_STEPS_PER_TASK：每次 Motor_Task 单个电机最多补发多少个 STEP。 */
 #define CAR_STEPPER_MAX_STEPS_PER_TASK  (4U)
@@ -47,8 +44,8 @@
 /* CAR_STEPPER_TEST_COMMAND：方向测试时的低速步进命令。 */
 #define CAR_STEPPER_TEST_COMMAND        (1200U)
 
-/* CAR_TRACK_BASE_DUTY：基础循迹时的默认电机占空比。 */
-#define CAR_TRACK_BASE_DUTY             (900)
+/* CAR_TRACK_BASE_COMMAND：基础循迹时的默认底盘速度命令。 */
+#define CAR_TRACK_BASE_COMMAND          (900)
 
 /* CAR_TRACK_TURN_GAIN：根据循迹误差计算转向修正的增益。 */
 #define CAR_TRACK_TURN_GAIN             (220)
@@ -59,11 +56,11 @@
 /* CAR_TRACK_LOST_SEARCH_TICKS：进入温和搜线动作后的持续次数。 */
 #define CAR_TRACK_LOST_SEARCH_TICKS     (24U)
 
-/* CAR_TRACK_LOST_SEARCH_BASE_DUTY：搜线阶段的基础占空比。 */
-#define CAR_TRACK_LOST_SEARCH_BASE_DUTY (650U)
+/* CAR_TRACK_LOST_SEARCH_BASE_COMMAND：搜线阶段的基础底盘速度命令。 */
+#define CAR_TRACK_LOST_SEARCH_BASE_COMMAND (650U)
 
-/* CAR_TRACK_LOST_SEARCH_DELTA_DUTY：搜线阶段左右轮的差速幅度。 */
-#define CAR_TRACK_LOST_SEARCH_DELTA_DUTY (180U)
+/* CAR_TRACK_LOST_SEARCH_DELTA_COMMAND：搜线阶段左右轮的差速幅度。 */
+#define CAR_TRACK_LOST_SEARCH_DELTA_COMMAND (180U)
 
 /* CAR_TRACK_ADC_FAULT_STOP_TICKS：ADC 连续失败多少次后判定为异常停车。 */
 #define CAR_TRACK_ADC_FAULT_STOP_TICKS  (2U)
@@ -113,7 +110,7 @@
     ((CAR_SPEED_CONTROL_PERIOD_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
         CAR_APP_LOOP_DELAY_MS)
 
-/* CAR_SPEED_MAX_TARGET_TICKS：满 PWM 对应的单周期目标编码器计数，后续按实车调。 */
+/* CAR_SPEED_MAX_TARGET_TICKS：最大速度命令对应的单周期目标编码器计数，后续按实车调。 */
 #define CAR_SPEED_MAX_TARGET_TICKS      (40)
 
 /* CAR_SPEED_TARGET_STEP：每个速度控制周期目标命令最多变化多少，避免突然加速。 */
@@ -128,8 +125,8 @@
 /* CAR_SPEED_INTEGRAL_LIMIT：速度 PI 积分限幅，防止长时间堵转后输出冲太大。 */
 #define CAR_SPEED_INTEGRAL_LIMIT        (300)
 
-/* CAR_SPEED_MIN_ACTIVE_DUTY：目标非零时的最小有效 PWM，低于它电机可能不动。 */
-#define CAR_SPEED_MIN_ACTIVE_DUTY       (450U)
+/* CAR_SPEED_MIN_ACTIVE_COMMAND：目标非零时的最小有效步进速度命令。 */
+#define CAR_SPEED_MIN_ACTIVE_COMMAND    (450U)
 
 /* CAR_SPEED_LEFT_ENCODER_SIGN：左编码器方向修正，实车反了就改成 -1。 */
 #define CAR_SPEED_LEFT_ENCODER_SIGN     (1)
@@ -149,17 +146,17 @@
 /* CAR_ROUTE_EXIT_TICKS：出弯后继续恢复速度的循环次数。 */
 #define CAR_ROUTE_EXIT_TICKS            (20U)
 
-/* CAR_ROUTE_CRUISE_DUTY：直道巡航时的基础占空比。 */
-#define CAR_ROUTE_CRUISE_DUTY           (1000U)
+/* CAR_ROUTE_CRUISE_COMMAND：直道巡航时的基础速度命令。 */
+#define CAR_ROUTE_CRUISE_COMMAND        (1000U)
 
-/* CAR_ROUTE_APPROACH_DUTY：接近直角前的降速占空比。 */
-#define CAR_ROUTE_APPROACH_DUTY         (820U)
+/* CAR_ROUTE_APPROACH_COMMAND：接近直角前的降速命令。 */
+#define CAR_ROUTE_APPROACH_COMMAND      (820U)
 
-/* CAR_ROUTE_TURN_DUTY：直角转弯时的低速占空比。 */
-#define CAR_ROUTE_TURN_DUTY             (650U)
+/* CAR_ROUTE_TURN_COMMAND：直角转弯时的低速命令。 */
+#define CAR_ROUTE_TURN_COMMAND          (650U)
 
-/* CAR_ROUTE_EXIT_DUTY：出弯恢复阶段的占空比。 */
-#define CAR_ROUTE_EXIT_DUTY             (900U)
+/* CAR_ROUTE_EXIT_COMMAND：出弯恢复阶段的速度命令。 */
+#define CAR_ROUTE_EXIT_COMMAND          (900U)
 
 /* CAR_ROUTE_CRUISE_TURN_LIMIT：直道时允许的最大转向修正。 */
 #define CAR_ROUTE_CRUISE_TURN_LIMIT     (1200U)
@@ -184,9 +181,6 @@
 
 /* CAR_ENABLE_MOTOR_TEST_MODE：1 表示按键1进入电机方向确认，平时保持 0。 */
 #define CAR_ENABLE_MOTOR_TEST_MODE      (0U)
-
-/* CAR_MOTOR_TEST_DUTY：旧 PWM 测试量程保留项，1.1ccs 步进测试使用 CAR_STEPPER_TEST_COMMAND。 */
-#define CAR_MOTOR_TEST_DUTY             (700U)
 
 /* CAR_MOTOR_TEST_RUN_MS：每个方向测试步骤持续时间，到时自动停车。 */
 #define CAR_MOTOR_TEST_RUN_MS           (800U)

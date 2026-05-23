@@ -6,23 +6,23 @@ static TrackingExceptionState g_trackingExceptionState;
 static uint16_t g_lostTicks;
 static uint16_t g_adcFaultTicks;
 static int8_t g_lastLineSide;
-static int16_t g_lastLeftDuty;
-static int16_t g_lastRightDuty;
+static int16_t g_lastLeftCommand;
+static int16_t g_lastRightCommand;
 static uint8_t g_hasLastCommand;
 
 /*
  * 作用：限制电机命令范围。
  * 使用场景：异常处理器自己生成保持/搜线速度时。
  */
-static int16_t TrackingException_ClampDuty(int32_t duty)
+static int16_t TrackingException_ClampCommand(int32_t command)
 {
-    if (duty > (int32_t)CAR_MOTOR_PWM_MAX_COUNTS) {
-        return (int16_t)CAR_MOTOR_PWM_MAX_COUNTS;
+    if (command > (int32_t)CAR_MOTOR_COMMAND_MAX) {
+        return (int16_t)CAR_MOTOR_COMMAND_MAX;
     }
-    if (duty < -(int32_t)CAR_MOTOR_PWM_MAX_COUNTS) {
-        return (int16_t)(-(int32_t)CAR_MOTOR_PWM_MAX_COUNTS);
+    if (command < -(int32_t)CAR_MOTOR_COMMAND_MAX) {
+        return (int16_t)(-(int32_t)CAR_MOTOR_COMMAND_MAX);
     }
-    return (int16_t)duty;
+    return (int16_t)command;
 }
 
 /*
@@ -47,10 +47,10 @@ static uint8_t TrackingException_CountActiveSensors(uint8_t digitalMask)
  * 作用：保存最近一次有效电机命令。
  * 使用场景：短暂丢线时先保持上一拍输出，避免遇到小断点就急停。
  */
-static void TrackingException_SaveCommand(int16_t leftDuty, int16_t rightDuty)
+static void TrackingException_SaveCommand(int16_t leftCommand, int16_t rightCommand)
 {
-    g_lastLeftDuty = leftDuty;
-    g_lastRightDuty = rightDuty;
+    g_lastLeftCommand = leftCommand;
+    g_lastRightCommand = rightCommand;
     g_hasLastCommand = 1U;
 }
 
@@ -76,8 +76,8 @@ static uint8_t TrackingException_ShouldSearchLeft(void)
  * 使用场景：灰度数据有效且能看到线时。
  */
 static void TrackingException_BuildNormalCommand(int16_t lineError,
-    uint16_t baseDuty, uint16_t turnLimit, int16_t *leftDuty,
-    int16_t *rightDuty)
+    uint16_t baseCommand, uint16_t turnLimit, int16_t *leftCommand,
+    int16_t *rightCommand)
 {
     int16_t correction =
         (int16_t)((lineError * CAR_TRACK_TURN_GAIN) / GRAY_LINE_ERROR_SCALE);
@@ -88,10 +88,10 @@ static void TrackingException_BuildNormalCommand(int16_t lineError,
         correction = -(int16_t)turnLimit;
     }
 
-    *leftDuty = TrackingException_ClampDuty(
-        (int32_t)baseDuty + (int32_t)correction);
-    *rightDuty = TrackingException_ClampDuty(
-        (int32_t)baseDuty - (int32_t)correction);
+    *leftCommand = TrackingException_ClampCommand(
+        (int32_t)baseCommand + (int32_t)correction);
+    *rightCommand = TrackingException_ClampCommand(
+        (int32_t)baseCommand - (int32_t)correction);
 }
 
 /*
@@ -100,28 +100,28 @@ static void TrackingException_BuildNormalCommand(int16_t lineError,
  * 说明：只做前进差速搜线，不直接原地反转，避免动作过猛。
  */
 static void TrackingException_BuildSearchCommand(uint8_t searchLeft,
-    int16_t *leftDuty, int16_t *rightDuty)
+    int16_t *leftCommand, int16_t *rightCommand)
 {
-    int32_t slowDuty = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_DUTY -
-        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_DUTY;
-    int32_t fastDuty = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_DUTY +
-        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_DUTY;
+    int32_t slowCommand = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_COMMAND -
+        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_COMMAND;
+    int32_t fastCommand = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_COMMAND +
+        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_COMMAND;
 
-    if (slowDuty < 0) {
-        slowDuty = 0;
+    if (slowCommand < 0) {
+        slowCommand = 0;
     }
-    if (fastDuty > (int32_t)CAR_MOTOR_PWM_MAX_COUNTS) {
-        fastDuty = (int32_t)CAR_MOTOR_PWM_MAX_COUNTS;
+    if (fastCommand > (int32_t)CAR_MOTOR_COMMAND_MAX) {
+        fastCommand = (int32_t)CAR_MOTOR_COMMAND_MAX;
     }
 
     if (searchLeft) {
-        *leftDuty = (int16_t)slowDuty;
-        *rightDuty = (int16_t)fastDuty;
+        *leftCommand = (int16_t)slowCommand;
+        *rightCommand = (int16_t)fastCommand;
         g_trackingExceptionState =
             TRACKING_EXCEPTION_STATE_LOST_SEARCH_LEFT;
     } else {
-        *leftDuty = (int16_t)fastDuty;
-        *rightDuty = (int16_t)slowDuty;
+        *leftCommand = (int16_t)fastCommand;
+        *rightCommand = (int16_t)slowCommand;
         g_trackingExceptionState =
             TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT;
     }
@@ -132,7 +132,7 @@ static void TrackingException_BuildSearchCommand(uint8_t searchLeft,
  * 使用场景：Gray_Update 返回失败时。
  */
 static TrackingExceptionAction TrackingException_HandleAdcFault(
-    int16_t *leftDuty, int16_t *rightDuty)
+    int16_t *leftCommand, int16_t *rightCommand)
 {
     if (g_adcFaultTicks < 0xFFFFU) {
         ++g_adcFaultTicks;
@@ -141,13 +141,13 @@ static TrackingExceptionAction TrackingException_HandleAdcFault(
     g_trackingExceptionState = TRACKING_EXCEPTION_STATE_ADC_FAULT;
     if ((g_adcFaultTicks < CAR_TRACK_ADC_FAULT_STOP_TICKS) &&
         g_hasLastCommand) {
-        *leftDuty = g_lastLeftDuty;
-        *rightDuty = g_lastRightDuty;
+        *leftCommand = g_lastLeftCommand;
+        *rightCommand = g_lastRightCommand;
         return TRACKING_EXCEPTION_ACTION_RUN;
     }
 
-    *leftDuty = 0;
-    *rightDuty = 0;
+    *leftCommand = 0;
+    *rightCommand = 0;
     return TRACKING_EXCEPTION_ACTION_STOP;
 }
 
@@ -156,7 +156,7 @@ static TrackingExceptionAction TrackingException_HandleAdcFault(
  * 使用场景：digitalMask 为 0 时。
  */
 static TrackingExceptionAction TrackingException_HandleLostLine(
-    int16_t *leftDuty, int16_t *rightDuty)
+    int16_t *leftCommand, int16_t *rightCommand)
 {
     uint16_t searchStopTicks =
         (uint16_t)(CAR_TRACK_LOST_HOLD_TICKS +
@@ -169,31 +169,31 @@ static TrackingExceptionAction TrackingException_HandleLostLine(
     if (g_lostTicks <= CAR_TRACK_LOST_HOLD_TICKS) {
         g_trackingExceptionState = TRACKING_EXCEPTION_STATE_LOST_HOLD;
         if (g_hasLastCommand) {
-            *leftDuty = g_lastLeftDuty;
-            *rightDuty = g_lastRightDuty;
+            *leftCommand = g_lastLeftCommand;
+            *rightCommand = g_lastRightCommand;
         } else {
-            *leftDuty = 0;
-            *rightDuty = 0;
+            *leftCommand = 0;
+            *rightCommand = 0;
         }
         return TRACKING_EXCEPTION_ACTION_RUN;
     }
 
     if (g_lostTicks <= searchStopTicks) {
         TrackingException_BuildSearchCommand(
-            TrackingException_ShouldSearchLeft(), leftDuty, rightDuty);
-        TrackingException_SaveCommand(*leftDuty, *rightDuty);
+            TrackingException_ShouldSearchLeft(), leftCommand, rightCommand);
+        TrackingException_SaveCommand(*leftCommand, *rightCommand);
         return TRACKING_EXCEPTION_ACTION_RUN;
     }
 
 #if CAR_TRACK_LOST_STOP
     g_trackingExceptionState = TRACKING_EXCEPTION_STATE_LOST_STOP;
-    *leftDuty = 0;
-    *rightDuty = 0;
+    *leftCommand = 0;
+    *rightCommand = 0;
     return TRACKING_EXCEPTION_ACTION_STOP;
 #else
     TrackingException_BuildSearchCommand(
-        TrackingException_ShouldSearchLeft(), leftDuty, rightDuty);
-    TrackingException_SaveCommand(*leftDuty, *rightDuty);
+        TrackingException_ShouldSearchLeft(), leftCommand, rightCommand);
+    TrackingException_SaveCommand(*leftCommand, *rightCommand);
     return TRACKING_EXCEPTION_ACTION_RUN;
 #endif
 }
@@ -209,30 +209,30 @@ void TrackingException_Reset(void)
     g_lostTicks = 0U;
     g_adcFaultTicks = 0U;
     g_lastLineSide = 0;
-    g_lastLeftDuty = 0;
-    g_lastRightDuty = 0;
+    g_lastLeftCommand = 0;
+    g_lastRightCommand = 0;
     g_hasLastCommand = 0U;
 }
 
 TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
-    uint8_t digitalMask, int16_t lineError, uint16_t baseDuty,
-    uint16_t turnLimit, int16_t *leftDuty, int16_t *rightDuty)
+    uint8_t digitalMask, int16_t lineError, uint16_t baseCommand,
+    uint16_t turnLimit, int16_t *leftCommand, int16_t *rightCommand)
 {
     uint8_t activeCount;
 
-    if ((leftDuty == 0) || (rightDuty == 0)) {
+    if ((leftCommand == 0) || (rightCommand == 0)) {
         return TRACKING_EXCEPTION_ACTION_STOP;
     }
 
     if (!sampleOk) {
-        return TrackingException_HandleAdcFault(leftDuty, rightDuty);
+        return TrackingException_HandleAdcFault(leftCommand, rightCommand);
     }
 
     g_adcFaultTicks = 0U;
     activeCount = TrackingException_CountActiveSensors(digitalMask);
 
     if (activeCount == 0U) {
-        return TrackingException_HandleLostLine(leftDuty, rightDuty);
+        return TrackingException_HandleLostLine(leftCommand, rightCommand);
     }
 
     g_lostTicks = 0U;
@@ -243,8 +243,8 @@ TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
     }
 
     TrackingException_BuildNormalCommand(
-        lineError, baseDuty, turnLimit, leftDuty, rightDuty);
-    TrackingException_SaveCommand(*leftDuty, *rightDuty);
+        lineError, baseCommand, turnLimit, leftCommand, rightCommand);
+    TrackingException_SaveCommand(*leftCommand, *rightCommand);
 
     if (activeCount >= CAR_TRACK_WIDE_LINE_ACTIVE_COUNT) {
         g_trackingExceptionState = TRACKING_EXCEPTION_STATE_WIDE_LINE;

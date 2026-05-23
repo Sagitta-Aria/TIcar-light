@@ -214,7 +214,7 @@ static void Menu_ShowMonoLine(uint8_t index, const char *text)
 /*
  * 作用：只使用 OLED 下半区刷新 4 行内容。
  * 使用场景：校准页、测试监视页和状态页。
- * 说明：line0 作为旧接口标题位保留但不显示，避免双色屏顶部黄区出现标题。
+ * 说明：line0 仅用于保持调用参数稳定，当前不显示标题，避免双色屏顶部黄区被点亮。
  */
 static void Menu_RenderLines(const char *line0, const char *line1,
     const char *line2, const char *line3, const char *line4)

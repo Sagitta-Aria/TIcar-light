@@ -338,14 +338,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
 #endif
 }
 
-/*
- * 1.1ccs 起电机改为闭环步进 DIR/STEP。
- * PWM/TB6612 初始化保留空函数，避免旧代码链接名失效。
- */
-SYSCONFIG_WEAK void SYSCFG_DL_PWM_init(void)
-{
-}
-
 static const DL_I2C_ClockConfig gOLEDClockConfig = {
     .clockSel = DL_I2C_CLOCK_BUSCLK,
     .divideRatio = DL_I2C_CLOCK_DIVIDE_1,

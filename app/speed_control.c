@@ -10,7 +10,7 @@ typedef struct {
     int32_t lastCount;
     int32_t integral;
     int16_t actualTicks;
-    int16_t outputPwm;
+    int16_t outputCommand;
     int8_t encoderSign;
 } SpeedControlWheel;
 
@@ -20,7 +20,7 @@ static uint16_t g_speedControlTicks;
 
 /*
  * 作用：限制有符号数范围。
- * 使用场景：限制目标命令、积分和最终 PWM。
+ * 使用场景：限制目标命令、积分和最终输出命令。
  */
 static int32_t SpeedControl_Clamp32(int32_t value, int32_t minValue,
     int32_t maxValue)
@@ -36,7 +36,7 @@ static int32_t SpeedControl_Clamp32(int32_t value, int32_t minValue,
 
 /*
  * 作用：求 int16_t 绝对值。
- * 使用场景：处理有符号 PWM 命令。
+ * 使用场景：处理有符号速度命令。
  */
 static uint16_t SpeedControl_Abs16(int16_t value)
 {
@@ -59,14 +59,14 @@ static int8_t SpeedControl_Sign16(int16_t value)
 }
 
 /*
- * 作用：把目标命令限制在电机 PWM 范围内。
+ * 作用：把目标命令限制在电机命令范围内。
  * 使用场景：外层给速度命令时先做保护。
  */
 static int16_t SpeedControl_ClampCommand(int16_t command)
 {
     return (int16_t)SpeedControl_Clamp32(command,
-        -(int32_t)CAR_MOTOR_PWM_MAX_COUNTS,
-        (int32_t)CAR_MOTOR_PWM_MAX_COUNTS);
+        -(int32_t)CAR_MOTOR_COMMAND_MAX,
+        (int32_t)CAR_MOTOR_COMMAND_MAX);
 }
 
 /*
@@ -89,13 +89,13 @@ static int16_t SpeedControl_StepToward(int16_t current, int16_t target)
 /*
  * 作用：把上层速度命令换算成一个控制周期内的目标编码器增量。
  * 使用场景：PI 环计算速度误差。
- * 说明：上层命令仍沿用 PWM 风格数值，便于和开环调试兼容。
+ * 说明：命令值最终会映射到底盘 STEP 脉冲节奏。
  */
 static int16_t SpeedControl_CommandToTargetTicks(int16_t command)
 {
     int32_t targetTicks =
         ((int32_t)command * (int32_t)CAR_SPEED_MAX_TARGET_TICKS) /
-        (int32_t)CAR_MOTOR_PWM_MAX_COUNTS;
+        (int32_t)CAR_MOTOR_COMMAND_MAX;
 
     if ((targetTicks == 0) && (command != 0)) {
         targetTicks = (command > 0) ? 1 : -1;
@@ -106,7 +106,7 @@ static int16_t SpeedControl_CommandToTargetTicks(int16_t command)
 
 /*
  * 作用：更新某个轮子的目标命令。
- * 使用场景：Motion_SetSpeed 写入新的左右轮目标。
+ * 使用场景：Motion_SetChassisCommand 写入新的左右轮目标。
  */
 static void SpeedControl_SetWheelTarget(SpeedControlWheel *wheel,
     int16_t command)
@@ -130,7 +130,7 @@ static void SpeedControl_StopWheel(SpeedControlWheel *wheel, int32_t count)
     wheel->lastCount = count;
     wheel->integral = 0;
     wheel->actualTicks = 0;
-    wheel->outputPwm = 0;
+    wheel->outputCommand = 0;
 }
 
 /*
@@ -155,7 +155,7 @@ static int16_t SpeedControl_UpdateWheel(SpeedControlWheel *wheel,
 
     if ((wheel->targetCommand == 0) && (wheel->currentCommand == 0)) {
         wheel->integral = 0;
-        wheel->outputPwm = 0;
+        wheel->outputCommand = 0;
         return 0;
     }
 
@@ -177,18 +177,18 @@ static int16_t SpeedControl_UpdateWheel(SpeedControlWheel *wheel,
     }
 
     output = SpeedControl_Clamp32(output,
-        -(int32_t)CAR_MOTOR_PWM_MAX_COUNTS,
-        (int32_t)CAR_MOTOR_PWM_MAX_COUNTS);
+        -(int32_t)CAR_MOTOR_COMMAND_MAX,
+        (int32_t)CAR_MOTOR_COMMAND_MAX);
 
     if ((wheel->currentCommand != 0) && (output != 0) &&
-        (SpeedControl_Abs16((int16_t)output) < CAR_SPEED_MIN_ACTIVE_DUTY)) {
+        (SpeedControl_Abs16((int16_t)output) < CAR_SPEED_MIN_ACTIVE_COMMAND)) {
         output = (wheel->currentCommand > 0) ?
-            (int32_t)CAR_SPEED_MIN_ACTIVE_DUTY :
-            -(int32_t)CAR_SPEED_MIN_ACTIVE_DUTY;
+            (int32_t)CAR_SPEED_MIN_ACTIVE_COMMAND :
+            -(int32_t)CAR_SPEED_MIN_ACTIVE_COMMAND;
     }
 
-    wheel->outputPwm = (int16_t)output;
-    return wheel->outputPwm;
+    wheel->outputCommand = (int16_t)output;
+    return wheel->outputCommand;
 }
 
 void SpeedControl_Init(void)
@@ -232,7 +232,7 @@ void SpeedControl_Task(void)
     if ((leftOutput == 0) && (rightOutput == 0)) {
         Motor_Stop();
     } else {
-        Motor_SetSpeed(leftOutput, rightOutput);
+        Motor_SetChassisCommand(leftOutput, rightOutput);
     }
 #endif
 }
@@ -249,10 +249,10 @@ int16_t SpeedControl_GetRightActual(void)
 
 int16_t SpeedControl_GetLeftOutput(void)
 {
-    return g_leftWheel.outputPwm;
+    return g_leftWheel.outputCommand;
 }
 
 int16_t SpeedControl_GetRightOutput(void)
 {
-    return g_rightWheel.outputPwm;
+    return g_rightWheel.outputCommand;
 }

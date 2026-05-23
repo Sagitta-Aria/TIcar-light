@@ -9,7 +9,7 @@
  */
 
 /*
- * 四个闭环步进驱动器使用 DIR/STEP 控制，不再使用 TB6612 PWM。
+ * 四个闭环步进驱动器使用 DIR/STEP 控制。
  * 这些宏只描述 MCU 到驱动器控制口的逻辑线，电机相线和驱动电源不接 MCU。
  */
 #define PIN_STEPPER_CHASSIS_LEFT_STEP_PORT   STEPPER_CHASSIS_LEFT_STEP_PORT

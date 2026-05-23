@@ -46,18 +46,18 @@ static MotorStepper g_motors[MOTOR_COUNT] = {
 };
 
 /*
- * 作用：把旧工程 0~4000 的命令量程限制到步进调度可接受范围。
+ * 作用：把上层速度命令限制到步进调度可接受范围。
  * 使用场景：Motor_Set 接收上层速度命令后先做保护。
  */
 static uint16_t Motor_ClampCommand(uint16_t command)
 {
-    return (command > CAR_STEPPER_MAX_COMMAND) ?
-        CAR_STEPPER_MAX_COMMAND : command;
+    return (command > CAR_MOTOR_COMMAND_MAX) ?
+        CAR_MOTOR_COMMAND_MAX : command;
 }
 
 /*
  * 作用：把 int16_t 速度命令转成正向幅值。
- * 使用场景：Motor_SetSpeed 兼容旧的左右轮有符号接口。
+ * 使用场景：Motor_SetChassisCommand 接收左右底盘有符号命令。
  */
 static uint16_t Motor_CommandFromSigned(int16_t speed)
 {
@@ -66,8 +66,8 @@ static uint16_t Motor_CommandFromSigned(int16_t speed)
     if (value < 0) {
         value = -value;
     }
-    if (value > (int32_t)CAR_STEPPER_MAX_COMMAND) {
-        value = (int32_t)CAR_STEPPER_MAX_COMMAND;
+    if (value > (int32_t)CAR_MOTOR_COMMAND_MAX) {
+        value = (int32_t)CAR_MOTOR_COMMAND_MAX;
     }
     return (uint16_t)value;
 }
@@ -109,12 +109,12 @@ static void Motor_PulseStep(MotorStepper *motor)
 /*
  * 作用：刷新单个步进电机的脉冲调度。
  * 使用场景：Motor_Task 对四个电机轮询调用。
- * 说明：上层命令 4000 对应每次任务最多 CAR_STEPPER_MAX_STEPS_PER_TASK 个脉冲。
+ * 说明：最大命令对应每次任务最多 CAR_STEPPER_MAX_STEPS_PER_TASK 个脉冲。
  */
 static void Motor_TaskOne(MotorStepper *motor)
 {
     const uint16_t quantum =
-        (uint16_t)(CAR_STEPPER_MAX_COMMAND / CAR_STEPPER_MAX_STEPS_PER_TASK);
+        (uint16_t)(CAR_MOTOR_COMMAND_MAX / CAR_STEPPER_MAX_STEPS_PER_TASK);
     uint8_t emitted = 0U;
 
     if ((motor->command == 0U) || (quantum == 0U)) {
@@ -165,14 +165,14 @@ void Motor_Set(MotorId motor, MotorDir dir, uint16_t command)
     stepper->command = Motor_ClampCommand(command);
 }
 
-void Motor_SetSpeed(int16_t left, int16_t right)
+void Motor_SetChassisCommand(int16_t leftCommand, int16_t rightCommand)
 {
     Motor_Set(MOTOR_CHASSIS_LEFT,
-        (left >= 0) ? MOTOR_FORWARD : MOTOR_REVERSE,
-        Motor_CommandFromSigned(left));
+        (leftCommand >= 0) ? MOTOR_FORWARD : MOTOR_REVERSE,
+        Motor_CommandFromSigned(leftCommand));
     Motor_Set(MOTOR_CHASSIS_RIGHT,
-        (right >= 0) ? MOTOR_FORWARD : MOTOR_REVERSE,
-        Motor_CommandFromSigned(right));
+        (rightCommand >= 0) ? MOTOR_FORWARD : MOTOR_REVERSE,
+        Motor_CommandFromSigned(rightCommand));
 }
 
 void Motor_SetAllStop(void)

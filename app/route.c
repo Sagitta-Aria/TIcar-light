@@ -6,8 +6,8 @@
 
 /* RouteProfile：路线外环当前速度配置。 */
 typedef struct {
-    uint16_t targetBaseDuty;
-    uint16_t currentBaseDuty;
+    uint16_t targetBaseCommand;
+    uint16_t currentBaseCommand;
     uint16_t targetTurnLimit;
     uint16_t currentTurnLimit;
 } RouteProfile;
@@ -90,28 +90,28 @@ static void Route_SetTargets(RouteStage stage)
 {
     switch (stage) {
     case ROUTE_STAGE_STRAIGHT:
-        g_routeProfile.targetBaseDuty = CAR_ROUTE_CRUISE_DUTY;
+        g_routeProfile.targetBaseCommand = CAR_ROUTE_CRUISE_COMMAND;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_APPROACH_CORNER:
-        g_routeProfile.targetBaseDuty = CAR_ROUTE_APPROACH_DUTY;
+        g_routeProfile.targetBaseCommand = CAR_ROUTE_APPROACH_COMMAND;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_APPROACH_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_TURNING:
-        g_routeProfile.targetBaseDuty = CAR_ROUTE_TURN_DUTY;
+        g_routeProfile.targetBaseCommand = CAR_ROUTE_TURN_COMMAND;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_EXIT_CORNER:
-        g_routeProfile.targetBaseDuty = CAR_ROUTE_EXIT_DUTY;
+        g_routeProfile.targetBaseCommand = CAR_ROUTE_EXIT_COMMAND;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_APPROACH_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_IDLE:
     default:
-        g_routeProfile.targetBaseDuty = CAR_TRACK_BASE_DUTY;
+        g_routeProfile.targetBaseCommand = CAR_TRACK_BASE_COMMAND;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
         break;
     }
@@ -164,9 +164,9 @@ void Route_Init(void)
     g_routeRightBase = Encoder_GetRight();
     g_routeCornerStartYaw = 0;
     g_routeTargetYaw = 0;
-    g_routeProfile.currentBaseDuty = CAR_TRACK_BASE_DUTY;
+    g_routeProfile.currentBaseCommand = CAR_TRACK_BASE_COMMAND;
     g_routeProfile.currentTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
-    g_routeProfile.targetBaseDuty = CAR_TRACK_BASE_DUTY;
+    g_routeProfile.targetBaseCommand = CAR_TRACK_BASE_COMMAND;
     g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
     g_routeStage = ROUTE_STAGE_IDLE;
 }
@@ -183,9 +183,9 @@ void Route_Stop(void)
     g_routeRunning = 0U;
     g_routeStage = ROUTE_STAGE_IDLE;
     g_routeStageTicks = 0U;
-    g_routeProfile.currentBaseDuty = CAR_TRACK_BASE_DUTY;
+    g_routeProfile.currentBaseCommand = CAR_TRACK_BASE_COMMAND;
     g_routeProfile.currentTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
-    g_routeProfile.targetBaseDuty = CAR_TRACK_BASE_DUTY;
+    g_routeProfile.targetBaseCommand = CAR_TRACK_BASE_COMMAND;
     g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
 }
 
@@ -239,8 +239,8 @@ void Route_Task(void)
         break;
     }
 
-    g_routeProfile.currentBaseDuty = Route_StepToward(
-        g_routeProfile.currentBaseDuty, g_routeProfile.targetBaseDuty);
+    g_routeProfile.currentBaseCommand = Route_StepToward(
+        g_routeProfile.currentBaseCommand, g_routeProfile.targetBaseCommand);
     g_routeProfile.currentTurnLimit = Route_StepToward(
         g_routeProfile.currentTurnLimit, g_routeProfile.targetTurnLimit);
 }
@@ -273,9 +273,9 @@ const char *Route_GetStageName(RouteStage stage)
     }
 }
 
-uint16_t Route_GetBaseDuty(void)
+uint16_t Route_GetBaseCommand(void)
 {
-    return g_routeProfile.currentBaseDuty;
+    return g_routeProfile.currentBaseCommand;
 }
 
 uint16_t Route_GetTurnLimit(void)

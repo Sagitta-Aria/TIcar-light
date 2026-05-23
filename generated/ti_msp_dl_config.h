@@ -170,9 +170,9 @@ extern "C" {
 #define KEY_2_IOMUX                                                (IOMUX_PINCM25)
 
 /*
- * Legacy encoder definitions.
+ * Encoder input fallback definitions.
  * 1.1ccs 中 PA12/PA13/PA22 已分配给步进电机，编码器输入默认关闭。
- * 这些宏只保留给旧模块编译使用，不要按这里接编码器。
+ * 这些宏只用于编码器输入关闭时保持模块可编译，不要按这里接编码器。
  */
 #define ENCODER_PORT                                                       GPIOA
 #define ENCODER_LEFT_A_PIN                                        DL_GPIO_PIN_12
@@ -194,7 +194,6 @@ void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
 bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 bool SYSCFG_DL_SYSCTL_isClockOk(void);
-void SYSCFG_DL_PWM_init(void);
 void SYSCFG_DL_OLED_init(void);
 void SYSCFG_DL_LogUart_init(void);
 void SYSCFG_DL_JY61P_init(void);
