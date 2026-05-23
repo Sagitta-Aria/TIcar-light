@@ -36,6 +36,13 @@ extern "C" {
 #define CPUCLK_FREQ                                                     32000000
 #define SYSCFG_DL_ENABLE_HFXT_PLL                                           (0U)
 
+/* STEP 调度定时器：TIMG0 每 50us 进一次中断，不占用任何 STEP 引脚复用。 */
+#define STEPPER_TIMER_INST                                                (TIMG0)
+#define STEPPER_TIMER_INST_IRQHandler                            TIMG0_IRQHandler
+#define STEPPER_TIMER_INST_INT_IRQN                              (TIMG0_INT_IRQn)
+#define STEPPER_TIMER_TICK_HZ                                           (20000U)
+#define STEPPER_TIMER_LOAD_VALUE                                        (1599U)
+
 #define GPIO_HFXT_PORT                                                     GPIOA
 #define GPIO_HFXIN_PIN                                             DL_GPIO_PIN_5
 #define GPIO_HFXIN_IOMUX                                         (IOMUX_PINCM10)
@@ -171,7 +178,7 @@ extern "C" {
 
 /*
  * Encoder input fallback definitions.
- * 1.1ccs 中 PA12/PA13/PA22 已分配给步进电机，编码器输入默认关闭。
+ * ccs1.2 中 PA12/PA13/PA22 已分配给步进电机，编码器输入默认关闭。
  * 这些宏只用于编码器输入关闭时保持模块可编译，不要按这里接编码器。
  */
 #define ENCODER_PORT                                                       GPIOA
@@ -194,6 +201,7 @@ void SYSCFG_DL_GPIO_init(void);
 void SYSCFG_DL_SYSCTL_init(void);
 bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 bool SYSCFG_DL_SYSCTL_isClockOk(void);
+void SYSCFG_DL_STEPPER_TIMER_init(void);
 void SYSCFG_DL_OLED_init(void);
 void SYSCFG_DL_LogUart_init(void);
 void SYSCFG_DL_JY61P_init(void);

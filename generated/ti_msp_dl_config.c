@@ -5,6 +5,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_initPower();
     SYSCFG_DL_GPIO_init();
     SYSCFG_DL_SYSCTL_init();
+    SYSCFG_DL_STEPPER_TIMER_init();
     SYSCFG_DL_OLED_init();
     SYSCFG_DL_LogUart_init();
     SYSCFG_DL_JY61P_init();
@@ -28,6 +29,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
     DL_I2C_reset(OLED_INST);
+    DL_TimerG_reset(STEPPER_TIMER_INST);
     DL_UART_Main_reset(LogUart_INST);
     DL_UART_Main_reset(JY61P_INST);
     DL_UART_Main_reset(Exchange_INST);
@@ -37,6 +39,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_I2C_enablePower(OLED_INST);
+    DL_TimerG_enablePower(STEPPER_TIMER_INST);
     DL_UART_Main_enablePower(LogUart_INST);
     DL_UART_Main_enablePower(JY61P_INST);
     DL_UART_Main_enablePower(Exchange_INST);
@@ -336,6 +339,29 @@ SYSCONFIG_WEAK void SYSCFG_DL_SYSCTL_init(void)
 #else
     g_sysctlClockOk = true;
 #endif
+}
+
+static const DL_TimerG_ClockConfig gSTEPPERTimerClockConfig = {
+    .clockSel = DL_TIMER_CLOCK_BUSCLK,
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
+    .prescale = 0U,
+};
+
+static const DL_TimerG_TimerConfig gSTEPPERTimerConfig = {
+    .period = STEPPER_TIMER_LOAD_VALUE,
+    .timerMode = DL_TIMER_TIMER_MODE_PERIODIC,
+    .startTimer = DL_TIMER_STOP,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_STEPPER_TIMER_init(void)
+{
+    DL_TimerG_setClockConfig(STEPPER_TIMER_INST,
+        (DL_TimerG_ClockConfig *)&gSTEPPERTimerClockConfig);
+    DL_TimerG_initTimerMode(STEPPER_TIMER_INST,
+        (DL_TimerG_TimerConfig *)&gSTEPPERTimerConfig);
+    DL_TimerG_enableInterrupt(STEPPER_TIMER_INST,
+        DL_TIMERG_INTERRUPT_ZERO_EVENT);
+    DL_TimerG_enableClock(STEPPER_TIMER_INST);
 }
 
 static const DL_I2C_ClockConfig gOLEDClockConfig = {

@@ -33,18 +33,21 @@
 
 /*
  * CAR_ENABLE_PA14_DEBUG_LED：是否启用 PA14 状态灯。
- * 1.1ccs 已把灰度 S1 迁到 PA15，PA14 固定作 LED，可用于观察主循环状态。
+ * ccs1.2 已把灰度 S1 迁到 PA15，PA14 固定作 LED，可用于观察主循环状态。
  */
 #define CAR_ENABLE_PA14_DEBUG_LED       (1U)
 
-/* CAR_MOTOR_COMMAND_MAX：步进速度命令最大值，0~4000 会换算成 STEP 脉冲节奏。 */
+/* CAR_MOTOR_COMMAND_MAX：步进速度命令最大值，0~4000 会换算成 STEP 频率。 */
 #define CAR_MOTOR_COMMAND_MAX           (4000U)
 
-/* CAR_STEPPER_MAX_STEPS_PER_TASK：每次 Motor_Task 单个电机最多补发多少个 STEP。 */
-#define CAR_STEPPER_MAX_STEPS_PER_TASK  (4U)
+/*
+ * CAR_STEPPER_COMMAND_TO_HZ_DIVISOR：速度命令到 STEP 频率的换算比例。
+ * 当前 4000 命令约等于 400 step/s，保持上一版低速测试手感。
+ */
+#define CAR_STEPPER_COMMAND_TO_HZ_DIVISOR (10U)
 
-/* CAR_STEPPER_PULSE_CYCLES：STEP 高电平保持时间，32MHz 下约 10us。 */
-#define CAR_STEPPER_PULSE_CYCLES        (320U)
+/* CAR_STEPPER_PULSE_HIGH_TICKS：STEP 高电平保持几个定时器 tick。 */
+#define CAR_STEPPER_PULSE_HIGH_TICKS    (1U)
 
 /* CAR_STEPPER_TEST_COMMAND：方向测试时的低速步进命令。 */
 #define CAR_STEPPER_TEST_COMMAND        (1200U)

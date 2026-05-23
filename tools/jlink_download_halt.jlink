@@ -3,6 +3,6 @@ if SWD
 speed 1000
 connect
 halt
-loadfile D:\Ti\light-car1.0ccs\Debug\codex-build\light-car1.1ccs.out
+loadfile D:\Ti\light-car1.0ccs\Debug\codex-build\light-car-ccs1.2.out
 halt
 qc

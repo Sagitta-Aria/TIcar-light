@@ -1,8 +1,8 @@
-# light-car1.1ccs
+# light-car ccs1.2
 
 TI CCS / TI Arm Clang version of the MSPM0G3507 laser tracking car firmware.
 
-当前最新开发分支：`1.1ccs`
+当前最新开发分支：`ccs1.2`
 最后整理：2026-05-23
 
 当前仓库路径仍是：
@@ -11,7 +11,7 @@ TI CCS / TI Arm Clang version of the MSPM0G3507 laser tracking car firmware.
 D:\Ti\light-car1.0ccs
 ```
 
-但 GitHub 版本线已经升级为 `1.1ccs`。这一版面向地猛星 MSPM0G3507 最小系统板，当前电机控制采用四个闭环步进驱动器的 `STEP/DIR` 方案。
+但 GitHub 版本线已经升级为 `ccs1.2`。这一版面向地猛星 MSPM0G3507 最小系统板，当前电机控制采用四个闭环步进驱动器的 `STEP/DIR` 方案。
 
 ## 当前结构
 
@@ -32,7 +32,7 @@ D:\Ti\light-car1.0ccs
 - Type-C CH340 日志走 `UART0 PA10/PA11`，正常 115200。
 - JY61P 使用 `UART1 PB6/PB7`；视觉/Exchange 使用 `UART3 PB2/PB3`；JQ8400 语音模块暂停。
 - 按键 PB9/PB8 已加软件消抖；OLED 菜单只用下半区，选中项固定在中间行。
-- 四个闭环步进电机已切到 STEP/DIR 框架，适合低速接线和方向测试。
+- 四个闭环步进电机已切到 STEP/DIR 框架，STEP 脉冲由 TIMG0 定时器中断调度。
 
 ## 日志开关
 
@@ -59,7 +59,7 @@ D:\Ti\light-car1.0ccs
 构建只编译链接，不下载、不擦除芯片。成功输出：
 
 ```text
-D:\Ti\light-car1.0ccs\Debug\codex-build\light-car1.1ccs.out
+D:\Ti\light-car1.0ccs\Debug\codex-build\light-car-ccs1.2.out
 ```
 
 ## 恢复安全模式开关
@@ -106,7 +106,7 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 
 该脚本 `loadfile` 后会停住 CPU，不会下载完立刻跑飞固件。构建脚本本身不会触碰硬件。
 
-## 1.1ccs 安全策略
+## ccs1.2 安全策略
 
 - 默认使用内部 `SYSOSC 32MHz`，不启用外部 HFXT / SYSPLL。
 - OLED I2C0 使用 PA0/PA1，软件等待都有超时。
@@ -115,6 +115,7 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 - UART0 使用 PA10/PA11 走 Type-C CH340 日志，PA18 拉低时仍可进入 BSL。
 - JY61P 使用 UART1 PB6/PB7；JQ8400 暂停接入，不初始化、不占串口。
 - Link/Exchange 使用 UART3 PB2/PB3，留给视觉模块。
+- STEP 定时器使用 TIMG0 50us 周期中断，不改变 PA7/PA8/PA12/PA13 接线。
 - PA19/PA20 是 SWD 下载脚，工程不复用。
 - PB14/PB15/PB16/PB17 是板载 SPI Flash，工程不复用。
 
@@ -123,9 +124,10 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 - `doc/PIN_ASSIGNMENT_2026-05-23.md`
 - `doc/PROJECT_STATUS_2026-05-23.md`
 - `doc/ROADMAP_2026-05-23.md`
-- `doc/CODE_STYLE_1_1CCS_2026-05-23.md`
+- `doc/CODE_STYLE_CCS1_2_2026-05-23.md`
+- `doc/TIMER_STEPPER_CCS1_2_2026-05-23.md`
 - `doc/XDS110_RECOVERY_DEBUG_LOG_2026-05-23.md`
 
 ## GitHub 分支说明
 
-`1.1ccs` 是当前最新 CCS 版本线；`keil1.0` 保留 Keil 版本线；`main` 若仍指向早期内容，打开仓库首页会显得版本很老。GitHub 仓库默认分支建议改成 `1.1ccs`。
+`ccs1.2` 是当前最新 CCS 版本线；`keil1.0` 保留 Keil 版本线；`main` 若仍指向早期内容，打开仓库首页会显得版本很老。GitHub 仓库默认分支建议改成 `ccs1.2`。

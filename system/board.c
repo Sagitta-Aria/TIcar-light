@@ -231,7 +231,7 @@ static void Board_RecoveryUartSendAll(const char *text)
 /*
  * 作用：初始化板载 LED 调试灯。
  * 使用场景：临时把按键/状态反馈映射到灯上，便于不看 OLED 也能确认事件。
- * 说明：1.1ccs 已把灰度 S1 迁走，PA14 固定作为状态灯。
+ * 说明：ccs1.2 已把灰度 S1 迁走，PA14 固定作为状态灯。
  */
 void Board_DebugLedInit(void)
 {
@@ -380,7 +380,10 @@ void Board_Init(void)
 
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();
-    Board_ShowBootStep("OK ADC", "RUN Motor", "WAIT Gray Enc",
+    Board_ShowBootStep("OK ADC", "RUN Stepper TIM", "WAIT Motor",
+        "WAIT Gray");
+    SYSCFG_DL_STEPPER_TIMER_init();
+    Board_ShowBootStep("OK Stepper TIM", "RUN Motor", "WAIT Gray Enc",
         "WAIT Key UART");
     Motor_Init();
     Board_ShowBootStep("OK Motor", "RUN Gray", "WAIT Key",

@@ -1,8 +1,8 @@
-# light-car1.1ccs 工程状态
+# light-car ccs1.2 工程状态
 
 最后更新：2026-05-23
 
-本文记录 CCS 版 `1.1ccs` 的当前结构、启动现象和硬件安全策略。
+本文记录 CCS 版 `ccs1.2` 的当前结构、启动现象和硬件安全策略。
 
 ## 目录分层
 
@@ -46,7 +46,7 @@
 - Type-C CH340 日志串口框架已接入 `UART0 PA10/PA11`，调试日志不再占用视觉串口；`CAR_ENABLE_LOG_UART` 是全局日志开关。
 - PB9/PB8 按键已加约 40ms 软件消抖，菜单切换不再依赖临时 PA14 翻转调试。
 - OLED 菜单和启动探针页避开顶部黄色区域；滚动菜单当前项固定在中间行。
-- 四个闭环步进电机已改成 `STEP/DIR` 控制框架，主循环每轮有限步进输出，不长时间阻塞。
+- 四个闭环步进电机已改成 `STEP/DIR` 控制框架，STEP 输出迁到 TIMG0 50us 定时器中断，不再由主循环补发脉冲。
 
 ## 开机 OLED 探针
 
@@ -56,6 +56,7 @@ OLED 上电会在下半区显示启动阶段，用来定位初始化卡点；顶
 - `RUN Stepper`
 - `RUN UART`
 - `RUN Gray ADC`
+- `RUN Stepper TIM`
 - `RUN Motor`
 - `RUN Gray`
 - `RUN Key`
@@ -93,7 +94,7 @@ OLED 上电会在下半区显示启动阶段，用来定位初始化卡点；顶
 | 云台 1 | PA12 | PA22 |
 | 云台 2 | PA13 | PB24 |
 
-当前不接 EN。`Motor_Task()` 每轮最多给单个电机补发有限个 STEP 脉冲，避免长时间阻塞主循环。后续如果要高速度/高同步性，应把 STEP 产生迁到定时器中断或硬件定时器。
+当前不接 EN。`hardware/motor.c` 只负责速度命令和 DIR 方向，`hardware/stepper_pulse.c` 使用 TIMG0 定时器中断输出四路 STEP。后续如果要极高速度/硬件全自动脉冲，再评估定时器 PWM/CCP 输出。
 
 ## 灰度与编码器
 
@@ -154,7 +155,7 @@ PA12/PA13/PA22 已用于步进电机，不再接原编码器接口。
 输出：
 
 ```text
-D:\Ti\light-car1.0ccs\Debug\codex-build\light-car1.1ccs.out
+D:\Ti\light-car1.0ccs\Debug\codex-build\light-car-ccs1.2.out
 ```
 
 构建不会下载、擦除或 mass erase。
@@ -169,7 +170,7 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 
 ## 已知限制
 
-- 当前 STEP 由主循环软件调度，适合低速验证接线和方向，不适合最终高速同步控制。
+- 当前 STEP 已由 TIMG0 中断调度，速度上限仍按保守低速参数配置；高速参数需要实车逐步调。
 - 步进驱动器反馈 UART/告警输入还没有接入业务闭环。
 - JQ8400 语音模块暂停接入；Link/Exchange 框架保留，但视觉业务还没展开。
 - JY61P 只完成 UART 帧解析和 yaw 缓存，姿态闭环还没有真正参与完整路线控制。

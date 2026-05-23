@@ -4,6 +4,7 @@
 #include "encoder.h"
 #include "jy61p.h"
 #include "key.h"
+#include "stepper_pulse.h"
 #include "ti_msp_dl_config.h"
 
 /* UART 兜底处理只清理有限数量，避免异常 RX 噪声导致中断里死循环。 */
@@ -82,4 +83,9 @@ void UART1_IRQHandler(void)
 void UART3_IRQHandler(void)
 {
     Interrupt_ClearUART(Exchange_INST);
+}
+
+void TIMG0_IRQHandler(void)
+{
+    StepperPulse_HandleTimerInterrupt();
 }

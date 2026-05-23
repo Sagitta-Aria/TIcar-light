@@ -2,46 +2,35 @@
 
 #include "board_config.h"
 #include "pin_map.h"
+#include "stepper_pulse.h"
 
 typedef struct {
-    GPIO_Regs *stepPort;
-    uint32_t stepPin;
     GPIO_Regs *dirPort;
     uint32_t dirPin;
     uint16_t command;
-    uint16_t accumulator;
     int8_t directionSign;
-    int32_t stepCount;
 } MotorStepper;
 
 static MotorStepper g_motors[MOTOR_COUNT] = {
     {
-        PIN_STEPPER_CHASSIS_LEFT_STEP_PORT,
-        PIN_STEPPER_CHASSIS_LEFT_STEP,
         PIN_STEPPER_CHASSIS_LEFT_DIR_PORT,
         PIN_STEPPER_CHASSIS_LEFT_DIR,
-        0U, 0U, 1, 0
+        0U, 1
     },
     {
-        PIN_STEPPER_CHASSIS_RIGHT_STEP_PORT,
-        PIN_STEPPER_CHASSIS_RIGHT_STEP,
         PIN_STEPPER_CHASSIS_RIGHT_DIR_PORT,
         PIN_STEPPER_CHASSIS_RIGHT_DIR,
-        0U, 0U, 1, 0
+        0U, 1
     },
     {
-        PIN_STEPPER_GIMBAL_1_STEP_PORT,
-        PIN_STEPPER_GIMBAL_1_STEP,
         PIN_STEPPER_GIMBAL_1_DIR_PORT,
         PIN_STEPPER_GIMBAL_1_DIR,
-        0U, 0U, 1, 0
+        0U, 1
     },
     {
-        PIN_STEPPER_GIMBAL_2_STEP_PORT,
-        PIN_STEPPER_GIMBAL_2_STEP,
         PIN_STEPPER_GIMBAL_2_DIR_PORT,
         PIN_STEPPER_GIMBAL_2_DIR,
-        0U, 0U, 1, 0
+        0U, 1
     }
 };
 
@@ -93,61 +82,21 @@ static void Motor_ApplyDirection(MotorStepper *motor, MotorDir dir)
     }
 }
 
-/*
- * 作用：发出一个有界 STEP 脉冲。
- * 使用场景：Motor_Task 根据调度累加器补发脉冲。
- * 说明：这里只阻塞约 10us，且每轮有最大脉冲数限制，不会形成不可控死等。
- */
-static void Motor_PulseStep(MotorStepper *motor)
-{
-    DL_GPIO_setPins(motor->stepPort, motor->stepPin);
-    delay_cycles(CAR_STEPPER_PULSE_CYCLES);
-    DL_GPIO_clearPins(motor->stepPort, motor->stepPin);
-    motor->stepCount += (int32_t)motor->directionSign;
-}
-
-/*
- * 作用：刷新单个步进电机的脉冲调度。
- * 使用场景：Motor_Task 对四个电机轮询调用。
- * 说明：最大命令对应每次任务最多 CAR_STEPPER_MAX_STEPS_PER_TASK 个脉冲。
- */
-static void Motor_TaskOne(MotorStepper *motor)
-{
-    const uint16_t quantum =
-        (uint16_t)(CAR_MOTOR_COMMAND_MAX / CAR_STEPPER_MAX_STEPS_PER_TASK);
-    uint8_t emitted = 0U;
-
-    if ((motor->command == 0U) || (quantum == 0U)) {
-        motor->accumulator = 0U;
-        return;
-    }
-
-    motor->accumulator = (uint16_t)(motor->accumulator + motor->command);
-    while ((motor->accumulator >= quantum) &&
-        (emitted < CAR_STEPPER_MAX_STEPS_PER_TASK)) {
-        motor->accumulator = (uint16_t)(motor->accumulator - quantum);
-        Motor_PulseStep(motor);
-        ++emitted;
-    }
-}
-
 void Motor_Init(void)
 {
     Motor_SetAllStop();
+    StepperPulse_Init();
 }
 
 void Motor_Task(void)
 {
-    uint32_t i;
-
-    for (i = 0U; i < (uint32_t)MOTOR_COUNT; ++i) {
-        Motor_TaskOne(&g_motors[i]);
-    }
+    /* ccs1.2 起 STEP 由 TIMG0 中断输出，主循环保留该接口便于后续扩展。 */
 }
 
 void Motor_Set(MotorId motor, MotorDir dir, uint16_t command)
 {
     MotorStepper *stepper;
+    int8_t nextDirectionSign;
 
     if (!Motor_IsValid(motor)) {
         return;
@@ -156,13 +105,17 @@ void Motor_Set(MotorId motor, MotorDir dir, uint16_t command)
     stepper = &g_motors[motor];
     if ((dir == MOTOR_COAST) || (dir == MOTOR_BRAKE) || (command == 0U)) {
         stepper->command = 0U;
-        stepper->accumulator = 0U;
-        DL_GPIO_clearPins(stepper->stepPort, stepper->stepPin);
+        StepperPulse_SetTarget(motor, stepper->directionSign, 0U);
         return;
     }
 
+    nextDirectionSign = (dir == MOTOR_REVERSE) ? -1 : 1;
+    if (nextDirectionSign != stepper->directionSign) {
+        StepperPulse_SetTarget(motor, stepper->directionSign, 0U);
+    }
     Motor_ApplyDirection(stepper, dir);
     stepper->command = Motor_ClampCommand(command);
+    StepperPulse_SetTarget(motor, stepper->directionSign, stepper->command);
 }
 
 void Motor_SetChassisCommand(int16_t leftCommand, int16_t rightCommand)
@@ -181,11 +134,10 @@ void Motor_SetAllStop(void)
 
     for (i = 0U; i < (uint32_t)MOTOR_COUNT; ++i) {
         g_motors[i].command = 0U;
-        g_motors[i].accumulator = 0U;
         g_motors[i].directionSign = 1;
-        DL_GPIO_clearPins(g_motors[i].stepPort, g_motors[i].stepPin);
         DL_GPIO_clearPins(g_motors[i].dirPort, g_motors[i].dirPin);
     }
+    StepperPulse_StopAll();
 }
 
 void Motor_Stop(void)
@@ -210,5 +162,5 @@ int32_t Motor_GetStepCount(MotorId motor)
     if (!Motor_IsValid(motor)) {
         return 0;
     }
-    return g_motors[motor].stepCount;
+    return StepperPulse_GetStepCount(motor);
 }

@@ -103,7 +103,7 @@ void App_Init(void)
     LOG_LINE("app: motor test init ok");
     Menu_Init();
     LOG_LINE("app: menu init ok");
-    LOG_LINE("light-car1.1ccs init ok");
+    LOG_LINE("light-car ccs1.2 init ok");
     StateMachine_Init();
 
     Board_ShowBootProgress("I2C OK", "UART OK", "ADC OK", "APP OK", "");
@@ -122,7 +122,7 @@ void App_Task(void)
 
     /*
      * 电机方向测试需要直接输出 STEP，不能被速度闭环覆盖。
-     * 1.1ccs 默认关闭编码器速度闭环，正式循迹仍走统一的左右轮命令接口。
+     * ccs1.2 默认关闭编码器速度闭环，正式循迹仍走统一的左右轮命令接口。
      */
     if (StateMachine_GetState() != CAR_STATE_MOTOR_TEST) {
         SpeedControl_Task();

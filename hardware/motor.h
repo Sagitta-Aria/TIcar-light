@@ -28,8 +28,9 @@ typedef enum {
 void Motor_Init(void);
 
 /*
- * Motor_Task：根据当前命令补发 STEP 脉冲。
- * 使用场景：App_Task 周期调用，保持步进运动持续进行。
+ * Motor_Task：电机主循环任务。
+ * 使用场景：App_Task 周期调用。
+ * 说明：ccs1.2 起 STEP 脉冲由 TIMG0 中断调度，本函数暂时不阻塞、不发脉冲。
  */
 void Motor_Task(void);
 
