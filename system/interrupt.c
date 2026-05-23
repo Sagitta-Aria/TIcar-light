@@ -1,7 +1,5 @@
 #include "interrupt.h"
 
-#include "board_config.h"
-#include "encoder.h"
 #include "jy61p.h"
 #include "key.h"
 #include "stepper_pulse.h"
@@ -22,9 +20,6 @@ void Interrupt_Init(void)
  */
 static void Interrupt_HandleGroup1(void)
 {
-#if CAR_ENABLE_ENCODER_INPUTS
-    Encoder_HandleGPIOInterrupt();
-#endif
     Key_HandleGPIOInterrupt();
 }
 
@@ -60,9 +55,6 @@ void GROUP1_IRQHandler(void)
 
 void GPIOA_IRQHandler(void)
 {
-#if CAR_ENABLE_ENCODER_INPUTS
-    Encoder_HandleGPIOInterrupt();
-#endif
 }
 
 void GPIOB_IRQHandler(void)

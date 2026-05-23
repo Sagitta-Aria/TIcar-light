@@ -164,10 +164,41 @@ void StepperPulse_StopAll(void)
 
 int32_t StepperPulse_GetStepCount(MotorId motor)
 {
+    int32_t count;
+    uint32_t primask;
+
     if (!StepperPulse_IsValid(motor)) {
         return 0;
     }
-    return g_stepperPulse[(uint32_t)motor].stepCount;
+
+    primask = StepperPulse_EnterCritical();
+    count = g_stepperPulse[(uint32_t)motor].stepCount;
+    StepperPulse_ExitCritical(primask);
+    return count;
+}
+
+void StepperPulse_ResetStepCount(MotorId motor)
+{
+    uint32_t primask;
+
+    if (!StepperPulse_IsValid(motor)) {
+        return;
+    }
+
+    primask = StepperPulse_EnterCritical();
+    g_stepperPulse[(uint32_t)motor].stepCount = 0;
+    StepperPulse_ExitCritical(primask);
+}
+
+void StepperPulse_ResetAllStepCounts(void)
+{
+    uint32_t i;
+    uint32_t primask = StepperPulse_EnterCritical();
+
+    for (i = 0U; i < (uint32_t)MOTOR_COUNT; ++i) {
+        g_stepperPulse[i].stepCount = 0;
+    }
+    StepperPulse_ExitCritical(primask);
 }
 
 void StepperPulse_HandleTimerInterrupt(void)

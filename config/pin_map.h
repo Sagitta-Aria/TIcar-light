@@ -32,12 +32,6 @@
 #define PIN_STEPPER_GIMBAL_2_DIR_PORT        STEPPER_GIMBAL_2_DIR_PORT
 #define PIN_STEPPER_GIMBAL_2_DIR             STEPPER_GIMBAL_2_DIR_PIN
 
-#define PIN_ENCODER_PORT                ENCODER_PORT
-#define PIN_ENCODER_LEFT_A              ENCODER_LEFT_A_PIN
-#define PIN_ENCODER_LEFT_B              ENCODER_LEFT_B_PIN
-#define PIN_ENCODER_RIGHT_A             ENCODER_RIGHT_A_PIN
-#define PIN_ENCODER_RIGHT_B             ENCODER_RIGHT_B_PIN
-
 #define PIN_KEY_PORT                    KEY_PORT
 #define PIN_KEY_1                       KEY_1_PIN
 #define PIN_KEY_2                       KEY_2_PIN

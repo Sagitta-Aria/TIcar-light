@@ -5,7 +5,7 @@
 
 static TrackingExceptionState g_trackingExceptionState;
 static uint16_t g_lostTicks;
-static uint16_t g_adcFaultTicks;
+static uint16_t g_sensorFaultTicks;
 static int8_t g_lastLineSide;
 static int16_t g_lastLeftCommand;
 static int16_t g_lastRightCommand;
@@ -24,8 +24,8 @@ static const char *TrackingException_StateText(TrackingExceptionState state)
         return "search_left";
     case TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT:
         return "search_right";
-    case TRACKING_EXCEPTION_STATE_ADC_FAULT:
-        return "adc_fault";
+    case TRACKING_EXCEPTION_STATE_SENSOR_FAULT:
+        return "sensor_fault";
     case TRACKING_EXCEPTION_STATE_LOST_STOP:
         return "lost_stop";
     default:
@@ -158,18 +158,18 @@ static void TrackingException_BuildSearchCommand(uint8_t searchLeft,
 }
 
 /*
- * 作用：处理 ADC 采样失败。
+ * 作用：处理灰度采样失败。
  * 使用场景：Gray_Update 返回失败时。
  */
-static TrackingExceptionAction TrackingException_HandleAdcFault(
+static TrackingExceptionAction TrackingException_HandleSensorFault(
     int16_t *leftCommand, int16_t *rightCommand)
 {
-    if (g_adcFaultTicks < 0xFFFFU) {
-        ++g_adcFaultTicks;
+    if (g_sensorFaultTicks < 0xFFFFU) {
+        ++g_sensorFaultTicks;
     }
 
-    TrackingException_SetState(TRACKING_EXCEPTION_STATE_ADC_FAULT);
-    if ((g_adcFaultTicks < CAR_TRACK_ADC_FAULT_STOP_TICKS) &&
+    TrackingException_SetState(TRACKING_EXCEPTION_STATE_SENSOR_FAULT);
+    if ((g_sensorFaultTicks < CAR_TRACK_SENSOR_FAULT_STOP_TICKS) &&
         g_hasLastCommand) {
         *leftCommand = g_lastLeftCommand;
         *rightCommand = g_lastRightCommand;
@@ -237,7 +237,7 @@ void TrackingException_Reset(void)
 {
     g_trackingExceptionState = TRACKING_EXCEPTION_STATE_NORMAL;
     g_lostTicks = 0U;
-    g_adcFaultTicks = 0U;
+    g_sensorFaultTicks = 0U;
     g_lastLineSide = 0;
     g_lastLeftCommand = 0;
     g_lastRightCommand = 0;
@@ -255,10 +255,10 @@ TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
     }
 
     if (!sampleOk) {
-        return TrackingException_HandleAdcFault(leftCommand, rightCommand);
+        return TrackingException_HandleSensorFault(leftCommand, rightCommand);
     }
 
-    g_adcFaultTicks = 0U;
+    g_sensorFaultTicks = 0U;
     activeCount = TrackingException_CountActiveSensors(digitalMask);
 
     if (activeCount == 0U) {
@@ -300,7 +300,7 @@ uint16_t TrackingException_GetLostTicks(void)
     return g_lostTicks;
 }
 
-uint16_t TrackingException_GetAdcFaultTicks(void)
+uint16_t TrackingException_GetSensorFaultTicks(void)
 {
-    return g_adcFaultTicks;
+    return g_sensorFaultTicks;
 }

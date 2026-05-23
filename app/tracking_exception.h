@@ -10,7 +10,7 @@ typedef enum {
     TRACKING_EXCEPTION_STATE_LOST_HOLD,
     TRACKING_EXCEPTION_STATE_LOST_SEARCH_LEFT,
     TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT,
-    TRACKING_EXCEPTION_STATE_ADC_FAULT,
+    TRACKING_EXCEPTION_STATE_SENSOR_FAULT,
     TRACKING_EXCEPTION_STATE_LOST_STOP
 } TrackingExceptionState;
 
@@ -43,7 +43,7 @@ const char *TrackingException_GetStateName(TrackingExceptionState state);
 /* TrackingException_GetLostTicks：读取连续丢线的循环次数。 */
 uint16_t TrackingException_GetLostTicks(void);
 
-/* TrackingException_GetAdcFaultTicks：读取连续 ADC 失败次数。 */
-uint16_t TrackingException_GetAdcFaultTicks(void);
+/* TrackingException_GetSensorFaultTicks：读取连续灰度采样失败次数。 */
+uint16_t TrackingException_GetSensorFaultTicks(void);
 
 #endif

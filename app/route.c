@@ -1,9 +1,9 @@
 #include "route.h"
 
 #include "board_config.h"
-#include "encoder.h"
 #include "jy61p.h"
 #include "log_uart.h"
+#include "motor.h"
 
 /* RouteProfile：路线外环当前速度配置。 */
 typedef struct {
@@ -18,8 +18,8 @@ static RouteProfile g_routeProfile;
 static uint8_t g_routeRunning;
 static uint8_t g_routeCornerIndex;
 static uint16_t g_routeStageTicks;
-static int32_t g_routeLeftBase;
-static int32_t g_routeRightBase;
+static int32_t g_routeLeftStepBase;
+static int32_t g_routeRightStepBase;
 static int16_t g_routeCornerStartYaw;
 static int16_t g_routeTargetYaw;
 
@@ -42,8 +42,8 @@ static const char *Route_StageText(RouteStage stage)
 }
 
 /*
- * 作用：把 int32_t 转成绝对值，避免编码器反向计数影响距离判断。
- * 使用场景：路线层计算相对编码器位移。
+ * 作用：把 int32_t 转成绝对值，避免反向 STEP 计数影响距离判断。
+ * 使用场景：路线层计算相对 STEP 位移。
  */
 static uint32_t Route_Abs32(int32_t value)
 {
@@ -157,23 +157,26 @@ static void Route_EnterStage(RouteStage stage)
         }
         g_routeTargetYaw = Route_NormalizeAngle(g_routeTargetYaw);
     } else if (stage == ROUTE_STAGE_STRAIGHT) {
-        g_routeLeftBase = Encoder_GetLeft();
-        g_routeRightBase = Encoder_GetRight();
+        g_routeLeftStepBase = Motor_GetStepCount(MOTOR_CHASSIS_LEFT);
+        g_routeRightStepBase = Motor_GetStepCount(MOTOR_CHASSIS_RIGHT);
     }
 }
 
 /*
- * 作用：计算当前边已经走了多少编码器相对计数。
+ * 作用：计算当前边已经输出了多少 STEP。
  * 使用场景：判断是否接近直角和是否已经到达直角。
+ * 说明：这里统计的是 MCU 实际发给闭环步进驱动器的脉冲数。
  */
-static uint32_t Route_GetTravelTicks(void)
+static uint32_t Route_GetTravelSteps(void)
 {
-    int32_t leftDelta = Encoder_GetLeft() - g_routeLeftBase;
-    int32_t rightDelta = Encoder_GetRight() - g_routeRightBase;
-    uint32_t leftTicks = Route_Abs32(leftDelta);
-    uint32_t rightTicks = Route_Abs32(rightDelta);
+    int32_t leftDelta =
+        Motor_GetStepCount(MOTOR_CHASSIS_LEFT) - g_routeLeftStepBase;
+    int32_t rightDelta =
+        Motor_GetStepCount(MOTOR_CHASSIS_RIGHT) - g_routeRightStepBase;
+    uint32_t leftSteps = Route_Abs32(leftDelta);
+    uint32_t rightSteps = Route_Abs32(rightDelta);
 
-    return (leftTicks + rightTicks) / 2U;
+    return (leftSteps + rightSteps) / 2U;
 }
 
 void Route_Init(void)
@@ -181,8 +184,8 @@ void Route_Init(void)
     g_routeRunning = 0U;
     g_routeCornerIndex = 0U;
     g_routeStageTicks = 0U;
-    g_routeLeftBase = Encoder_GetLeft();
-    g_routeRightBase = Encoder_GetRight();
+    g_routeLeftStepBase = Motor_GetStepCount(MOTOR_CHASSIS_LEFT);
+    g_routeRightStepBase = Motor_GetStepCount(MOTOR_CHASSIS_RIGHT);
     g_routeCornerStartYaw = 0;
     g_routeTargetYaw = 0;
     g_routeProfile.currentBaseCommand = CAR_TRACK_BASE_COMMAND;
@@ -216,7 +219,7 @@ void Route_Stop(void)
 
 void Route_Task(void)
 {
-    uint32_t travelTicks;
+    uint32_t travelSteps;
     int16_t yawError;
 
     if (!g_routeRunning) {
@@ -224,17 +227,17 @@ void Route_Task(void)
     }
 
     ++g_routeStageTicks;
-    travelTicks = Route_GetTravelTicks();
+    travelSteps = Route_GetTravelSteps();
 
     switch (g_routeStage) {
     case ROUTE_STAGE_STRAIGHT:
-        if (travelTicks >= CAR_ROUTE_APPROACH_TICKS) {
+        if (travelSteps >= CAR_ROUTE_APPROACH_STEPS) {
             Route_EnterStage(ROUTE_STAGE_APPROACH_CORNER);
         }
         break;
 
     case ROUTE_STAGE_APPROACH_CORNER:
-        if (travelTicks >= CAR_ROUTE_EDGE_TICKS) {
+        if (travelSteps >= CAR_ROUTE_EDGE_STEPS) {
             Route_EnterStage(ROUTE_STAGE_TURNING);
         }
         break;

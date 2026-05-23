@@ -2,7 +2,6 @@
 
 #include "gray.h"
 #include "log_uart.h"
-#include "motor_test.h"
 #include "motion.h"
 #include "route.h"
 #include "tracking.h"
@@ -28,8 +27,6 @@ static const char *StateMachine_GetEventName(CarEvent event)
         return "gray_calibration_sample";
     case CAR_EVENT_GRAY_CALIBRATION_APPLY:
         return "gray_calibration_apply";
-    case CAR_EVENT_MOTOR_TEST_NEXT:
-        return "motor_test_next";
     case CAR_EVENT_TRACKING_TEST_START:
         return "tracking_test_start";
     case CAR_EVENT_MISSION_1_START:
@@ -80,7 +77,6 @@ static void StateMachine_StopMotionModules(void)
 {
     Tracking_SetEnabled(0U);
     Route_Stop();
-    MotorTest_Stop();
     Motion_Stop();
 }
 
@@ -123,7 +119,6 @@ static void StateMachine_EnterGrayCalibration(void)
 static void StateMachine_EnterTracking(void)
 {
     Route_Start();
-    MotorTest_Stop();
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
     LOG_LINE("state: tracking");
@@ -131,27 +126,14 @@ static void StateMachine_EnterTracking(void)
 
 /*
  * 作用：进入单纯循迹测试状态。
- * 使用场景：测试菜单里的 TrackOnly，只跑灰度循迹，不跑路线外环。
+ * 使用场景：菜单里的 Track Test，只跑灰度循迹，不跑路线外环。
  */
 static void StateMachine_EnterTrackingTest(void)
 {
     Route_Stop();
-    MotorTest_Stop();
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
     LOG_LINE("state: tracking test");
-}
-
-/*
- * 作用：进入电机方向确认状态。
- * 使用场景：测试菜单里的 MotorDir。
- */
-static void StateMachine_EnterMotorTest(void)
-{
-    Tracking_SetEnabled(0U);
-    Route_Stop();
-    MotorTest_Start();
-    LOG_LINE("state: motor test");
 }
 
 /*
@@ -188,7 +170,7 @@ static void StateMachine_EnterStop(void)
 
 /*
  * 作用：进入错误状态。
- * 使用场景：ADC 连续异常、后续硬件故障等。
+ * 使用场景：灰度采样连续异常、后续硬件故障等。
  */
 static void StateMachine_EnterError(void)
 {
@@ -223,9 +205,6 @@ static void StateMachine_Enter(CarState nextState)
         break;
     case CAR_STATE_TRACKING_TEST:
         StateMachine_EnterTrackingTest();
-        break;
-    case CAR_STATE_MOTOR_TEST:
-        StateMachine_EnterMotorTest();
         break;
     case CAR_STATE_MISSION:
         StateMachine_EnterMission();
@@ -267,7 +246,7 @@ static void StateMachine_CheckTrackingException(void)
 {
     TrackingExceptionState exceptionState = TrackingException_GetState();
 
-    if (exceptionState == TRACKING_EXCEPTION_STATE_ADC_FAULT) {
+    if (exceptionState == TRACKING_EXCEPTION_STATE_SENSOR_FAULT) {
         StateMachine_Enter(CAR_STATE_ERROR);
     } else if (exceptionState == TRACKING_EXCEPTION_STATE_LOST_STOP) {
         StateMachine_Enter(CAR_STATE_STOP);
@@ -285,11 +264,6 @@ static void StateMachine_TrackingTestTask(void)
 {
     Tracking_Task();
     StateMachine_CheckTrackingException();
-}
-
-static void StateMachine_MotorTestTask(void)
-{
-    MotorTest_Task();
 }
 
 static void StateMachine_MissionTask(void)
@@ -351,8 +325,6 @@ void StateMachine_Dispatch(CarEvent event)
             StateMachine_Enter(CAR_STATE_TRACKING);
         } else if (event == CAR_EVENT_GRAY_CALIBRATION_START) {
             StateMachine_Enter(CAR_STATE_GRAY_CALIBRATION);
-        } else if (event == CAR_EVENT_MOTOR_TEST_NEXT) {
-            StateMachine_Enter(CAR_STATE_MOTOR_TEST);
         } else if (event == CAR_EVENT_TRACKING_TEST_START) {
             StateMachine_Enter(CAR_STATE_TRACKING_TEST);
         } else if (event == CAR_EVENT_MENU) {
@@ -378,16 +350,6 @@ void StateMachine_Dispatch(CarEvent event)
             StateMachine_Enter(CAR_STATE_MENU);
         } else if (event == CAR_EVENT_TRACKING_DONE) {
             StateMachine_Enter(CAR_STATE_FINISHED);
-        }
-        break;
-
-    case CAR_STATE_MOTOR_TEST:
-        if (event == CAR_EVENT_MOTOR_TEST_NEXT) {
-            if (!MotorTest_Next()) {
-                StateMachine_Enter(CAR_STATE_MENU);
-            }
-        } else if (event == CAR_EVENT_BACK) {
-            StateMachine_Enter(CAR_STATE_MENU);
         }
         break;
 
@@ -434,9 +396,6 @@ void StateMachine_Task(void)
     case CAR_STATE_TRACKING_TEST:
         StateMachine_TrackingTestTask();
         break;
-    case CAR_STATE_MOTOR_TEST:
-        StateMachine_MotorTestTask();
-        break;
     case CAR_STATE_MISSION:
         StateMachine_MissionTask();
         break;
@@ -475,8 +434,6 @@ const char *StateMachine_GetStateName(CarState state)
         return "tracking";
     case CAR_STATE_TRACKING_TEST:
         return "tracking_test";
-    case CAR_STATE_MOTOR_TEST:
-        return "motor_test";
     case CAR_STATE_MISSION:
         return "mission";
     case CAR_STATE_FINISHED:

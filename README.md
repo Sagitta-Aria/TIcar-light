@@ -15,7 +15,7 @@ D:\Ti\light-car1.0ccs
 
 ## 当前结构
 
-- `app/`：菜单、状态机、循迹、速度命令、步进电机测试入口。
+- `app/`：菜单、状态机、循迹、速度命令和任务框架。
 - `hardware/`：OLED、按键、四步进电机、数字灰度输入、日志/JY61P/视觉 UART 模块驱动。
 - `system/`：板级初始化、延时、中断入口和错误兜底。
 - `config/`：工程参数和引脚映射。
@@ -33,6 +33,7 @@ D:\Ti\light-car1.0ccs
 - JY61P 使用 `UART1 PB6/PB7`；视觉/Exchange 使用 `UART3 PB2/PB3`；JQ8400 语音模块暂停。
 - 按键 PB9/PB8 已加软件消抖；OLED 菜单只用下半区，选中项固定在中间行。
 - 四个闭环步进电机已切到 STEP/DIR 框架，STEP 脉冲由 TIMG0 定时器中断调度。
+- 路线距离不再读外部编码器，直接使用底盘左右 STEP 输出计数。
 
 ## 日志开关
 
@@ -70,7 +71,7 @@ D:\Ti\light-car1.0ccs\Debug\codex-build\light-car-ccs1.2.out
 #define CAR_RECOVERY_SAFE_BUILD       (0U)
 ```
 
-如果要做救板子或首次恢复下载，再临时改成 `1U`。此模式下主工程只初始化 PA14 和三路 UART 心跳，不进入 `App_Init/App_Task`，也不初始化 OLED/I2C/PLL/ADC/步进电机。串口默认 115200，会周期打印 `RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK`。
+如果要做救板子或首次恢复下载，再临时改成 `1U`。此模式下主工程只初始化 PA14 和三路 UART 心跳，不进入 `App_Init/App_Task`，也不初始化 OLED/I2C/PLL/灰度输入/步进电机。串口默认 115200，会周期打印 `RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK`。
 
 ## XDS110 安全下载
 

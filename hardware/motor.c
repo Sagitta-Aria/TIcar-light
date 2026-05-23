@@ -164,3 +164,16 @@ int32_t Motor_GetStepCount(MotorId motor)
     }
     return StepperPulse_GetStepCount(motor);
 }
+
+void Motor_ResetStepCount(MotorId motor)
+{
+    if (!Motor_IsValid(motor)) {
+        return;
+    }
+    StepperPulse_ResetStepCount(motor);
+}
+
+void Motor_ResetAllStepCounts(void)
+{
+    StepperPulse_ResetAllStepCounts();
+}

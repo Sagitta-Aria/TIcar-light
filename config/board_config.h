@@ -49,9 +49,6 @@
 /* CAR_STEPPER_PULSE_HIGH_TICKS：STEP 高电平保持几个定时器 tick。 */
 #define CAR_STEPPER_PULSE_HIGH_TICKS    (1U)
 
-/* CAR_STEPPER_TEST_COMMAND：方向测试时的低速步进命令。 */
-#define CAR_STEPPER_TEST_COMMAND        (1200U)
-
 /* CAR_TRACK_BASE_COMMAND：基础循迹时的默认底盘速度命令。 */
 #define CAR_TRACK_BASE_COMMAND          (900)
 
@@ -70,8 +67,8 @@
 /* CAR_TRACK_LOST_SEARCH_DELTA_COMMAND：搜线阶段左右轮的差速幅度。 */
 #define CAR_TRACK_LOST_SEARCH_DELTA_COMMAND (180U)
 
-/* CAR_TRACK_ADC_FAULT_STOP_TICKS：ADC 连续失败多少次后判定为异常停车。 */
-#define CAR_TRACK_ADC_FAULT_STOP_TICKS  (2U)
+/* CAR_TRACK_SENSOR_FAULT_STOP_TICKS：灰度采样连续失败多少次后判定为异常停车。 */
+#define CAR_TRACK_SENSOR_FAULT_STOP_TICKS (2U)
 
 /* CAR_TRACK_WIDE_LINE_ACTIVE_COUNT：认为进入路口/宽线的最小有效通道数。 */
 #define CAR_TRACK_WIDE_LINE_ACTIVE_COUNT (5U)
@@ -101,52 +98,11 @@
     ((CAR_MENU_LINK_PRINT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
         CAR_APP_LOOP_DELAY_MS)
 
-/*
- * CAR_ENABLE_SPEED_CONTROL：当前四步进方案不再使用外部编码器闭环。
- * 闭环由步进驱动器内部完成，MCU 只输出 STEP/DIR。
- */
-#define CAR_ENABLE_SPEED_CONTROL        (0U)
+/* CAR_ROUTE_EDGE_STEPS：单边直线路程的 STEP 相对计数，后续按实车标定。 */
+#define CAR_ROUTE_EDGE_STEPS            (2400U)
 
-/* CAR_ENABLE_ENCODER_INPUTS：PA12/PA13/PA22 已改作步进控制，编码器输入默认关闭。 */
-#define CAR_ENABLE_ENCODER_INPUTS       (0U)
-
-/* CAR_SPEED_CONTROL_PERIOD_MS：速度闭环控制周期，先用 20ms，实车再调。 */
-#define CAR_SPEED_CONTROL_PERIOD_MS     (20U)
-
-/* CAR_SPEED_CONTROL_PERIOD_TICKS：把速度闭环周期换算成 App_Task 调度次数。 */
-#define CAR_SPEED_CONTROL_PERIOD_TICKS \
-    ((CAR_SPEED_CONTROL_PERIOD_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
-        CAR_APP_LOOP_DELAY_MS)
-
-/* CAR_SPEED_MAX_TARGET_TICKS：最大速度命令对应的单周期目标编码器计数，后续按实车调。 */
-#define CAR_SPEED_MAX_TARGET_TICKS      (40)
-
-/* CAR_SPEED_TARGET_STEP：每个速度控制周期目标命令最多变化多少，避免突然加速。 */
-#define CAR_SPEED_TARGET_STEP           (120)
-
-/* CAR_SPEED_KP：速度 PI 的比例系数，误差单位是单周期编码器计数。 */
-#define CAR_SPEED_KP                    (24)
-
-/* CAR_SPEED_KI：速度 PI 的积分系数，用于补偿左右电机差异和低速死区。 */
-#define CAR_SPEED_KI                    (2)
-
-/* CAR_SPEED_INTEGRAL_LIMIT：速度 PI 积分限幅，防止长时间堵转后输出冲太大。 */
-#define CAR_SPEED_INTEGRAL_LIMIT        (300)
-
-/* CAR_SPEED_MIN_ACTIVE_COMMAND：目标非零时的最小有效步进速度命令。 */
-#define CAR_SPEED_MIN_ACTIVE_COMMAND    (450U)
-
-/* CAR_SPEED_LEFT_ENCODER_SIGN：左编码器方向修正，实车反了就改成 -1。 */
-#define CAR_SPEED_LEFT_ENCODER_SIGN     (1)
-
-/* CAR_SPEED_RIGHT_ENCODER_SIGN：右编码器方向修正，实车反了就改成 -1。 */
-#define CAR_SPEED_RIGHT_ENCODER_SIGN    (1)
-
-/* CAR_ROUTE_EDGE_TICKS：单边直线路程的编码器相对计数，后续按实车调。 */
-#define CAR_ROUTE_EDGE_TICKS            (2400U)
-
-/* CAR_ROUTE_APPROACH_TICKS：开始提前降速的路程阈值。 */
-#define CAR_ROUTE_APPROACH_TICKS        (1800U)
+/* CAR_ROUTE_APPROACH_STEPS：开始提前降速的 STEP 路程阈值。 */
+#define CAR_ROUTE_APPROACH_STEPS        (1800U)
 
 /* CAR_ROUTE_TURN_HOLD_TICKS：没有 yaw 数据时，拐角状态保留的循环次数。 */
 #define CAR_ROUTE_TURN_HOLD_TICKS       (40U)
@@ -186,16 +142,6 @@
 
 /* CAR_ROUTE_CORNER_COUNT：正方形赛道的直角数量。 */
 #define CAR_ROUTE_CORNER_COUNT          (4U)
-
-/* CAR_ENABLE_MOTOR_TEST_MODE：1 表示按键1进入电机方向确认，平时保持 0。 */
-#define CAR_ENABLE_MOTOR_TEST_MODE      (0U)
-
-/* CAR_MOTOR_TEST_RUN_MS：每个方向测试步骤持续时间，到时自动停车。 */
-#define CAR_MOTOR_TEST_RUN_MS           (800U)
-
-/* CAR_MOTOR_TEST_RUN_TICKS：把测试时间换算成 App_Task 调度次数。 */
-#define CAR_MOTOR_TEST_RUN_TICKS \
-    ((CAR_MOTOR_TEST_RUN_MS + CAR_APP_LOOP_DELAY_MS - 1U) / CAR_APP_LOOP_DELAY_MS)
 
 /*
  * CAR_GRAY_INPUT_DIGITAL：灰度模块输入模式。

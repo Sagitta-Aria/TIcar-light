@@ -46,7 +46,7 @@ Possible root causes:
 RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK
 ```
 
-安全模式不会初始化 OLED/I2C、ADC、步进电机和 App 层，因此适合刚恢复芯片后的第一次下载。
+安全模式不会初始化 OLED/I2C、灰度输入、步进电机和 App 层，因此适合刚恢复芯片后的第一次下载。
 
 ## 已执行的恢复过程
 

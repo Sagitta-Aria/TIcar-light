@@ -176,25 +176,6 @@ extern "C" {
 #define KEY_2_IIDX                                                DL_GPIO_IIDX_DIO8
 #define KEY_2_IOMUX                                                (IOMUX_PINCM25)
 
-/*
- * Encoder input fallback definitions.
- * ccs1.2 中 PA12/PA13/PA22 已分配给步进电机，编码器输入默认关闭。
- * 这些宏只用于编码器输入关闭时保持模块可编译，不要按这里接编码器。
- */
-#define ENCODER_PORT                                                       GPIOA
-#define ENCODER_LEFT_A_PIN                                        DL_GPIO_PIN_12
-#define ENCODER_LEFT_A_IIDX                                      DL_GPIO_IIDX_DIO12
-#define ENCODER_LEFT_A_IOMUX                                     (IOMUX_PINCM34)
-#define ENCODER_LEFT_B_PIN                                        DL_GPIO_PIN_13
-#define ENCODER_LEFT_B_IIDX                                      DL_GPIO_IIDX_DIO13
-#define ENCODER_LEFT_B_IOMUX                                     (IOMUX_PINCM35)
-#define ENCODER_RIGHT_A_PIN                                       DL_GPIO_PIN_22
-#define ENCODER_RIGHT_A_IIDX                                     DL_GPIO_IIDX_DIO22
-#define ENCODER_RIGHT_A_IOMUX                                    (IOMUX_PINCM47)
-#define ENCODER_RIGHT_B_PIN                                       DL_GPIO_PIN_23
-#define ENCODER_RIGHT_B_IIDX                                     DL_GPIO_IIDX_DIO23
-#define ENCODER_RIGHT_B_IOMUX                                    (IOMUX_PINCM53)
-
 void SYSCFG_DL_init(void);
 void SYSCFG_DL_initPower(void);
 void SYSCFG_DL_GPIO_init(void);

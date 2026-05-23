@@ -1,8 +1,6 @@
 #include "motion.h"
 
-#include "board_config.h"
 #include "motor.h"
-#include "speed_control.h"
 
 static int16_t Motion_ToSignedCommand(uint16_t command)
 {
@@ -11,20 +9,12 @@ static int16_t Motion_ToSignedCommand(uint16_t command)
 
 void Motion_Stop(void)
 {
-#if CAR_ENABLE_SPEED_CONTROL
-    SpeedControl_Stop();
-#else
     Motor_Stop();
-#endif
 }
 
 void Motion_SetChassisCommand(int16_t leftCommand, int16_t rightCommand)
 {
-#if CAR_ENABLE_SPEED_CONTROL
-    SpeedControl_SetTarget(leftCommand, rightCommand);
-#else
     Motor_SetChassisCommand(leftCommand, rightCommand);
-#endif
 }
 
 void Motion_Forward(uint16_t command)

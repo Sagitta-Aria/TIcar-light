@@ -42,7 +42,7 @@ void Motor_Set(MotorId motor, MotorDir dir, uint16_t command);
 
 /*
  * Motor_SetChassisCommand：设置底盘左右两个步进电机的有符号速度命令。
- * 使用场景：循迹、路线和速度闭环统一从这里驱动底盘。
+ * 使用场景：循迹和路线统一从这里驱动底盘。
  */
 void Motor_SetChassisCommand(int16_t leftCommand, int16_t rightCommand);
 
@@ -62,9 +62,16 @@ void Motor_Stop(void);
 int16_t Motor_GetCommand(MotorId motor);
 
 /*
- * Motor_GetStepCount：读取某个电机自上次清零后的累计 STEP 数。
- * 使用场景：测试时观察电机是否真的在走。
+ * Motor_GetStepCount：读取某个电机累计 STEP 数。
+ * 使用场景：路线测距、串口调试和实车标定。
+ * 说明：返回值带方向符号，正负由 DIR 命令决定。
  */
 int32_t Motor_GetStepCount(MotorId motor);
+
+/* Motor_ResetStepCount：清零某个电机的 STEP 计数。 */
+void Motor_ResetStepCount(MotorId motor);
+
+/* Motor_ResetAllStepCounts：清零四个电机的 STEP 计数。 */
+void Motor_ResetAllStepCounts(void);
 
 #endif

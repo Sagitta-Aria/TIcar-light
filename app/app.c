@@ -8,10 +8,8 @@
 #include "log_uart.h"
 #include "menu.h"
 #include "motor.h"
-#include "motor_test.h"
 #include "oled.h"
 #include "route.h"
-#include "speed_control.h"
 #include "state_machine.h"
 #include "tracking.h"
 
@@ -54,15 +52,6 @@ static void App_HandleKeyEvent(KeyEvent event)
         return;
     }
 
-    if (state == CAR_STATE_MOTOR_TEST) {
-        if (event == KEY_EVENT_1) {
-            StateMachine_Dispatch(CAR_EVENT_MOTOR_TEST_NEXT);
-        } else if (event == KEY_EVENT_2) {
-            StateMachine_Dispatch(CAR_EVENT_BACK);
-        }
-        return;
-    }
-
     if (state == CAR_STATE_ERROR) {
         if (event == KEY_EVENT_1) {
             StateMachine_Dispatch(CAR_EVENT_CLEAR_ERROR);
@@ -97,10 +86,6 @@ void App_Init(void)
     LOG_LINE("app: tracking init ok");
     Route_Init();
     LOG_LINE("app: route init ok");
-    SpeedControl_Init();
-    LOG_LINE("app: speed control init ok");
-    MotorTest_Init();
-    LOG_LINE("app: motor test init ok");
     Menu_Init();
     LOG_LINE("app: menu init ok");
     LOG_LINE("light-car ccs1.2 init ok");
@@ -119,14 +104,6 @@ void App_Task(void)
     App_HandleKeyEvent(Key_PopEvent());
 
     StateMachine_Task();
-
-    /*
-     * 电机方向测试需要直接输出 STEP，不能被速度闭环覆盖。
-     * ccs1.2 默认关闭编码器速度闭环，正式循迹仍走统一的左右轮命令接口。
-     */
-    if (StateMachine_GetState() != CAR_STATE_MOTOR_TEST) {
-        SpeedControl_Task();
-    }
 
     Menu_Task(StateMachine_GetState());
     LogUart_Task();

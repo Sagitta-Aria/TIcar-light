@@ -307,9 +307,6 @@ static void Menu_RenderByState(CarState state)
     case CAR_STATE_TRACKING:
         Menu_RenderSimpleState("Tracking", "Running");
         break;
-    case CAR_STATE_MOTOR_TEST:
-        Menu_RenderSimpleState("Motor Test", "Running");
-        break;
     case CAR_STATE_FINISHED:
         Menu_RenderSimpleState("Finished", "Mission done");
         break;

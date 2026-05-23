@@ -28,9 +28,22 @@ void StepperPulse_StopAll(void);
 
 /*
  * StepperPulse_GetStepCount：读取累计 STEP 数。
- * 使用场景：测试页/日志观察电机是否收到脉冲。
+ * 使用场景：路线测距、测试页/日志观察电机是否收到脉冲。
+ * 说明：返回值带方向符号，正负由 DIR 命令决定。
  */
 int32_t StepperPulse_GetStepCount(MotorId motor);
+
+/*
+ * StepperPulse_ResetStepCount：清零单路 STEP 计数。
+ * 使用场景：测试开始、路线重新标定起点。
+ */
+void StepperPulse_ResetStepCount(MotorId motor);
+
+/*
+ * StepperPulse_ResetAllStepCounts：清零全部 STEP 计数。
+ * 使用场景：上电初始化或整车任务重新开始。
+ */
+void StepperPulse_ResetAllStepCounts(void);
 
 /*
  * StepperPulse_HandleTimerInterrupt：TIMG0 中断入口分发函数。

@@ -2,7 +2,6 @@
 
 #include "board_config.h"
 #include "delay.h"
-#include "encoder.h"
 #include "gray.h"
 #include "jy61p.h"
 #include "key.h"
@@ -86,7 +85,7 @@ static void Board_ClearBootArea(void)
 
 /*
  * 作用：把启动阶段的一行状态写到 OLED 下半区。
- * 使用场景：排查时钟、I2C、UART、ADC、应用层初始化卡在哪一步。
+ * 使用场景：排查时钟、I2C、UART、灰度输入、应用层初始化卡在哪一步。
  * 说明：从 y=16 开始显示，避开双色 OLED 顶部黄色区域。
  */
 static void Board_ShowBootLine(uint8_t line, const char *text)
@@ -301,7 +300,7 @@ void Board_Init(void)
      * 恢复安全模式：
      * 只用内部 SYSOSC，关闭 HFXT/PLL，只给 GPIOA/GPIOB 上电并配置 PA14、UART。
      * 不调用 SYSCFG_DL_initPower()，避免整口 reset GPIOA 后影响 SWD 默认状态。
-     * 不初始化 OLED/I2C/ADC/步进电机，只开三路 UART 打印心跳。
+     * 不初始化 OLED/I2C/灰度输入/步进电机，只开三路 UART 打印心跳。
      */
     DL_SYSCTL_setBORThreshold(DL_SYSCTL_BOR_THRESHOLD_LEVEL_0);
     DL_SYSCTL_setSYSOSCFreq(DL_SYSCTL_SYSOSC_FREQ_BASE);
@@ -398,7 +397,7 @@ void Board_Init(void)
         "WAIT Gray");
 #endif
     SYSCFG_DL_STEPPER_TIMER_init();
-    Board_ShowBootStep("OK Stepper TIM", "RUN Motor", "WAIT Gray Enc",
+    Board_ShowBootStep("OK Stepper TIM", "RUN Motor", "WAIT Gray",
         "WAIT Key UART");
     Motor_Init();
     Board_ShowBootStep("OK Motor", "RUN Gray", "WAIT Key",
@@ -406,13 +405,6 @@ void Board_Init(void)
     Gray_Init();
     Board_ShowBootStep("OK Gray", "RUN Key", "WAIT UART Wrap",
         "WAIT App");
-#if CAR_ENABLE_ENCODER_INPUTS
-    Board_ShowBootStep("OK Gray", "RUN Encoder", "WAIT Key",
-        "WAIT UART Wrap");
-    Encoder_Init();
-    Board_ShowBootStep("OK Encoder", "RUN Key", "WAIT UART Wrap",
-        "WAIT App");
-#endif
     Key_Init();
     Board_ShowBootStep("OK Key", "RUN JY61P", "WAIT Link",
         "WAIT App");
