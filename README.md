@@ -33,6 +33,40 @@ D:\Ti\light-car1.0ccs
 D:\Ti\light-car1.0ccs\Debug\codex-build\light-car1.1ccs.out
 ```
 
+## 当前临时安全模式
+
+为了 XDS110 解锁后的第一次恢复下载，当前 `config/board_config.h` 中：
+
+```c
+#define CAR_RECOVERY_SAFE_BUILD       (1U)
+```
+
+此模式下主工程只初始化 PA14 和三路 UART 心跳，不进入 `App_Init/App_Task`，也不初始化 OLED/I2C/PLL/ADC/步进电机。串口默认 115200，会周期打印 `RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK`。确认 PA14 稳定闪烁、串口有输出、芯片可以重复下载后，再把它改回 `0U` 恢复完整小车固件。
+
+## XDS110 安全下载
+
+当前已验证：XDS110 执行 DSSM Factory Reset 后，安全版 MAIN 程序可下载成功，PA14 已实测慢闪。
+
+普通安全下载命令：
+
+```powershell
+& "D:\Ti\light-car1.0ccs\tools\flash_xds110_safe.ps1" -SkipBuild
+```
+
+读取 Boot Diagnostic：
+
+```powershell
+& "D:\Ti\ccs\ccs_base\scripting\bin\dss.bat" "D:\Ti\light-car1.0ccs\tools\read_boot_diag.js"
+```
+
+Factory Reset 必须显式确认：
+
+```powershell
+& "D:\Ti\light-car1.0ccs\tools\factory_reset_xds110.ps1" -ConfirmFactoryReset
+```
+
+完整恢复记录见 `doc/XDS110_RECOVERY_DEBUG_LOG.md`。
+
 ## 下载建议
 
 如果要用 J-Link，优先用下载后保持 halt 的脚本：
@@ -57,3 +91,4 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 - `doc/PIN_ASSIGNMENT.md`
 - `doc/PROJECT_STATUS.md`
 - `doc/CODE_STYLE_1_1CCS.md`
+- `doc/XDS110_RECOVERY_DEBUG_LOG.md`

@@ -4,6 +4,17 @@
 #include <stdint.h>
 
 /*
+ * CAR_RECOVERY_SAFE_BUILD：芯片恢复用安全构建开关。
+ *
+ * 1：只初始化 PA14 状态灯和三路 UART 心跳，不进入 App，不初始化 OLED/I2C/PLL/ADC/电机。
+ *    用于刚解锁芯片后的第一次下载，确认芯片和调试链路恢复稳定。
+ * 0：恢复正常小车固件。
+ *
+ * 注意：当前为了救板子，默认先保持 1。确认 PA14 稳定闪烁、可重复下载后再改回 0。
+ */
+#define CAR_RECOVERY_SAFE_BUILD       (1U)
+
+/*
  * CAR_ENABLE_PA14_DEBUG_LED：是否启用 PA14 状态灯。
  * 1.1ccs 已把灰度 S1 迁到 PA15，PA14 固定作 LED，可用于观察主循环状态。
  */

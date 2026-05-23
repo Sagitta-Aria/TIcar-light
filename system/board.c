@@ -19,8 +19,19 @@
 #define BOARD_FATAL_ERROR_MASK      (BOARD_ERROR_CLOCK)
 #define BOARD_SIGNAL_BLINK_TICKS    (120000U)
 #define BOARD_ERROR_BLINK_TICKS     (25000U)
+#define BOARD_RECOVERY_BLINK_CYCLES (16000000U)
+#define BOARD_RECOVERY_POWER_DELAY  (16U)
+#define BOARD_RECOVERY_UART_TIMEOUT (100000U)
+#define BOARD_RECOVERY_UART_TEXT \
+    "RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK\r\n"
 
 static uint32_t g_boardErrors;
+
+#if CAR_RECOVERY_SAFE_BUILD
+static void Board_RecoveryUartInit(void);
+static void Board_RecoveryUartSendAll(const char *text);
+static uint8_t Board_RecoveryUartSendByte(UART_Regs *uart, uint8_t data);
+#endif
 
 /*
  * 作用：把启动阶段的 5 行状态写到 OLED。
@@ -91,6 +102,73 @@ static void Board_ShowBootStep(const char *done, const char *running,
     }
 }
 
+#if CAR_RECOVERY_SAFE_BUILD
+/*
+ * 作用：恢复安全模式下只拉起串口打印，不初始化其它外设。
+ * 使用场景：XDS110/CCS 下载流程不稳定时，用串口判断程序是否真的烧录并运行。
+ * 说明：同时打开三路已有 UART，便于不确定接线时直接观察任意一路。
+ */
+static void Board_RecoveryUartInit(void)
+{
+    DL_UART_Main_reset(JY61P_INST);
+    DL_UART_Main_reset(JQ8400_INST);
+    DL_UART_Main_reset(Exchange_INST);
+
+    DL_UART_Main_enablePower(JY61P_INST);
+    DL_UART_Main_enablePower(JQ8400_INST);
+    DL_UART_Main_enablePower(Exchange_INST);
+
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_JY61P_IOMUX_TX, GPIO_JY61P_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_JY61P_IOMUX_RX, GPIO_JY61P_IOMUX_RX_FUNC);
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_JQ8400_IOMUX_TX, GPIO_JQ8400_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_JQ8400_IOMUX_RX, GPIO_JQ8400_IOMUX_RX_FUNC);
+    DL_GPIO_initPeripheralOutputFunction(
+        GPIO_Exchange_IOMUX_TX, GPIO_Exchange_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_Exchange_IOMUX_RX, GPIO_Exchange_IOMUX_RX_FUNC);
+
+    SYSCFG_DL_JY61P_init();
+    SYSCFG_DL_JQ8400_init();
+    SYSCFG_DL_Exchange_init();
+}
+
+/*
+ * 作用：向单个 UART 发送 1 字节，等待带超时。
+ * 使用场景：恢复模式串口心跳。
+ * 说明：即使串口外设异常，也不能因为打印把主循环卡死。
+ */
+static uint8_t Board_RecoveryUartSendByte(UART_Regs *uart, uint8_t data)
+{
+    uint32_t timeout = BOARD_RECOVERY_UART_TIMEOUT;
+
+    while (timeout > 0U) {
+        if (DL_UART_Main_transmitDataCheck(uart, data)) {
+            return 1U;
+        }
+        --timeout;
+    }
+    return 0U;
+}
+
+/*
+ * 作用：把恢复心跳同时打印到三路 UART。
+ * 使用场景：不知道 USB-TTL 现在接在哪一路 TX 时，三路都能看到同一条消息。
+ */
+static void Board_RecoveryUartSendAll(const char *text)
+{
+    while ((text != NULL) && (*text != '\0')) {
+        (void)Board_RecoveryUartSendByte(JY61P_INST, (uint8_t)*text);
+        (void)Board_RecoveryUartSendByte(JQ8400_INST, (uint8_t)*text);
+        (void)Board_RecoveryUartSendByte(Exchange_INST, (uint8_t)*text);
+        ++text;
+    }
+}
+#endif
+
 /*
  * 作用：初始化板载 LED 调试灯。
  * 使用场景：临时把按键/状态反馈映射到灯上，便于不看 OLED 也能确认事件。
@@ -159,6 +237,26 @@ void Board_Init(void)
 {
     g_boardErrors = BOARD_ERROR_NONE;
 
+#if CAR_RECOVERY_SAFE_BUILD
+    /*
+     * 恢复安全模式：
+     * 只用内部 SYSOSC，关闭 HFXT/PLL，只给 GPIOA/GPIOB 上电并配置 PA14、UART。
+     * 不调用 SYSCFG_DL_initPower()，避免整口 reset GPIOA 后影响 SWD 默认状态。
+     * 不初始化 OLED/I2C/ADC/步进电机，只开三路 UART 打印心跳。
+     */
+    DL_SYSCTL_setBORThreshold(DL_SYSCTL_BOR_THRESHOLD_LEVEL_0);
+    DL_SYSCTL_setSYSOSCFreq(DL_SYSCTL_SYSOSC_FREQ_BASE);
+    DL_SYSCTL_disableHFXT();
+    DL_SYSCTL_disableSYSPLL();
+
+    DL_GPIO_enablePower(BOARD_DEBUG_LED_PORT);
+    DL_GPIO_enablePower(GPIOB);
+    delay_cycles(BOARD_RECOVERY_POWER_DELAY);
+    Board_DebugLedInit();
+    Board_RecoveryUartInit();
+    Board_RecoveryUartSendAll(BOARD_RECOVERY_UART_TEXT);
+    return;
+#else
     /*
      * 先只初始化电源、GPIO 和 OLED。
      * 这样如果系统时钟卡住，屏幕还能停在启动探针页。
@@ -241,6 +339,7 @@ void Board_Init(void)
     Link_Init();
 
     Board_ShowBootStep("OK Board", "RUN App", "", "");
+#endif
 }
 
 /*
@@ -253,6 +352,15 @@ void Board_Task(void)
 {
     static uint32_t signalCounter;
     static uint32_t errorCounter;
+
+#if CAR_RECOVERY_SAFE_BUILD
+    delay_cycles(BOARD_RECOVERY_BLINK_CYCLES);
+#if CAR_ENABLE_PA14_DEBUG_LED
+    DL_GPIO_togglePins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
+#endif
+    Board_RecoveryUartSendAll(BOARD_RECOVERY_UART_TEXT);
+    return;
+#endif
 
     if (Board_HasFatalError() != 0U) {
 #if CAR_ENABLE_PA14_DEBUG_LED

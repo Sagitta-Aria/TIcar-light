@@ -16,6 +16,22 @@
 
 `app/main.c` 保持干净：
 
+当前为了芯片恢复，`CAR_RECOVERY_SAFE_BUILD = 1`。实际编译出来的固件会跳过 App 层，只执行 `Board_Init()` 和 `Board_Task()` 里的 PA14 慢闪与三路 UART 心跳恢复逻辑。
+
+恢复正常小车固件前，需要在 `config/board_config.h` 把：
+
+```c
+#define CAR_RECOVERY_SAFE_BUILD       (1U)
+```
+
+改回：
+
+```c
+#define CAR_RECOVERY_SAFE_BUILD       (0U)
+```
+
+安全模式关闭后，主流程为：
+
 1. `Board_Init()`：初始化电源、GPIO、OLED、时钟、步进 GPIO、UART、ADC 和硬件模块。
 2. 无致命错误时执行 `App_Init()`。
 3. 主循环持续执行 `Board_Task()`，无致命错误时执行 `App_Task()`。
@@ -85,6 +101,16 @@ PA12/PA13/PA22 已用于步进电机，不再接旧编码器。
 - 慢闪：主循环还活着。
 - 快闪：存在非致命错误，例如 OLED/I2C 超时。
 - 常亮：存在致命错误，例如时钟初始化失败。
+
+2026-05-23 已通过 XDS110 恢复下载验证：`CAR_RECOVERY_SAFE_BUILD = 1` 时，安全版 MAIN 程序下载成功后 PA14 已实测慢闪。
+
+## XDS110 恢复记录
+
+本次芯片失联时，Boot Diagnostic 曾读到 `0x00000007`。经用户明确授权后执行 DSSM Factory Reset，随后安全版 MAIN 程序下载成功。
+
+完整过程、命令和注意事项见：
+
+- `doc/XDS110_RECOVERY_DEBUG_LOG.md`
 
 ## 中断处理
 
