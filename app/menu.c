@@ -3,7 +3,7 @@
 #include "board_config.h"
 #include "encoder.h"
 #include "gray.h"
-#include "link.h"
+#include "log_uart.h"
 #include "motor_test.h"
 #include "oled.h"
 #include "route.h"
@@ -151,13 +151,13 @@ static char *Menu_AppendHexByte(char *write, char *end, uint8_t value)
 }
 
 /*
- * 作用：发送一行调试文本到现有串口输出。
+ * 作用：发送一行调试文本到 Type-C 日志串口。
  * 使用场景：监视页面周期打印数据。
  */
 static void Menu_SendLine(const char *text)
 {
-    Link_SendString(text);
-    Link_SendString("\r\n");
+    LogUart_SendString(text);
+    LogUart_SendString("\r\n");
 }
 
 /*
@@ -212,17 +212,24 @@ static void Menu_ShowMonoLine(uint8_t index, const char *text)
 }
 
 /*
- * 作用：刷新 5 行 OLED 文本。
- * 使用场景：菜单页、校准页、测试监视页。
+ * 作用：只使用 OLED 下半区刷新 4 行内容。
+ * 使用场景：校准页、测试监视页和状态页。
+ * 说明：line0 作为旧接口标题位保留但不显示，避免双色屏顶部黄区出现标题。
  */
 static void Menu_RenderLines(const char *line0, const char *line1,
     const char *line2, const char *line3, const char *line4)
 {
-    Menu_ShowPaddedLine(0U, line0);
-    Menu_ShowPaddedLine(1U, line1);
-    Menu_ShowPaddedLine(2U, line2);
-    Menu_ShowPaddedLine(3U, line3);
-    Menu_ShowPaddedLine(4U, line4);
+    (void)line0;
+
+    Menu_ShowPaddedLine(0U, "");
+    Menu_ShowPaddedLine(1U, "");
+    Menu_ShowPaddedLine(2U, "");
+    Menu_ShowPaddedLine(3U, "");
+    Menu_ShowPaddedLine(4U, "");
+    Menu_ShowMonoLine(0U, line1);
+    Menu_ShowMonoLine(1U, line2);
+    Menu_ShowMonoLine(2U, line3);
+    Menu_ShowMonoLine(3U, line4);
     OLED_Refresh();
 }
 
@@ -260,35 +267,41 @@ static void Menu_BuildItemLine(char line[MENU_LINE_BUFFER_SIZE],
     (void)Menu_AppendText(write, end, text);
 }
 
-static void Menu_RenderMainMenu(void)
+/*
+ * 作用：渲染三行滚动菜单，当前选中项固定在中间行。
+ * 使用场景：主菜单和测试菜单按 K2 切换选项。
+ */
+static void Menu_RenderCenteredList(const char *const *items, uint8_t count,
+    uint8_t selected)
 {
+    char line0[MENU_LINE_BUFFER_SIZE];
     char line1[MENU_LINE_BUFFER_SIZE];
     char line2[MENU_LINE_BUFFER_SIZE];
-    char line3[MENU_LINE_BUFFER_SIZE];
+    uint8_t previous;
+    uint8_t next;
 
-    Menu_BuildItemLine(line1, (g_mainIndex == MENU_MAIN_CALIB),
-        g_mainItems[MENU_MAIN_CALIB]);
-    Menu_BuildItemLine(line2, (g_mainIndex == MENU_MAIN_TEST),
-        g_mainItems[MENU_MAIN_TEST]);
-    Menu_BuildItemLine(line3, (g_mainIndex == MENU_MAIN_MISSION),
-        g_mainItems[MENU_MAIN_MISSION]);
+    if (count == 0U) {
+        return;
+    }
 
-    Menu_RenderMonoMenuLines(line1, line2, line3, "K1 OK K2 Next");
+    previous = (selected == 0U) ? (uint8_t)(count - 1U) :
+        (uint8_t)(selected - 1U);
+    next = (uint8_t)((selected + 1U) % count);
+
+    Menu_BuildItemLine(line0, 0U, items[previous]);
+    Menu_BuildItemLine(line1, 1U, items[selected]);
+    Menu_BuildItemLine(line2, 0U, items[next]);
+    Menu_RenderMonoMenuLines(line0, line1, line2, "");
+}
+
+static void Menu_RenderMainMenu(void)
+{
+    Menu_RenderCenteredList(g_mainItems, MENU_MAIN_COUNT, g_mainIndex);
 }
 
 static void Menu_RenderTestMenu(void)
 {
-    char line1[MENU_LINE_BUFFER_SIZE];
-    char line2[MENU_LINE_BUFFER_SIZE];
-    char line3[MENU_LINE_BUFFER_SIZE];
-    uint8_t index0 = g_testIndex;
-    uint8_t index1 = (uint8_t)((g_testIndex + 1U) % MENU_TEST_COUNT);
-    uint8_t index2 = (uint8_t)((g_testIndex + 2U) % MENU_TEST_COUNT);
-
-    Menu_BuildItemLine(line1, 1U, g_testItems[index0]);
-    Menu_BuildItemLine(line2, 0U, g_testItems[index1]);
-    Menu_BuildItemLine(line3, 0U, g_testItems[index2]);
-    Menu_RenderMonoMenuLines(line1, line2, line3, "K1 OK K2 Next");
+    Menu_RenderCenteredList(g_testItems, MENU_TEST_COUNT, g_testIndex);
 }
 
 static void Menu_BuildPairLine(char line[MENU_LINE_BUFFER_SIZE],

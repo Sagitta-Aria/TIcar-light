@@ -1,7 +1,7 @@
 #include "motor_test.h"
 
 #include "board_config.h"
-#include "link.h"
+#include "log_uart.h"
 #include "motor.h"
 
 typedef enum {
@@ -30,8 +30,8 @@ static void MotorTest_RunOne(MotorId motor, MotorDir dir, const char *text)
 {
     Motor_Stop();
     Motor_Set(motor, dir, CAR_STEPPER_TEST_COMMAND);
-    Link_SendString(text);
-    Link_SendString("\r\n");
+    LogUart_SendString(text);
+    LogUart_SendString("\r\n");
 }
 
 /*
@@ -86,7 +86,7 @@ static void MotorTest_ApplyStep(void)
     case MOTOR_TEST_STEP_DONE:
     default:
         Motor_Stop();
-        Link_SendString("stepper test: stop\r\n");
+        LogUart_SendString("stepper test: stop\r\n");
         break;
     }
 
@@ -126,7 +126,7 @@ uint8_t MotorTest_Next(void)
     if (g_motorTestStep >= MOTOR_TEST_STEP_GIMBAL_2_REVERSE) {
         g_motorTestStep = MOTOR_TEST_STEP_DONE;
         MotorTest_Stop();
-        Link_SendString("stepper test: done\r\n");
+        LogUart_SendString("stepper test: done\r\n");
         return 0U;
     }
 
@@ -144,7 +144,7 @@ void MotorTest_Task(void)
     --g_motorTestTicks;
     if (g_motorTestTicks == 0U) {
         Motor_Stop();
-        Link_SendString("stepper test: auto stop\r\n");
+        LogUart_SendString("stepper test: auto stop\r\n");
     }
 }
 

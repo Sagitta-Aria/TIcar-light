@@ -9,7 +9,7 @@
 #define JY61P_CHECKSUM_LENGTH         (10U)
 #define JY61P_UART_TX_TIMEOUT_COUNT   (100000U)
 
-/* 单次 UART0 中断最多服务的中断源和字节数，避免串口噪声长期占住 CPU。 */
+/* 单次 JY61P UART 中断最多服务的中断源和字节数，避免串口噪声长期占住 CPU。 */
 #define JY61P_IRQ_SERVICE_LIMIT       (16U)
 #define JY61P_IRQ_RX_DRAIN_LIMIT      (64U)
 
@@ -89,7 +89,7 @@ static void JY61P_HandleAngleFrame(const uint8_t *frame)
 
 /*
  * 作用：逐字节同步并解析 JY61P 数据帧。
- * 使用场景：UART0 接收中断每拿到 1 个字节就喂给它。
+ * 使用场景：JY61P 接收中断每拿到 1 个字节就喂给它。
  */
 static void JY61P_ParseByte(uint8_t data)
 {

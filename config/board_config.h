@@ -10,9 +10,21 @@
  *    用于刚解锁芯片后的第一次下载，确认芯片和调试链路恢复稳定。
  * 0：恢复正常小车固件。
  *
- * 注意：当前为了救板子，默认先保持 1。确认 PA14 稳定闪烁、可重复下载后再改回 0。
+ * 注意：只有救板子或首次恢复下载时才改成 1，正常小车固件保持 0。
  */
-#define CAR_RECOVERY_SAFE_BUILD       (1U)
+#define CAR_RECOVERY_SAFE_BUILD       (0U)
+
+/*
+ * CAR_ENABLE_LOG_UART：是否启用 Type-C CH340 日志串口。
+ * UART0 复用 PA10/PA11，和 BSL 串口走同一组物理引脚。
+ */
+#define CAR_ENABLE_LOG_UART            (1U)
+
+/*
+ * CAR_ENABLE_JQ8400：语音模块开关。
+ * 当前为了把 UART1 PB6/PB7 分给 JY61P，JQ8400 暂停接入。
+ */
+#define CAR_ENABLE_JQ8400              (0U)
 
 /*
  * CAR_ENABLE_PA14_DEBUG_LED：是否启用 PA14 状态灯。

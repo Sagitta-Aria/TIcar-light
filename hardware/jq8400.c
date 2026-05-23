@@ -1,6 +1,9 @@
 #include "jq8400.h"
 
+#include "board_config.h"
 #include "ti_msp_dl_config.h"
+
+#if CAR_ENABLE_JQ8400
 
 #define JQ8400_UART_TX_TIMEOUT_COUNT    (100000U)
 
@@ -49,3 +52,30 @@ void JQ8400_SendBytes(const uint8_t *data, uint16_t length)
         }
     }
 }
+
+#else
+
+/*
+ * 当前硬件资源分配中，UART1 PB6/PB7 已给 JY61P。
+ * JQ8400 框架保留为空实现，避免误占串口或误初始化引脚。
+ */
+void JQ8400_Init(void)
+{
+}
+
+void JQ8400_Task(void)
+{
+}
+
+void JQ8400_SendByte(uint8_t data)
+{
+    (void)data;
+}
+
+void JQ8400_SendBytes(const uint8_t *data, uint16_t length)
+{
+    (void)data;
+    (void)length;
+}
+
+#endif

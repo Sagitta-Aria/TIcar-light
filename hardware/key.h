@@ -5,7 +5,8 @@
 
 typedef enum {
     KEY_ID_1 = 0,
-    KEY_ID_2
+    KEY_ID_2,
+    KEY_ID_COUNT
 } KeyId;
 
 typedef enum {
@@ -15,6 +16,7 @@ typedef enum {
 } KeyEvent;
 
 void Key_Init(void);
+void Key_Task(void);
 uint8_t Key_IsPressed(KeyId key);
 KeyEvent Key_PopEvent(void);
 void Key_HandleGPIOInterrupt(void);

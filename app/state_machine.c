@@ -1,7 +1,7 @@
 #include "state_machine.h"
 
 #include "gray.h"
-#include "link.h"
+#include "log_uart.h"
 #include "motor_test.h"
 #include "motion.h"
 #include "route.h"
@@ -29,7 +29,7 @@ static void StateMachine_StopMotionModules(void)
 static void StateMachine_EnterIdle(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: idle\r\n");
+    LogUart_SendString("state: idle\r\n");
 }
 
 /*
@@ -39,7 +39,7 @@ static void StateMachine_EnterIdle(void)
 static void StateMachine_EnterMenu(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: menu\r\n");
+    LogUart_SendString("state: menu\r\n");
 }
 
 /*
@@ -51,7 +51,7 @@ static void StateMachine_EnterGrayCalibration(void)
 {
     StateMachine_StopMotionModules();
     Gray_CalibrationReset();
-    Link_SendString("state: gray calibration\r\n");
+    LogUart_SendString("state: gray calibration\r\n");
 }
 
 /*
@@ -64,7 +64,7 @@ static void StateMachine_EnterTracking(void)
     MotorTest_Stop();
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
-    Link_SendString("state: tracking\r\n");
+    LogUart_SendString("state: tracking\r\n");
 }
 
 /*
@@ -77,7 +77,7 @@ static void StateMachine_EnterTrackingTest(void)
     MotorTest_Stop();
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
-    Link_SendString("state: tracking test\r\n");
+    LogUart_SendString("state: tracking test\r\n");
 }
 
 /*
@@ -89,7 +89,7 @@ static void StateMachine_EnterMotorTest(void)
     Tracking_SetEnabled(0U);
     Route_Stop();
     MotorTest_Start();
-    Link_SendString("state: motor test\r\n");
+    LogUart_SendString("state: motor test\r\n");
 }
 
 /*
@@ -99,7 +99,7 @@ static void StateMachine_EnterMotorTest(void)
 static void StateMachine_EnterPidMonitor(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: pid monitor\r\n");
+    LogUart_SendString("state: pid monitor\r\n");
 }
 
 /*
@@ -109,7 +109,7 @@ static void StateMachine_EnterPidMonitor(void)
 static void StateMachine_EnterGrayMonitor(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: gray monitor\r\n");
+    LogUart_SendString("state: gray monitor\r\n");
 }
 
 /*
@@ -120,7 +120,7 @@ static void StateMachine_EnterGrayMonitor(void)
 static void StateMachine_EnterExchangeMonitor(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: exchange monitor\r\n");
+    LogUart_SendString("state: exchange monitor\r\n");
 }
 
 /*
@@ -130,7 +130,7 @@ static void StateMachine_EnterExchangeMonitor(void)
 static void StateMachine_EnterEncoderMonitor(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: encoder monitor\r\n");
+    LogUart_SendString("state: encoder monitor\r\n");
 }
 
 /*
@@ -140,7 +140,7 @@ static void StateMachine_EnterEncoderMonitor(void)
 static void StateMachine_EnterMission(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: mission placeholder\r\n");
+    LogUart_SendString("state: mission placeholder\r\n");
 }
 
 /*
@@ -150,7 +150,7 @@ static void StateMachine_EnterMission(void)
 static void StateMachine_EnterFinished(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: finished\r\n");
+    LogUart_SendString("state: finished\r\n");
 }
 
 /*
@@ -160,7 +160,7 @@ static void StateMachine_EnterFinished(void)
 static void StateMachine_EnterStop(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: stop\r\n");
+    LogUart_SendString("state: stop\r\n");
 }
 
 /*
@@ -170,7 +170,7 @@ static void StateMachine_EnterStop(void)
 static void StateMachine_EnterError(void)
 {
     StateMachine_StopMotionModules();
-    Link_SendString("state: error\r\n");
+    LogUart_SendString("state: error\r\n");
 }
 
 /*

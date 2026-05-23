@@ -71,12 +71,12 @@ void GPIOB_IRQHandler(void)
 
 void UART0_IRQHandler(void)
 {
-    JY61P_HandleUARTInterrupt();
+    Interrupt_ClearUART(LogUart_INST);
 }
 
 void UART1_IRQHandler(void)
 {
-    Interrupt_ClearUART(JQ8400_INST);
+    JY61P_HandleUARTInterrupt();
 }
 
 void UART3_IRQHandler(void)

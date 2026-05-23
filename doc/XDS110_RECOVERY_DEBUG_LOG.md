@@ -169,9 +169,9 @@ Success
 - `factory_reset_xds110.ps1` 会触发 DSSM Factory Reset，会重置 NONMAIN，必须谨慎。
 - 串口监听 COM17/COM18 没收到文本不代表程序没跑；XDS110 虚拟串口未必接到当前固件打印的 TX 引脚。
 - 当前安全版 UART 打印引脚是：
-  - UART0：PA28 TX / PA31 RX
-  - UART1：PB6 TX / PB7 RX
-  - UART3：PB2 TX / PB3 RX
+  - UART0：PA10 TX / PA11 RX，Type-C CH340 日志/BSL 数据线
+  - UART1：PB6 TX / PB7 RX，JY61P 姿态模块
+  - UART3：PB2 TX / PB3 RX，Link/Exchange 视觉模块
 - 最可靠的恢复成功标志是 PA14 慢闪，以及 XDS110 能再次下载 MAIN 程序。
 
 ## 第二块锁死板记录：BootDiag 0x00000036

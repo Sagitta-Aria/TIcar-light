@@ -16,7 +16,8 @@
 | PA0 | OLED I2C0 SDA | 开漏释放，必须上拉 |
 | PA1 | OLED I2C0 SCL | 开漏释放，必须上拉 |
 | PA5/PA6 | HFXT 晶振 | 当前软件不用 PLL，但硬件保留 |
-| PA10/PA11/PA18 | BSL 相关 | 保留恢复入口，不接普通外设 |
+| PA10/PA11 | Type-C CH340 / BSL UART | 正常固件作日志串口，进入 BSL 时复用为下载串口 |
+| PA18 | BSL invoke | 保留恢复入口，正常运行时不要外接会拉低的普通外设 |
 | PA14 | 状态 LED | 固定作 LED，成功/错误状态从这里看 |
 | PA19/PA20 | SWDIO/SWCLK | 下载调试脚，禁止接外设 |
 | PA21 | VREF- 相关 | 暂时保留，不做普通 GPIO/ADC |
@@ -34,9 +35,10 @@
 | J-Link | SWCLK | PA20 | 只接调试器 |
 | Key 1 | 输入 | PB9 | 菜单确认 |
 | Key 2 | 输入 | PB8 | 菜单切换/返回 |
-| JY61P | UART0 TX/RX | PA28 / PA31 | 115200，保留姿态模块 |
-| JQ8400 | UART1 TX/RX | PB6 / PB7 | 115200，保留语音模块 |
+| Type-C 日志 | UART0 TX/RX | PA10 / PA11 | 115200，接板载 CH340；PA18 拉低进 BSL 时同线复用下载 |
+| JY61P | UART1 TX/RX | PB6 / PB7 | 115200，语音模块暂停后释放给姿态模块 |
 | Link/反馈总线 | UART3 TX/RX | PB2 / PB3 | 115200，可接视觉模块或后续步进反馈总线 |
+| JQ8400 | 暂停接入 | 不接 | 框架保留，不初始化，不占用 UART |
 
 ## 四个闭环步进驱动器
 
@@ -70,7 +72,9 @@ PA14 已固定作 LED，PA18 保留 BSL，PA21/PA23 保留 VREF，因此灰度�
 | 管脚 | 建议用途 |
 | --- | --- |
 | PA2 | 普通 GPIO 或后续调试输入 |
+| PA28 | 普通 GPIO 备用；UART0 已给 PA10/PA11 日志，不再接 JY61P |
+| PA31 | 普通 GPIO 备用；UART0 已给 PA10/PA11 日志，不再接 JY61P |
 | PB19 | 普通 GPIO，后续可做步进报警输入 |
 | PB20 | 普通 GPIO，后续可做步进到位/报警输入 |
 
-如果后续确认不接 JY61P/JQ8400/视觉模块，也可以释放 PA28/PA31、PB6/PB7、PB2/PB3 这些 UART 口，但需要同步改 `generated/ti_msp_dl_config.*` 和文档。
+如果后续要恢复 JQ8400，需要重新分配一组真实可用的 UART 引脚；不要直接抢 PB6/PB7，否则会和 JY61P 冲突。

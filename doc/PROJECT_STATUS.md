@@ -1,11 +1,13 @@
 # light-car1.1ccs 工程状态
 
+最后更新：2026-05-23
+
 本文记录 CCS 版 `1.1ccs` 的当前结构、启动现象和硬件安全策略。
 
 ## 目录分层
 
 - `app/`：应用层逻辑，包括菜单、状态机、循迹、速度命令、任务框架和步进测试入口。
-- `hardware/`：硬件驱动，包括 OLED、按键、四步进电机、灰度、JY61P、JQ8400、Link。
+- `hardware/`：硬件驱动，包括 OLED、按键、四步进电机、灰度、Type-C 日志、JY61P、Link。JQ8400 框架保留但当前暂停接入。
 - `system/`：板级初始化、延时和中断入口。
 - `config/`：工程参数和引脚映射。
 - `generated/`：CCS/SysConfig 风格生成层。
@@ -16,29 +18,39 @@
 
 `app/main.c` 保持干净：
 
-当前为了芯片恢复，`CAR_RECOVERY_SAFE_BUILD = 1`。实际编译出来的固件会跳过 App 层，只执行 `Board_Init()` 和 `Board_Task()` 里的 PA14 慢闪与三路 UART 心跳恢复逻辑。
+当前正常小车固件使用 `CAR_RECOVERY_SAFE_BUILD = 0`。程序会执行完整 `Board_Init()`，无致命错误时进入 `App_Init()` 和 `App_Task()`。
 
-恢复正常小车固件前，需要在 `config/board_config.h` 把：
+只有救板子或首次恢复下载时，才需要在 `config/board_config.h` 临时改成：
 
 ```c
 #define CAR_RECOVERY_SAFE_BUILD       (1U)
 ```
 
-改回：
+确认 PA14 稳定慢闪、可重复下载后，再改回：
 
 ```c
 #define CAR_RECOVERY_SAFE_BUILD       (0U)
 ```
 
-安全模式关闭后，主流程为：
+保持正常模式时，主流程为：
 
 1. `Board_Init()`：初始化电源、GPIO、OLED、时钟、步进 GPIO、UART、ADC 和硬件模块。
 2. 无致命错误时执行 `App_Init()`。
 3. 主循环持续执行 `Board_Task()`，无致命错误时执行 `App_Task()`。
 
+## 已完成并验证的基础项
+
+- XDS110 MAIN 下载成功，不需要 Factory Reset，不写 NONMAIN。
+- PA14 状态灯可用：慢闪为主循环存活，快闪为 OLED/I2C 等非致命错误，常亮为致命错误。
+- OLED/I2C 初始化已加超时、错误兜底和 bus clear，线松或 OLED 未响应时不会死等。
+- Type-C CH340 日志串口框架已接入 `UART0 PA10/PA11`，调试日志不再占用视觉串口。
+- PB9/PB8 按键已加约 40ms 软件消抖，菜单切换不再依赖临时 PA14 翻转调试。
+- OLED 菜单和启动探针页避开顶部黄色区域；滚动菜单当前项固定在中间行。
+- 四个闭环步进电机已改成 `STEP/DIR` 控制框架，主循环每轮有限步进输出，不长时间阻塞。
+
 ## 开机 OLED 探针
 
-OLED 上电会显示启动阶段，用来定位初始化卡点：
+OLED 上电会在下半区显示启动阶段，用来定位初始化卡点；顶部黄色区域保持清空：
 
 - `RUN Clock`
 - `RUN Stepper`
@@ -104,6 +116,15 @@ PA12/PA13/PA22 已用于步进电机，不再接旧编码器。
 
 2026-05-23 已通过 XDS110 恢复下载验证：`CAR_RECOVERY_SAFE_BUILD = 1` 时，安全版 MAIN 程序下载成功后 PA14 已实测慢闪。
 
+## 当前 UART 分配
+
+| 用途 | UART | 引脚 | 说明 |
+| --- | --- | --- | --- |
+| Type-C 日志 / BSL 数据线 | UART0 | PA10 TX / PA11 RX | 正常固件打印日志；PA18 拉低进 BSL 时同线复用下载 |
+| JY61P 姿态模块 | UART1 | PB6 TX / PB7 RX | 语音模块暂停后释放给姿态模块 |
+| Link/Exchange 视觉模块 | UART3 | PB2 TX / PB3 RX | 先保留视觉通信框架 |
+| JQ8400 语音模块 | 暂停 | 不接 | 不初始化，不占用串口 |
+
 ## XDS110 恢复记录
 
 本次芯片失联时，Boot Diagnostic 曾读到 `0x00000007`。经用户明确授权后执行 DSSM Factory Reset，随后安全版 MAIN 程序下载成功。
@@ -142,5 +163,7 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 
 - 当前 STEP 由主循环软件调度，适合低速验证接线和方向，不适合最终高速同步控制。
 - 步进驱动器反馈 UART/告警输入还没有接入业务闭环。
-- JQ8400 和 Link/Exchange 框架保留，但业务还没展开。
+- JQ8400 语音模块暂停接入；Link/Exchange 框架保留，但视觉业务还没展开。
+- JY61P 只完成 UART 帧解析和 yaw 缓存，姿态闭环还没有真正参与完整路线控制。
+- 灰度循迹和路线状态机有框架，但实车参数、阈值、路口策略仍需要现场调试。
 - `generated/ti_msp_dl_config.*` 是手工维护的 SysConfig 风格文件，再生成 SysConfig 时必须重新核对引脚。

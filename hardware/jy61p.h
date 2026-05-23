@@ -9,7 +9,7 @@ void JY61P_Init(void);
 /* JY61P_Task：JY61P 后台任务入口，当前解析在串口中断内完成。 */
 void JY61P_Task(void);
 
-/* JY61P_HandleUARTInterrupt：处理 UART0 接收中断并解析 yaw。 */
+/* JY61P_HandleUARTInterrupt：处理 JY61P 串口接收中断并解析 yaw。 */
 void JY61P_HandleUARTInterrupt(void);
 
 /* JY61P_SendByte：向 JY61P 模块发送 1 个字节。 */

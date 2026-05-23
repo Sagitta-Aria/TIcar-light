@@ -91,39 +91,39 @@ extern "C" {
 #define GPIO_OLED_IOMUX_SCL                                       (IOMUX_PINCM2)
 #define GPIO_OLED_IOMUX_SCL_FUNC                        IOMUX_PINCM2_PF_I2C0_SCL
 
-/* JY61P UART0: PA28 TX, PA31 RX. */
-#define JY61P_INST                                                         UART0
+/* Type-C CH340 日志 UART0: PA10 TX, PA11 RX。PA18 仍只作为 BSL invoke。 */
+#define LogUart_INST                                                       UART0
+#define LogUart_INST_FREQUENCY                                          32000000
+#define LogUart_INST_IRQHandler                                 UART0_IRQHandler
+#define LogUart_INST_INT_IRQN                                     UART0_INT_IRQn
+#define GPIO_LogUart_RX_PORT                                             GPIOA
+#define GPIO_LogUart_TX_PORT                                             GPIOA
+#define GPIO_LogUart_RX_PIN                                     DL_GPIO_PIN_11
+#define GPIO_LogUart_TX_PIN                                     DL_GPIO_PIN_10
+#define GPIO_LogUart_IOMUX_RX                                   (IOMUX_PINCM22)
+#define GPIO_LogUart_IOMUX_TX                                   (IOMUX_PINCM21)
+#define GPIO_LogUart_IOMUX_RX_FUNC                    IOMUX_PINCM22_PF_UART0_RX
+#define GPIO_LogUart_IOMUX_TX_FUNC                    IOMUX_PINCM21_PF_UART0_TX
+#define LogUart_BAUD_RATE                                            (115200)
+#define LogUart_IBRD_32_MHZ_115200_BAUD                                  (17)
+#define LogUart_FBRD_32_MHZ_115200_BAUD                                  (23)
+
+/* JY61P UART1: PB6 TX, PB7 RX。JQ8400 暂停接入后释放给姿态模块。 */
+#define JY61P_INST                                                         UART1
 #define JY61P_INST_FREQUENCY                                            32000000
-#define JY61P_INST_IRQHandler                                   UART0_IRQHandler
-#define JY61P_INST_INT_IRQN                                       UART0_INT_IRQn
-#define GPIO_JY61P_RX_PORT                                                 GPIOA
-#define GPIO_JY61P_TX_PORT                                                 GPIOA
-#define GPIO_JY61P_RX_PIN                                         DL_GPIO_PIN_31
-#define GPIO_JY61P_TX_PIN                                         DL_GPIO_PIN_28
-#define GPIO_JY61P_IOMUX_RX                                       (IOMUX_PINCM6)
-#define GPIO_JY61P_IOMUX_TX                                       (IOMUX_PINCM3)
-#define GPIO_JY61P_IOMUX_RX_FUNC                        IOMUX_PINCM6_PF_UART0_RX
-#define GPIO_JY61P_IOMUX_TX_FUNC                        IOMUX_PINCM3_PF_UART0_TX
+#define JY61P_INST_IRQHandler                                   UART1_IRQHandler
+#define JY61P_INST_INT_IRQN                                       UART1_INT_IRQn
+#define GPIO_JY61P_RX_PORT                                                 GPIOB
+#define GPIO_JY61P_TX_PORT                                                 GPIOB
+#define GPIO_JY61P_RX_PIN                                          DL_GPIO_PIN_7
+#define GPIO_JY61P_TX_PIN                                          DL_GPIO_PIN_6
+#define GPIO_JY61P_IOMUX_RX                                      (IOMUX_PINCM24)
+#define GPIO_JY61P_IOMUX_TX                                      (IOMUX_PINCM23)
+#define GPIO_JY61P_IOMUX_RX_FUNC                       IOMUX_PINCM24_PF_UART1_RX
+#define GPIO_JY61P_IOMUX_TX_FUNC                       IOMUX_PINCM23_PF_UART1_TX
 #define JY61P_BAUD_RATE                                                 (115200)
 #define JY61P_IBRD_32_MHZ_115200_BAUD                                       (17)
 #define JY61P_FBRD_32_MHZ_115200_BAUD                                       (23)
-
-/* JQ8400 UART1: PB6 TX, PB7 RX. */
-#define JQ8400_INST                                                        UART1
-#define JQ8400_INST_FREQUENCY                                           32000000
-#define JQ8400_INST_IRQHandler                                  UART1_IRQHandler
-#define JQ8400_INST_INT_IRQN                                      UART1_INT_IRQn
-#define GPIO_JQ8400_RX_PORT                                                GPIOB
-#define GPIO_JQ8400_TX_PORT                                                GPIOB
-#define GPIO_JQ8400_RX_PIN                                         DL_GPIO_PIN_7
-#define GPIO_JQ8400_TX_PIN                                         DL_GPIO_PIN_6
-#define GPIO_JQ8400_IOMUX_RX                                     (IOMUX_PINCM24)
-#define GPIO_JQ8400_IOMUX_TX                                     (IOMUX_PINCM23)
-#define GPIO_JQ8400_IOMUX_RX_FUNC                      IOMUX_PINCM24_PF_UART1_RX
-#define GPIO_JQ8400_IOMUX_TX_FUNC                      IOMUX_PINCM23_PF_UART1_TX
-#define JQ8400_BAUD_RATE                                                (115200)
-#define JQ8400_IBRD_32_MHZ_115200_BAUD                                      (17)
-#define JQ8400_FBRD_32_MHZ_115200_BAUD                                      (23)
 
 /* Exchange UART3: PB2 TX, PB3 RX. */
 #define Exchange_INST                                                      UART3
@@ -196,8 +196,8 @@ bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 bool SYSCFG_DL_SYSCTL_isClockOk(void);
 void SYSCFG_DL_PWM_init(void);
 void SYSCFG_DL_OLED_init(void);
+void SYSCFG_DL_LogUart_init(void);
 void SYSCFG_DL_JY61P_init(void);
-void SYSCFG_DL_JQ8400_init(void);
 void SYSCFG_DL_Exchange_init(void);
 void SYSCFG_DL_GRAY_ADC0_init(void);
 void SYSCFG_DL_GRAY_ADC1_init(void);

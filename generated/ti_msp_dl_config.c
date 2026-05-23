@@ -6,8 +6,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_GPIO_init();
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_OLED_init();
+    SYSCFG_DL_LogUart_init();
     SYSCFG_DL_JY61P_init();
-    SYSCFG_DL_JQ8400_init();
     SYSCFG_DL_Exchange_init();
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();
@@ -28,8 +28,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
     DL_I2C_reset(OLED_INST);
+    DL_UART_Main_reset(LogUart_INST);
     DL_UART_Main_reset(JY61P_INST);
-    DL_UART_Main_reset(JQ8400_INST);
     DL_UART_Main_reset(Exchange_INST);
     DL_ADC12_reset(GRAY_ADC0_INST);
     DL_ADC12_reset(GRAY_ADC1_INST);
@@ -37,8 +37,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_I2C_enablePower(OLED_INST);
+    DL_UART_Main_enablePower(LogUart_INST);
     DL_UART_Main_enablePower(JY61P_INST);
-    DL_UART_Main_enablePower(JQ8400_INST);
     DL_UART_Main_enablePower(Exchange_INST);
     DL_ADC12_enablePower(GRAY_ADC0_INST);
     DL_ADC12_enablePower(GRAY_ADC1_INST);
@@ -76,13 +76,13 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_enableHiZ(GPIO_OLED_IOMUX_SCL);
 
     DL_GPIO_initPeripheralOutputFunction(
+        GPIO_LogUart_IOMUX_TX, GPIO_LogUart_IOMUX_TX_FUNC);
+    DL_GPIO_initPeripheralInputFunction(
+        GPIO_LogUart_IOMUX_RX, GPIO_LogUart_IOMUX_RX_FUNC);
+    DL_GPIO_initPeripheralOutputFunction(
         GPIO_JY61P_IOMUX_TX, GPIO_JY61P_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_JY61P_IOMUX_RX, GPIO_JY61P_IOMUX_RX_FUNC);
-    DL_GPIO_initPeripheralOutputFunction(
-        GPIO_JQ8400_IOMUX_TX, GPIO_JQ8400_IOMUX_TX_FUNC);
-    DL_GPIO_initPeripheralInputFunction(
-        GPIO_JQ8400_IOMUX_RX, GPIO_JQ8400_IOMUX_RX_FUNC);
     DL_GPIO_initPeripheralOutputFunction(
         GPIO_Exchange_IOMUX_TX, GPIO_Exchange_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
@@ -383,6 +383,18 @@ static const DL_UART_Main_Config gUARTConfig = {
     .stopBits = DL_UART_MAIN_STOP_BITS_ONE
 };
 
+SYSCONFIG_WEAK void SYSCFG_DL_LogUart_init(void)
+{
+    DL_UART_Main_setClockConfig(
+        LogUart_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
+    DL_UART_Main_init(LogUart_INST, (DL_UART_Main_Config *) &gUARTConfig);
+    DL_UART_Main_setOversampling(LogUart_INST, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(
+        LogUart_INST, LogUart_IBRD_32_MHZ_115200_BAUD,
+        LogUart_FBRD_32_MHZ_115200_BAUD);
+    DL_UART_Main_enable(LogUart_INST);
+}
+
 SYSCONFIG_WEAK void SYSCFG_DL_JY61P_init(void)
 {
     DL_UART_Main_setClockConfig(
@@ -393,18 +405,6 @@ SYSCONFIG_WEAK void SYSCFG_DL_JY61P_init(void)
         JY61P_INST, JY61P_IBRD_32_MHZ_115200_BAUD,
         JY61P_FBRD_32_MHZ_115200_BAUD);
     DL_UART_Main_enable(JY61P_INST);
-}
-
-SYSCONFIG_WEAK void SYSCFG_DL_JQ8400_init(void)
-{
-    DL_UART_Main_setClockConfig(
-        JQ8400_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
-    DL_UART_Main_init(JQ8400_INST, (DL_UART_Main_Config *) &gUARTConfig);
-    DL_UART_Main_setOversampling(JQ8400_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(
-        JQ8400_INST, JQ8400_IBRD_32_MHZ_115200_BAUD,
-        JQ8400_FBRD_32_MHZ_115200_BAUD);
-    DL_UART_Main_enable(JQ8400_INST);
 }
 
 SYSCONFIG_WEAK void SYSCFG_DL_Exchange_init(void)
