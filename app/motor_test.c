@@ -30,8 +30,7 @@ static void MotorTest_RunOne(MotorId motor, MotorDir dir, const char *text)
 {
     Motor_Stop();
     Motor_Set(motor, dir, CAR_STEPPER_TEST_COMMAND);
-    LogUart_SendString(text);
-    LogUart_SendString("\r\n");
+    LOG_LINE(text);
 }
 
 /*
@@ -86,7 +85,7 @@ static void MotorTest_ApplyStep(void)
     case MOTOR_TEST_STEP_DONE:
     default:
         Motor_Stop();
-        LogUart_SendString("stepper test: stop\r\n");
+        LOG_LINE("stepper test: stop");
         break;
     }
 
@@ -126,7 +125,7 @@ uint8_t MotorTest_Next(void)
     if (g_motorTestStep >= MOTOR_TEST_STEP_GIMBAL_2_REVERSE) {
         g_motorTestStep = MOTOR_TEST_STEP_DONE;
         MotorTest_Stop();
-        LogUart_SendString("stepper test: done\r\n");
+        LOG_LINE("stepper test: done");
         return 0U;
     }
 
@@ -144,7 +143,7 @@ void MotorTest_Task(void)
     --g_motorTestTicks;
     if (g_motorTestTicks == 0U) {
         Motor_Stop();
-        LogUart_SendString("stepper test: auto stop\r\n");
+        LOG_LINE("stepper test: auto stop");
     }
 }
 

@@ -30,9 +30,9 @@ static void App_HandleKeyEvent(KeyEvent event)
 
     /* 按键测试日志：如果一按出现多行，说明硬件抖动或中断消抖还要继续加强。 */
     if (event == KEY_EVENT_1) {
-        LogUart_SendString("key: K1 PB9\r\n");
+        LOG_LINE("key: K1 PB9");
     } else if (event == KEY_EVENT_2) {
-        LogUart_SendString("key: K2 PB8\r\n");
+        LOG_LINE("key: K2 PB8");
     }
 
     state = StateMachine_GetState();
@@ -90,14 +90,20 @@ static void App_HandleKeyEvent(KeyEvent event)
 void App_Init(void)
 {
     Board_ShowBootProgress("I2C OK", "UART OK", "ADC OK", "APP...", "");
+    LOG_LINE("app: init begin");
     delay_ms(100U);
 
     Tracking_Init();
+    LOG_LINE("app: tracking init ok");
     Route_Init();
+    LOG_LINE("app: route init ok");
     SpeedControl_Init();
+    LOG_LINE("app: speed control init ok");
     MotorTest_Init();
+    LOG_LINE("app: motor test init ok");
     Menu_Init();
-    LogUart_SendString("light-car1.1ccs init ok\r\n");
+    LOG_LINE("app: menu init ok");
+    LOG_LINE("light-car1.1ccs init ok");
     StateMachine_Init();
 
     Board_ShowBootProgress("I2C OK", "UART OK", "ADC OK", "APP OK", "");

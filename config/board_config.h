@@ -15,8 +15,13 @@
 #define CAR_RECOVERY_SAFE_BUILD       (0U)
 
 /*
- * CAR_ENABLE_LOG_UART：是否启用 Type-C CH340 日志串口。
+ * CAR_ENABLE_LOG_UART：工程日志总开关。
+ *
+ * 1：启用 Type-C CH340 日志串口，启动、按键、状态机、路线阶段、循迹异常等行为都会打印。
+ * 0：LOG_* 宏编译为空操作，正常小车逻辑不再输出日志。
+ *
  * UART0 复用 PA10/PA11，和 BSL 串口走同一组物理引脚。
+ * 注意：PA10/PA11 仍按接线表保留给 Type-C/BSL，不建议拿去接其它外设。
  */
 #define CAR_ENABLE_LOG_UART            (1U)
 

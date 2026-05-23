@@ -5,7 +5,7 @@
 
 /*
  * Pin source: 地猛星最小系统板 H3/H5 引脚排布 + 1.1ccs 接线表。
- * 详细约束见 doc/PIN_ASSIGNMENT.md。
+ * 详细约束见 doc/PIN_ASSIGNMENT_2026-05-23.md。
  */
 
 /*

@@ -25,6 +25,13 @@
 - 出错后优先“记录错误并退出”，不要在底层无限重试。
 - 能恢复的错误由模块提供显式恢复函数，例如 `OLED_TryRecover()`。
 
+## 日志风格
+
+- 行为日志统一用 `LOG_LINE()`、`LOG_RAW()`、`LOG_U32()`、`LOG_I32()`、`LOG_HEX32()`。
+- 不在业务代码里直接调用 `LogUart_SendString()`，除非正在维护 `hardware/log_uart.c` 本身。
+- `CAR_ENABLE_LOG_UART` 是总开关，改成 0 后日志宏必须为空操作。
+- 高频数据只在监视页按周期打印，不要在每轮电机输出或每次 ADC 采样里刷屏。
+
 ## 注释风格
 
 - 新函数前优先写中文短注释，说明“作用、使用场景、限制”。
@@ -43,7 +50,7 @@
 ## 生成层维护
 
 - `generated/ti_msp_dl_config.*` 现在是 CCS/SysConfig 风格手工维护文件。
-- 改引脚必须同步更新 `doc/PIN_ASSIGNMENT.md`、`config/pin_map.h` 和生成层宏。
+- 改引脚必须同步更新 `doc/PIN_ASSIGNMENT_2026-05-23.md`、`config/pin_map.h` 和生成层宏。
 - 再次用 SysConfig 图形界面生成后，必须重点复查 PA0/PA1、PA14、PA19/PA20、PA21/PA23、PB14-PB17。
 
 ## 验证习惯

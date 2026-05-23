@@ -1,6 +1,7 @@
 #include "tracking_exception.h"
 
 #include "board_config.h"
+#include "log_uart.h"
 
 static TrackingExceptionState g_trackingExceptionState;
 static uint16_t g_lostTicks;
@@ -9,6 +10,37 @@ static int8_t g_lastLineSide;
 static int16_t g_lastLeftCommand;
 static int16_t g_lastRightCommand;
 static uint8_t g_hasLastCommand;
+
+static const char *TrackingException_StateText(TrackingExceptionState state)
+{
+    switch (state) {
+    case TRACKING_EXCEPTION_STATE_NORMAL:
+        return "normal";
+    case TRACKING_EXCEPTION_STATE_WIDE_LINE:
+        return "wide_line";
+    case TRACKING_EXCEPTION_STATE_LOST_HOLD:
+        return "lost_hold";
+    case TRACKING_EXCEPTION_STATE_LOST_SEARCH_LEFT:
+        return "search_left";
+    case TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT:
+        return "search_right";
+    case TRACKING_EXCEPTION_STATE_ADC_FAULT:
+        return "adc_fault";
+    case TRACKING_EXCEPTION_STATE_LOST_STOP:
+        return "lost_stop";
+    default:
+        return "unknown";
+    }
+}
+
+static void TrackingException_SetState(TrackingExceptionState state)
+{
+    if (g_trackingExceptionState != state) {
+        LOG_RAW("tracking exception: ");
+        LOG_LINE(TrackingException_StateText(state));
+    }
+    g_trackingExceptionState = state;
+}
 
 /*
  * 作用：限制电机命令范围。
@@ -117,13 +149,11 @@ static void TrackingException_BuildSearchCommand(uint8_t searchLeft,
     if (searchLeft) {
         *leftCommand = (int16_t)slowCommand;
         *rightCommand = (int16_t)fastCommand;
-        g_trackingExceptionState =
-            TRACKING_EXCEPTION_STATE_LOST_SEARCH_LEFT;
+        TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_SEARCH_LEFT);
     } else {
         *leftCommand = (int16_t)fastCommand;
         *rightCommand = (int16_t)slowCommand;
-        g_trackingExceptionState =
-            TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT;
+        TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT);
     }
 }
 
@@ -138,7 +168,7 @@ static TrackingExceptionAction TrackingException_HandleAdcFault(
         ++g_adcFaultTicks;
     }
 
-    g_trackingExceptionState = TRACKING_EXCEPTION_STATE_ADC_FAULT;
+    TrackingException_SetState(TRACKING_EXCEPTION_STATE_ADC_FAULT);
     if ((g_adcFaultTicks < CAR_TRACK_ADC_FAULT_STOP_TICKS) &&
         g_hasLastCommand) {
         *leftCommand = g_lastLeftCommand;
@@ -167,7 +197,7 @@ static TrackingExceptionAction TrackingException_HandleLostLine(
     }
 
     if (g_lostTicks <= CAR_TRACK_LOST_HOLD_TICKS) {
-        g_trackingExceptionState = TRACKING_EXCEPTION_STATE_LOST_HOLD;
+        TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_HOLD);
         if (g_hasLastCommand) {
             *leftCommand = g_lastLeftCommand;
             *rightCommand = g_lastRightCommand;
@@ -186,7 +216,7 @@ static TrackingExceptionAction TrackingException_HandleLostLine(
     }
 
 #if CAR_TRACK_LOST_STOP
-    g_trackingExceptionState = TRACKING_EXCEPTION_STATE_LOST_STOP;
+    TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_STOP);
     *leftCommand = 0;
     *rightCommand = 0;
     return TRACKING_EXCEPTION_ACTION_STOP;
@@ -247,9 +277,9 @@ TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
     TrackingException_SaveCommand(*leftCommand, *rightCommand);
 
     if (activeCount >= CAR_TRACK_WIDE_LINE_ACTIVE_COUNT) {
-        g_trackingExceptionState = TRACKING_EXCEPTION_STATE_WIDE_LINE;
+        TrackingException_SetState(TRACKING_EXCEPTION_STATE_WIDE_LINE);
     } else {
-        g_trackingExceptionState = TRACKING_EXCEPTION_STATE_NORMAL;
+        TrackingException_SetState(TRACKING_EXCEPTION_STATE_NORMAL);
     }
 
     return TRACKING_EXCEPTION_ACTION_RUN;
@@ -262,24 +292,7 @@ TrackingExceptionState TrackingException_GetState(void)
 
 const char *TrackingException_GetStateName(TrackingExceptionState state)
 {
-    switch (state) {
-    case TRACKING_EXCEPTION_STATE_NORMAL:
-        return "normal";
-    case TRACKING_EXCEPTION_STATE_WIDE_LINE:
-        return "wide_line";
-    case TRACKING_EXCEPTION_STATE_LOST_HOLD:
-        return "lost_hold";
-    case TRACKING_EXCEPTION_STATE_LOST_SEARCH_LEFT:
-        return "search_left";
-    case TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT:
-        return "search_right";
-    case TRACKING_EXCEPTION_STATE_ADC_FAULT:
-        return "adc_fault";
-    case TRACKING_EXCEPTION_STATE_LOST_STOP:
-        return "lost_stop";
-    default:
-        return "unknown";
-    }
+    return TrackingException_StateText(state);
 }
 
 uint16_t TrackingException_GetLostTicks(void)

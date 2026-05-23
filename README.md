@@ -34,6 +34,22 @@ D:\Ti\light-car1.0ccs
 - 按键 PB9/PB8 已加软件消抖；OLED 菜单只用下半区，选中项固定在中间行。
 - 四个闭环步进电机已切到 STEP/DIR 框架，适合低速接线和方向测试。
 
+## 日志开关
+
+正常调试时，所有行为日志走 Type-C CH340：
+
+```c
+#define CAR_ENABLE_LOG_UART            (1U)
+```
+
+不想打印时，只需要在 `config/board_config.h` 改成：
+
+```c
+#define CAR_ENABLE_LOG_UART            (0U)
+```
+
+关闭后 `LOG_*` 宏会变成空操作。PA10/PA11 仍保留给 Type-C/BSL，不建议改接其它外设。
+
 ## 构建
 
 ```powershell
@@ -78,7 +94,7 @@ Factory Reset 必须显式确认：
 & "D:\Ti\light-car1.0ccs\tools\factory_reset_xds110.ps1" -ConfirmFactoryReset
 ```
 
-完整恢复记录见 `doc/XDS110_RECOVERY_DEBUG_LOG.md`。
+完整恢复记录见 `doc/XDS110_RECOVERY_DEBUG_LOG_2026-05-23.md`。
 
 ## 下载建议
 
@@ -104,11 +120,11 @@ JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
 
 详细接线和当前状态见：
 
-- `doc/PIN_ASSIGNMENT.md`
-- `doc/PROJECT_STATUS.md`
-- `doc/ROADMAP.md`
-- `doc/CODE_STYLE_1_1CCS.md`
-- `doc/XDS110_RECOVERY_DEBUG_LOG.md`
+- `doc/PIN_ASSIGNMENT_2026-05-23.md`
+- `doc/PROJECT_STATUS_2026-05-23.md`
+- `doc/ROADMAP_2026-05-23.md`
+- `doc/CODE_STYLE_1_1CCS_2026-05-23.md`
+- `doc/XDS110_RECOVERY_DEBUG_LOG_2026-05-23.md`
 
 ## GitHub 分支说明
 

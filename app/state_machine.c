@@ -10,6 +10,49 @@
 
 static CarState g_carState = CAR_STATE_INIT;
 
+static const char *StateMachine_GetEventName(CarEvent event)
+{
+    switch (event) {
+    case CAR_EVENT_START:
+        return "start";
+    case CAR_EVENT_STOP:
+        return "stop";
+    case CAR_EVENT_MENU:
+        return "menu";
+    case CAR_EVENT_BACK:
+        return "back";
+    case CAR_EVENT_GRAY_CALIBRATION_START:
+        return "gray_calibration_start";
+    case CAR_EVENT_GRAY_CALIBRATION_SAMPLE:
+        return "gray_calibration_sample";
+    case CAR_EVENT_GRAY_CALIBRATION_APPLY:
+        return "gray_calibration_apply";
+    case CAR_EVENT_MOTOR_TEST_NEXT:
+        return "motor_test_next";
+    case CAR_EVENT_TRACKING_TEST_START:
+        return "tracking_test_start";
+    case CAR_EVENT_PID_MONITOR_START:
+        return "pid_monitor_start";
+    case CAR_EVENT_GRAY_MONITOR_START:
+        return "gray_monitor_start";
+    case CAR_EVENT_EXCHANGE_MONITOR_START:
+        return "exchange_monitor_start";
+    case CAR_EVENT_ENCODER_MONITOR_START:
+        return "encoder_monitor_start";
+    case CAR_EVENT_MISSION_START:
+        return "mission_start";
+    case CAR_EVENT_TRACKING_DONE:
+        return "tracking_done";
+    case CAR_EVENT_ERROR:
+        return "error";
+    case CAR_EVENT_CLEAR_ERROR:
+        return "clear_error";
+    case CAR_EVENT_NONE:
+    default:
+        return "none";
+    }
+}
+
 /*
  * 作用：停止所有会让车运动的模块。
  * 使用场景：进入菜单、监视、校准、停止、错误等非运行状态时。
@@ -29,7 +72,7 @@ static void StateMachine_StopMotionModules(void)
 static void StateMachine_EnterIdle(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: idle\r\n");
+    LOG_LINE("state: idle");
 }
 
 /*
@@ -39,7 +82,7 @@ static void StateMachine_EnterIdle(void)
 static void StateMachine_EnterMenu(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: menu\r\n");
+    LOG_LINE("state: menu");
 }
 
 /*
@@ -51,7 +94,7 @@ static void StateMachine_EnterGrayCalibration(void)
 {
     StateMachine_StopMotionModules();
     Gray_CalibrationReset();
-    LogUart_SendString("state: gray calibration\r\n");
+    LOG_LINE("state: gray calibration");
 }
 
 /*
@@ -64,7 +107,7 @@ static void StateMachine_EnterTracking(void)
     MotorTest_Stop();
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
-    LogUart_SendString("state: tracking\r\n");
+    LOG_LINE("state: tracking");
 }
 
 /*
@@ -77,7 +120,7 @@ static void StateMachine_EnterTrackingTest(void)
     MotorTest_Stop();
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
-    LogUart_SendString("state: tracking test\r\n");
+    LOG_LINE("state: tracking test");
 }
 
 /*
@@ -89,7 +132,7 @@ static void StateMachine_EnterMotorTest(void)
     Tracking_SetEnabled(0U);
     Route_Stop();
     MotorTest_Start();
-    LogUart_SendString("state: motor test\r\n");
+    LOG_LINE("state: motor test");
 }
 
 /*
@@ -99,7 +142,7 @@ static void StateMachine_EnterMotorTest(void)
 static void StateMachine_EnterPidMonitor(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: pid monitor\r\n");
+    LOG_LINE("state: pid monitor");
 }
 
 /*
@@ -109,7 +152,7 @@ static void StateMachine_EnterPidMonitor(void)
 static void StateMachine_EnterGrayMonitor(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: gray monitor\r\n");
+    LOG_LINE("state: gray monitor");
 }
 
 /*
@@ -120,7 +163,7 @@ static void StateMachine_EnterGrayMonitor(void)
 static void StateMachine_EnterExchangeMonitor(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: exchange monitor\r\n");
+    LOG_LINE("state: exchange monitor");
 }
 
 /*
@@ -130,7 +173,7 @@ static void StateMachine_EnterExchangeMonitor(void)
 static void StateMachine_EnterEncoderMonitor(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: encoder monitor\r\n");
+    LOG_LINE("state: encoder monitor");
 }
 
 /*
@@ -140,7 +183,7 @@ static void StateMachine_EnterEncoderMonitor(void)
 static void StateMachine_EnterMission(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: mission placeholder\r\n");
+    LOG_LINE("state: mission placeholder");
 }
 
 /*
@@ -150,7 +193,7 @@ static void StateMachine_EnterMission(void)
 static void StateMachine_EnterFinished(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: finished\r\n");
+    LOG_LINE("state: finished");
 }
 
 /*
@@ -160,7 +203,7 @@ static void StateMachine_EnterFinished(void)
 static void StateMachine_EnterStop(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: stop\r\n");
+    LOG_LINE("state: stop");
 }
 
 /*
@@ -170,7 +213,7 @@ static void StateMachine_EnterStop(void)
 static void StateMachine_EnterError(void)
 {
     StateMachine_StopMotionModules();
-    LogUart_SendString("state: error\r\n");
+    LOG_LINE("state: error");
 }
 
 /*
@@ -324,6 +367,9 @@ void StateMachine_Dispatch(CarEvent event)
     if (event == CAR_EVENT_NONE) {
         return;
     }
+
+    LOG_RAW("event: ");
+    LOG_LINE(StateMachine_GetEventName(event));
 
     if (event == CAR_EVENT_ERROR) {
         StateMachine_Enter(CAR_STATE_ERROR);

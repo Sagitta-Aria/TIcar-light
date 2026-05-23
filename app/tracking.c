@@ -2,6 +2,7 @@
 
 #include "board_config.h"
 #include "gray.h"
+#include "log_uart.h"
 #include "motion.h"
 #include "route.h"
 #include "tracking_exception.h"
@@ -16,7 +17,13 @@ void Tracking_Init(void)
 
 void Tracking_SetEnabled(uint8_t enabled)
 {
-    g_trackingEnabled = enabled ? 1U : 0U;
+    uint8_t nextEnabled = enabled ? 1U : 0U;
+
+    if (g_trackingEnabled != nextEnabled) {
+        LOG_LINE(nextEnabled ? "tracking: enable" : "tracking: disable");
+    }
+
+    g_trackingEnabled = nextEnabled;
     TrackingException_Reset();
     if (!g_trackingEnabled) {
         Motion_Stop();

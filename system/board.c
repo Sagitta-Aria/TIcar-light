@@ -41,39 +41,28 @@ static uint8_t Board_RecoveryUartSendByte(UART_Regs *uart, uint8_t data);
 #endif
 
 /*
- * 作用：通过日志串口输出一个 32 位十六进制值。
- * 使用场景：板级错误码变化时，快速知道是哪类错误触发了 PA14 快闪。
- */
-static void Board_LogHex32(uint32_t value)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    int8_t shift;
-
-    LogUart_SendString("0x");
-    for (shift = 28; shift >= 0; shift -= 4) {
-        LogUart_SendByte((uint8_t)hex[(value >> (uint8_t)shift) & 0x0FU]);
-    }
-}
-
-/*
  * 作用：错误码变化时打一行日志。
  * 使用场景：OLED/I2C 超时、时钟错误等需要同时从 PA14 和串口确认的场景。
  */
 static void Board_LogErrorChange(uint32_t errors)
 {
+#if CAR_ENABLE_LOG_UART
     if (errors == BOARD_ERROR_NONE) {
         return;
     }
 
-    LogUart_SendString("board error mask=");
-    Board_LogHex32(errors);
+    LOG_RAW("board error mask=");
+    LogUart_SendHex32(errors);
     if ((errors & BOARD_ERROR_OLED_I2C) != 0U) {
-        LogUart_SendString(" OLED_I2C");
+        LOG_RAW(" OLED_I2C");
     }
     if ((errors & BOARD_ERROR_CLOCK) != 0U) {
-        LogUart_SendString(" CLOCK");
+        LOG_RAW(" CLOCK");
     }
-    LogUart_SendString("\r\n");
+    LOG_LINE("");
+#else
+    (void)errors;
+#endif
 }
 
 /*
@@ -374,13 +363,20 @@ void Board_Init(void)
     Board_ShowBootStep("OK Stepper GPIO", "RUN UART", "WAIT ADC",
         "WAIT Drivers");
 
-    SYSCFG_DL_LogUart_init();
     SYSCFG_DL_JY61P_init();
     SYSCFG_DL_Exchange_init();
+#if CAR_ENABLE_LOG_UART
+    SYSCFG_DL_LogUart_init();
     LogUart_Init();
-    LogUart_SendString("board uart: log/jy61p/exchange ok\r\n");
+    LOG_LINE("board uart: log/jy61p/exchange ok");
+#endif
+#if CAR_ENABLE_LOG_UART
     Board_ShowBootStep("OK UART Log/JY/Ex", "RUN Gray ADC", "WAIT Drivers",
         "WAIT App");
+#else
+    Board_ShowBootStep("OK UART JY/Ex", "RUN Gray ADC", "WAIT Drivers",
+        "WAIT App");
+#endif
 
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();

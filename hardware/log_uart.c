@@ -67,3 +67,52 @@ void LogUart_SendString(const char *text)
         ++text;
     }
 }
+
+void LogUart_SendUnsigned(uint32_t value)
+{
+    char digits[10];
+    uint8_t count = 0U;
+
+    do {
+        digits[count] = (char)('0' + (value % 10U));
+        value /= 10U;
+        ++count;
+    } while ((value != 0U) && (count < (uint8_t)sizeof(digits)));
+
+    while (count > 0U) {
+        --count;
+        if (!LogUart_TrySendByte((uint8_t)digits[count])) {
+            return;
+        }
+    }
+}
+
+void LogUart_SendSigned(int32_t value)
+{
+    uint32_t magnitude;
+
+    if (value < 0) {
+        if (!LogUart_TrySendByte((uint8_t)'-')) {
+            return;
+        }
+        magnitude = (uint32_t)(-(value + 1)) + 1U;
+    } else {
+        magnitude = (uint32_t)value;
+    }
+
+    LogUart_SendUnsigned(magnitude);
+}
+
+void LogUart_SendHex32(uint32_t value)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    int8_t shift;
+
+    LogUart_SendString("0x");
+    for (shift = 28; shift >= 0; shift -= 4) {
+        if (!LogUart_TrySendByte(
+            (uint8_t)hex[(value >> (uint8_t)shift) & 0x0FU])) {
+            return;
+        }
+    }
+}

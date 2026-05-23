@@ -1,5 +1,6 @@
 #include "gray.h"
 
+#include "log_uart.h"
 #include "pin_map.h"
 
 typedef struct {
@@ -431,6 +432,7 @@ void Gray_CalibrationReset(void)
         g_grayMin[i] = GRAY_ADC_MAX_VALUE;
         g_grayMax[i] = 0U;
     }
+    LOG_LINE("gray calibration: reset");
 }
 
 /*
@@ -472,4 +474,5 @@ void Gray_CalibrationApply(void)
     if (g_grayValid) {
         Gray_UpdateDigitalFromRaw();
     }
+    LOG_LINE("gray calibration: apply");
 }

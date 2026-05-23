@@ -3,6 +3,7 @@
 #include "board_config.h"
 #include "encoder.h"
 #include "jy61p.h"
+#include "log_uart.h"
 
 /* RouteProfile：路线外环当前速度配置。 */
 typedef struct {
@@ -21,6 +22,24 @@ static int32_t g_routeLeftBase;
 static int32_t g_routeRightBase;
 static int16_t g_routeCornerStartYaw;
 static int16_t g_routeTargetYaw;
+
+static const char *Route_StageText(RouteStage stage)
+{
+    switch (stage) {
+    case ROUTE_STAGE_IDLE:
+        return "idle";
+    case ROUTE_STAGE_STRAIGHT:
+        return "straight";
+    case ROUTE_STAGE_APPROACH_CORNER:
+        return "approach";
+    case ROUTE_STAGE_TURNING:
+        return "turning";
+    case ROUTE_STAGE_EXIT_CORNER:
+        return "exit";
+    default:
+        return "unknown";
+    }
+}
 
 /*
  * 作用：把 int32_t 转成绝对值，避免编码器反向计数影响距离判断。
@@ -126,6 +145,8 @@ static void Route_EnterStage(RouteStage stage)
     g_routeStage = stage;
     g_routeStageTicks = 0U;
     Route_SetTargets(stage);
+    LOG_RAW("route: stage=");
+    LOG_LINE(Route_StageText(stage));
 
     if (stage == ROUTE_STAGE_TURNING) {
         g_routeCornerStartYaw = JY61P_GetYawDeg();
@@ -175,11 +196,15 @@ void Route_Start(void)
 {
     Route_Init();
     g_routeRunning = 1U;
+    LOG_LINE("route: start");
     Route_EnterStage(ROUTE_STAGE_STRAIGHT);
 }
 
 void Route_Stop(void)
 {
+    if (g_routeRunning != 0U) {
+        LOG_LINE("route: stop");
+    }
     g_routeRunning = 0U;
     g_routeStage = ROUTE_STAGE_IDLE;
     g_routeStageTicks = 0U;
@@ -257,20 +282,7 @@ RouteStage Route_GetStage(void)
 
 const char *Route_GetStageName(RouteStage stage)
 {
-    switch (stage) {
-    case ROUTE_STAGE_IDLE:
-        return "idle";
-    case ROUTE_STAGE_STRAIGHT:
-        return "straight";
-    case ROUTE_STAGE_APPROACH_CORNER:
-        return "approach";
-    case ROUTE_STAGE_TURNING:
-        return "turning";
-    case ROUTE_STAGE_EXIT_CORNER:
-        return "exit";
-    default:
-        return "unknown";
-    }
+    return Route_StageText(stage);
 }
 
 uint16_t Route_GetBaseCommand(void)

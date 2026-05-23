@@ -43,7 +43,7 @@
 - XDS110 MAIN 下载成功，不需要 Factory Reset，不写 NONMAIN。
 - PA14 状态灯可用：慢闪为主循环存活，快闪为 OLED/I2C 等非致命错误，常亮为致命错误。
 - OLED/I2C 初始化已加超时、错误兜底和 bus clear，线松或 OLED 未响应时不会死等。
-- Type-C CH340 日志串口框架已接入 `UART0 PA10/PA11`，调试日志不再占用视觉串口。
+- Type-C CH340 日志串口框架已接入 `UART0 PA10/PA11`，调试日志不再占用视觉串口；`CAR_ENABLE_LOG_UART` 是全局日志开关。
 - PB9/PB8 按键已加约 40ms 软件消抖，菜单切换不再依赖临时 PA14 翻转调试。
 - OLED 菜单和启动探针页避开顶部黄色区域；滚动菜单当前项固定在中间行。
 - 四个闭环步进电机已改成 `STEP/DIR` 控制框架，主循环每轮有限步进输出，不长时间阻塞。
@@ -120,10 +120,18 @@ PA12/PA13/PA22 已用于步进电机，不再接原编码器接口。
 
 | 用途 | UART | 引脚 | 说明 |
 | --- | --- | --- | --- |
-| Type-C 日志 / BSL 数据线 | UART0 | PA10 TX / PA11 RX | 正常固件打印日志；PA18 拉低进 BSL 时同线复用下载 |
+| Type-C 日志 / BSL 数据线 | UART0 | PA10 TX / PA11 RX | 正常固件打印行为日志；PA18 拉低进 BSL 时同线复用下载 |
 | JY61P 姿态模块 | UART1 | PB6 TX / PB7 RX | 语音模块暂停后释放给姿态模块 |
 | Link/Exchange 视觉模块 | UART3 | PB2 TX / PB3 RX | 先保留视觉通信框架 |
 | JQ8400 语音模块 | 暂停 | 不接 | 不初始化，不占用串口 |
+
+日志关闭方式：
+
+```c
+#define CAR_ENABLE_LOG_UART            (0U)
+```
+
+关闭后 `LOG_*` 宏为空操作，启动、按键、状态机、路线阶段、循迹异常、电机测试等行为日志不再输出。PA10/PA11 仍作为 Type-C/BSL 保留脚，不建议复用给其它外设。
 
 ## XDS110 恢复记录
 
@@ -131,7 +139,7 @@ PA12/PA13/PA22 已用于步进电机，不再接原编码器接口。
 
 完整过程、命令和注意事项见：
 
-- `doc/XDS110_RECOVERY_DEBUG_LOG.md`
+- `doc/XDS110_RECOVERY_DEBUG_LOG_2026-05-23.md`
 
 ## 中断处理
 

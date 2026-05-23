@@ -156,8 +156,7 @@ static char *Menu_AppendHexByte(char *write, char *end, uint8_t value)
  */
 static void Menu_SendLine(const char *text)
 {
-    LogUart_SendString(text);
-    LogUart_SendString("\r\n");
+    LOG_LINE(text);
 }
 
 /*
@@ -577,8 +576,12 @@ void Menu_Next(void)
 {
     if (g_menuPage == MENU_PAGE_MAIN) {
         g_mainIndex = (uint8_t)((g_mainIndex + 1U) % MENU_MAIN_COUNT);
+        LOG_RAW("menu: select ");
+        LOG_LINE(g_mainItems[g_mainIndex]);
     } else {
         g_testIndex = (uint8_t)((g_testIndex + 1U) % MENU_TEST_COUNT);
+        LOG_RAW("menu: select ");
+        LOG_LINE(g_testItems[g_testIndex]);
     }
     g_forceRefresh = 1U;
 }
@@ -586,6 +589,8 @@ void Menu_Next(void)
 CarEvent Menu_Confirm(void)
 {
     if (g_menuPage == MENU_PAGE_MAIN) {
+        LOG_RAW("menu: confirm ");
+        LOG_LINE(g_mainItems[g_mainIndex]);
         switch (g_mainIndex) {
         case MENU_MAIN_CALIB:
             return CAR_EVENT_GRAY_CALIBRATION_START;
@@ -601,6 +606,8 @@ CarEvent Menu_Confirm(void)
         }
     }
 
+    LOG_RAW("menu: confirm ");
+    LOG_LINE(g_testItems[g_testIndex]);
     switch (g_testIndex) {
     case MENU_TEST_MOTOR_DIR:
         return CAR_EVENT_MOTOR_TEST_NEXT;
