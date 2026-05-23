@@ -173,3 +173,96 @@ Success
   - UART1：PB6 TX / PB7 RX
   - UART3：PB2 TX / PB3 RX
 - 最可靠的恢复成功标志是 PA14 慢闪，以及 XDS110 能再次下载 MAIN 程序。
+
+## 第二块锁死板记录：BootDiag 0x00000036
+
+日期：2026-05-23
+
+第二块板读取到的诊断值为：
+
+```text
+Device diagnostic read = 0x00000036
+```
+
+TI GEL 对该值的解释是：
+
+```text
+Possible root causes could be one or multiple of the following:
+1) Invalid CRC configuration
+2) Invalid BCR configuration
+3) Invalid BSL configuration
+```
+
+这和第一块板的 `0x00000007` 不同。第一块板可以通过普通 DSSM Factory Reset 恢复；第二块板目前是 NONMAIN 配置区本身异常，且 Factory Reset 命令窗口没有收到 SEC_AP 响应。
+
+已执行并确认失败的恢复动作：
+
+```powershell
+& "D:\Ti\light-car1.0ccs\tools\factory_reset_xds110.ps1" -ConfirmFactoryReset -Slow
+```
+
+失败点：
+
+```text
+Command Sent
+Start hardware Reset using NRST
+SEC_AP Reconnect
+Could not read register SECAP_RCR: target is not connected
+```
+
+长复位脚本也未收到有效响应：
+
+```powershell
+& "D:\Ti\light-car1.0ccs\tools\factory_reset_xds110_long_reset.ps1" -ConfirmFactoryReset
+```
+
+关键输出：
+
+```text
+SECAP_RCR[0..39] = 0x0
+Command execution failed: no valid SEC_AP response.
+```
+
+为了排除 XDS110 的 NRST 没接到板子，新增并运行了诊断脚本：
+
+```powershell
+$env:MSPM0_XDS110_CONFIG="D:\Ti\light-car1.0ccs\targetConfigs\MSPM0G3507_XDS110_SLOW.ccxml"
+& "D:\Ti\ccs\ccs_base\scripting\bin\dss.bat" "D:\Ti\light-car1.0ccs\tools\check_xds110_nrst.js"
+```
+
+结果：
+
+```text
+BOOTDIAG before NRST assert      = 0x00000036
+BOOTDIAG while NRST asserted     = 0x00000000
+BOOTDIAG after NRST deassert     = 0x00000036
+```
+
+结论：XDS110 的 reset 线确实能拉低芯片 NRST，问题不是“NRST 没接上”。失败集中在复位释放后，芯片没有对 DSSM 命令返回 `SECAP_RCR` 应答。
+
+又执行了不擦写的 BSL 串口探测：
+
+```powershell
+& "D:\Ti\light-car1.0ccs\tools\probe_bsl_uart.ps1" -Port COM17 -InvokeMode None
+```
+
+结果表现为回环/残留数据，不是有效 BSL `GET_ID` 响应：
+
+```text
+Connection response: 80 01 00 ...
+GET_ID response: incomplete echo-like bytes
+```
+
+结论：当前 XDS110 `COM17` 没有真正进入 MSPM0 BSL，或者串口 TX/RX 接线存在回环/接错。`COM18` 未收到有效 BSL 响应。
+
+当前判断：
+
+- 这块板已经不是 MAIN 程序下载后跑飞的问题。
+- `0x00000036` 指向 NONMAIN 的 CRC/BCR/BSL 配置异常。
+- XDS110、SWD、NRST 基本可用，因为能读 BootDiag，也能观察到 NRST assert 时诊断值变化。
+- DSSM 命令通道在复位后的响应窗口失败，继续重复 Factory Reset 意义不大。
+- 若继续救这块板，下一步应优先硬件方式确认 BSL：
+  - PA18 按芯片手册要求进入 BSL 的电平；
+  - XDS110 UART TX/RX 必须交叉接到芯片 BSL UART 引脚；
+  - GND 共地，3V3 稳定；
+  - 进入 BSL 后先运行 `probe_bsl_uart.ps1`，只有能读到完整 `GET_ID` 后再考虑 BSL Factory Reset 或重新下载。

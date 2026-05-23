@@ -15,7 +15,7 @@ server.setConfig(config);
 
 try {
     if (java.lang.System.getenv("MSPM0_ALLOW_FACTORY_RESET") != "YES") {
-        print("Factory Reset aborted: run tools/factory_reset_xds110.ps1 -ConfirmFactoryReset");
+        print("Manual Factory Reset aborted: use the PowerShell wrapper with -ConfirmFactoryReset");
         exitCode = 2;
     } else {
         print("openSession: CS_DAP");
@@ -23,14 +23,15 @@ try {
         session.target.connect();
         print("connected: CS_DAP");
 
-        print("execute DSSM Factory Reset with automatic NRST");
-        session.expression.evaluate("GEL_DAPInit_remoteFactoryReset(1)");
+        print("execute DSSM Factory Reset with manual NRST");
+        print("When GEL prints 'Press the reset button...', press and release board RESET once.");
+        session.expression.evaluate("GEL_DAPInit_remoteFactoryReset(0)");
 
         java.lang.Thread.sleep(30000);
-        print("Factory Reset command window finished");
+        print("Manual Factory Reset command window finished");
     }
 } catch (error) {
-    print("Factory Reset failed: " + error);
+    print("Manual Factory Reset failed: " + error);
     exitCode = 1;
 } finally {
     if (session != null) {

@@ -13,17 +13,18 @@ if (-not $ConfirmFactoryReset) {
 
 $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 $CcsDir = (Resolve-Path -LiteralPath $CcsDir).Path
-$Script = Join-Path $ProjectDir "tools\factory_reset_xds110.js"
+$Script = Join-Path $ProjectDir "tools\factory_reset_xds110_manual.js"
 $Dss = Join-Path $CcsDir "ccs_base\scripting\bin\dss.bat"
 
 if (-not (Test-Path -LiteralPath $Script -PathType Leaf)) {
-    throw "Factory Reset DSS script not found: $Script"
+    throw "Manual Factory Reset DSS script not found: $Script"
 }
 if (-not (Test-Path -LiteralPath $Dss -PathType Leaf)) {
     throw "DSS not found: $Dss"
 }
 
-Write-Host "Running DSSM Factory Reset. Do not unplug XDS110 or power during this step."
+Write-Host "Running MANUAL DSSM Factory Reset."
+Write-Host "When you see 'Press the reset button...', press and release board RESET once."
 $oldValue = $env:MSPM0_ALLOW_FACTORY_RESET
 $oldConfig = $env:MSPM0_XDS110_CONFIG
 $env:MSPM0_ALLOW_FACTORY_RESET = "YES"
@@ -48,13 +49,13 @@ try {
     $ErrorActionPreference = $oldActionPreference
     $text = $output -join "`n"
     if ($exitCode -ne 0) {
-        throw "DSSM Factory Reset failed"
+        throw "Manual DSSM Factory Reset failed"
     }
     if (($text -match "Factory Reset aborted") -or
         ($text -match "Factory Reset failed") -or
         ($text -match "Command execution failed") -or
         ($text -notmatch "Command execution completed")) {
-        throw "DSSM Factory Reset did not report successful completion"
+        throw "Manual DSSM Factory Reset did not report successful completion"
     }
 }
 finally {
