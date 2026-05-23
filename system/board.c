@@ -331,7 +331,7 @@ void Board_Init(void)
         OLED_ColorTurn(0U);
         OLED_DisplayTurn(0U);
         OLED_Clear();
-        Board_ShowBootStep("OK Power GPIO", "RUN Clock", "WAIT UART ADC",
+        Board_ShowBootStep("OK Power GPIO", "RUN Clock", "WAIT UART Gray",
             "WAIT Drivers");
     }
 
@@ -352,15 +352,15 @@ void Board_Init(void)
     if (OLED_HasError() != 0U) {
         Board_ReportError(BOARD_ERROR_OLED_I2C);
     }
-    Board_ShowBootStep("OK Clock OLED", "RUN Stepper", "WAIT UART ADC",
+    Board_ShowBootStep("OK Clock OLED", "RUN Stepper", "WAIT UART Gray",
         "WAIT Drivers");
 
     /*
      * 剩余外设在系统时钟就绪后统一拉起。
-     * 这样 UART/I2C/ADC 的频率配置都按正式工作时钟来生效。
+     * 这样 UART/I2C/灰度输入的频率配置都按正式工作时钟来生效。
      * 步进 STEP/DIR GPIO 已在 SYSCFG_DL_GPIO_init() 中完成。
      */
-    Board_ShowBootStep("OK Stepper GPIO", "RUN UART", "WAIT ADC",
+    Board_ShowBootStep("OK Stepper GPIO", "RUN UART", "WAIT Gray",
         "WAIT Drivers");
 
     SYSCFG_DL_JY61P_init();
@@ -371,17 +371,32 @@ void Board_Init(void)
     LOG_LINE("board uart: log/jy61p/exchange ok");
 #endif
 #if CAR_ENABLE_LOG_UART
+#if CAR_GRAY_INPUT_DIGITAL
+    Board_ShowBootStep("OK UART Log/JY/Ex", "RUN Gray GPIO", "WAIT Drivers",
+        "WAIT App");
+#else
     Board_ShowBootStep("OK UART Log/JY/Ex", "RUN Gray ADC", "WAIT Drivers",
+        "WAIT App");
+#endif
+#else
+#if CAR_GRAY_INPUT_DIGITAL
+    Board_ShowBootStep("OK UART JY/Ex", "RUN Gray GPIO", "WAIT Drivers",
         "WAIT App");
 #else
     Board_ShowBootStep("OK UART JY/Ex", "RUN Gray ADC", "WAIT Drivers",
         "WAIT App");
 #endif
+#endif
 
+#if (CAR_GRAY_INPUT_DIGITAL == 0U)
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();
     Board_ShowBootStep("OK ADC", "RUN Stepper TIM", "WAIT Motor",
         "WAIT Gray");
+#else
+    Board_ShowBootStep("OK Gray GPIO", "RUN Stepper TIM", "WAIT Motor",
+        "WAIT Gray");
+#endif
     SYSCFG_DL_STEPPER_TIMER_init();
     Board_ShowBootStep("OK Stepper TIM", "RUN Motor", "WAIT Gray Enc",
         "WAIT Key UART");

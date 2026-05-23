@@ -9,6 +9,7 @@
 #include "tracking_exception.h"
 
 static CarState g_carState = CAR_STATE_INIT;
+static uint8_t g_missionId;
 
 static const char *StateMachine_GetEventName(CarEvent event)
 {
@@ -31,16 +32,14 @@ static const char *StateMachine_GetEventName(CarEvent event)
         return "motor_test_next";
     case CAR_EVENT_TRACKING_TEST_START:
         return "tracking_test_start";
-    case CAR_EVENT_PID_MONITOR_START:
-        return "pid_monitor_start";
-    case CAR_EVENT_GRAY_MONITOR_START:
-        return "gray_monitor_start";
-    case CAR_EVENT_EXCHANGE_MONITOR_START:
-        return "exchange_monitor_start";
-    case CAR_EVENT_ENCODER_MONITOR_START:
-        return "encoder_monitor_start";
-    case CAR_EVENT_MISSION_START:
-        return "mission_start";
+    case CAR_EVENT_MISSION_1_START:
+        return "mission_1_start";
+    case CAR_EVENT_MISSION_2_START:
+        return "mission_2_start";
+    case CAR_EVENT_MISSION_3_START:
+        return "mission_3_start";
+    case CAR_EVENT_MISSION_4_START:
+        return "mission_4_start";
     case CAR_EVENT_TRACKING_DONE:
         return "tracking_done";
     case CAR_EVENT_ERROR:
@@ -50,6 +49,26 @@ static const char *StateMachine_GetEventName(CarEvent event)
     case CAR_EVENT_NONE:
     default:
         return "none";
+    }
+}
+
+/*
+ * 作用：把任务菜单事件转换成任务编号。
+ * 使用场景：主菜单选择任务 1~4 后，状态机进入同一个任务状态。
+ */
+static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
+{
+    switch (event) {
+    case CAR_EVENT_MISSION_1_START:
+        return 1U;
+    case CAR_EVENT_MISSION_2_START:
+        return 2U;
+    case CAR_EVENT_MISSION_3_START:
+        return 3U;
+    case CAR_EVENT_MISSION_4_START:
+        return 4U;
+    default:
+        return 0U;
     }
 }
 
@@ -136,54 +155,15 @@ static void StateMachine_EnterMotorTest(void)
 }
 
 /*
- * 作用：进入 PID 数据监视状态。
- * 使用场景：测试菜单里查看速度闭环输出和实际编码器增量。
- */
-static void StateMachine_EnterPidMonitor(void)
-{
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: pid monitor");
-}
-
-/*
- * 作用：进入灰度数据监视状态。
- * 使用场景：测试菜单里查看灰度传感器原始值、数字量和误差。
- */
-static void StateMachine_EnterGrayMonitor(void)
-{
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: gray monitor");
-}
-
-/*
- * 作用：进入 Exchange 数据监视状态。
- * 使用场景：后续视觉模块数据接入后查看通信内容。
- * 说明：现在只保留状态入口，不主动改动视觉模块协议。
- */
-static void StateMachine_EnterExchangeMonitor(void)
-{
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: exchange monitor");
-}
-
-/*
- * 作用：进入编码器数据监视状态。
- * 使用场景：测试菜单里查看左右编码器计数。
- */
-static void StateMachine_EnterEncoderMonitor(void)
-{
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: encoder monitor");
-}
-
-/*
  * 作用：进入赛题任务状态。
  * 使用场景：主菜单里的 Mission，具体赛题流程后续再填。
  */
 static void StateMachine_EnterMission(void)
 {
     StateMachine_StopMotionModules();
-    LOG_LINE("state: mission placeholder");
+    LOG_RAW("state: mission ");
+    LogUart_SendUnsigned(g_missionId);
+    LOG_LINE("");
 }
 
 /*
@@ -246,18 +226,6 @@ static void StateMachine_Enter(CarState nextState)
         break;
     case CAR_STATE_MOTOR_TEST:
         StateMachine_EnterMotorTest();
-        break;
-    case CAR_STATE_PID_MONITOR:
-        StateMachine_EnterPidMonitor();
-        break;
-    case CAR_STATE_GRAY_MONITOR:
-        StateMachine_EnterGrayMonitor();
-        break;
-    case CAR_STATE_EXCHANGE_MONITOR:
-        StateMachine_EnterExchangeMonitor();
-        break;
-    case CAR_STATE_ENCODER_MONITOR:
-        StateMachine_EnterEncoderMonitor();
         break;
     case CAR_STATE_MISSION:
         StateMachine_EnterMission();
@@ -324,22 +292,6 @@ static void StateMachine_MotorTestTask(void)
     MotorTest_Task();
 }
 
-static void StateMachine_PidMonitorTask(void)
-{
-}
-
-static void StateMachine_GrayMonitorTask(void)
-{
-}
-
-static void StateMachine_ExchangeMonitorTask(void)
-{
-}
-
-static void StateMachine_EncoderMonitorTask(void)
-{
-}
-
 static void StateMachine_MissionTask(void)
 {
 }
@@ -359,6 +311,7 @@ static void StateMachine_ErrorTask(void)
 void StateMachine_Init(void)
 {
     g_carState = CAR_STATE_INIT;
+    g_missionId = 0U;
     StateMachine_Enter(CAR_STATE_MENU);
 }
 
@@ -384,6 +337,16 @@ void StateMachine_Dispatch(CarEvent event)
     switch (g_carState) {
     case CAR_STATE_IDLE:
     case CAR_STATE_MENU:
+        {
+            uint8_t missionId = StateMachine_GetMissionIdFromEvent(event);
+
+            if (missionId != 0U) {
+                g_missionId = missionId;
+                StateMachine_Enter(CAR_STATE_MISSION);
+                break;
+            }
+        }
+
         if (event == CAR_EVENT_START) {
             StateMachine_Enter(CAR_STATE_TRACKING);
         } else if (event == CAR_EVENT_GRAY_CALIBRATION_START) {
@@ -392,16 +355,6 @@ void StateMachine_Dispatch(CarEvent event)
             StateMachine_Enter(CAR_STATE_MOTOR_TEST);
         } else if (event == CAR_EVENT_TRACKING_TEST_START) {
             StateMachine_Enter(CAR_STATE_TRACKING_TEST);
-        } else if (event == CAR_EVENT_PID_MONITOR_START) {
-            StateMachine_Enter(CAR_STATE_PID_MONITOR);
-        } else if (event == CAR_EVENT_GRAY_MONITOR_START) {
-            StateMachine_Enter(CAR_STATE_GRAY_MONITOR);
-        } else if (event == CAR_EVENT_EXCHANGE_MONITOR_START) {
-            StateMachine_Enter(CAR_STATE_EXCHANGE_MONITOR);
-        } else if (event == CAR_EVENT_ENCODER_MONITOR_START) {
-            StateMachine_Enter(CAR_STATE_ENCODER_MONITOR);
-        } else if (event == CAR_EVENT_MISSION_START) {
-            StateMachine_Enter(CAR_STATE_MISSION);
         } else if (event == CAR_EVENT_MENU) {
             StateMachine_Enter(CAR_STATE_MENU);
         }
@@ -420,10 +373,6 @@ void StateMachine_Dispatch(CarEvent event)
 
     case CAR_STATE_TRACKING:
     case CAR_STATE_TRACKING_TEST:
-    case CAR_STATE_PID_MONITOR:
-    case CAR_STATE_GRAY_MONITOR:
-    case CAR_STATE_EXCHANGE_MONITOR:
-    case CAR_STATE_ENCODER_MONITOR:
     case CAR_STATE_MISSION:
         if (event == CAR_EVENT_BACK) {
             StateMachine_Enter(CAR_STATE_MENU);
@@ -488,18 +437,6 @@ void StateMachine_Task(void)
     case CAR_STATE_MOTOR_TEST:
         StateMachine_MotorTestTask();
         break;
-    case CAR_STATE_PID_MONITOR:
-        StateMachine_PidMonitorTask();
-        break;
-    case CAR_STATE_GRAY_MONITOR:
-        StateMachine_GrayMonitorTask();
-        break;
-    case CAR_STATE_EXCHANGE_MONITOR:
-        StateMachine_ExchangeMonitorTask();
-        break;
-    case CAR_STATE_ENCODER_MONITOR:
-        StateMachine_EncoderMonitorTask();
-        break;
     case CAR_STATE_MISSION:
         StateMachine_MissionTask();
         break;
@@ -540,14 +477,6 @@ const char *StateMachine_GetStateName(CarState state)
         return "tracking_test";
     case CAR_STATE_MOTOR_TEST:
         return "motor_test";
-    case CAR_STATE_PID_MONITOR:
-        return "pid_monitor";
-    case CAR_STATE_GRAY_MONITOR:
-        return "gray_monitor";
-    case CAR_STATE_EXCHANGE_MONITOR:
-        return "exchange_monitor";
-    case CAR_STATE_ENCODER_MONITOR:
-        return "encoder_monitor";
     case CAR_STATE_MISSION:
         return "mission";
     case CAR_STATE_FINISHED:
@@ -559,4 +488,9 @@ const char *StateMachine_GetStateName(CarState state)
     default:
         return "unknown";
     }
+}
+
+uint8_t StateMachine_GetMissionId(void)
+{
+    return g_missionId;
 }

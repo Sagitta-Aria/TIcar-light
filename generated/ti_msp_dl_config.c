@@ -1,5 +1,7 @@
 #include "ti_msp_dl_config.h"
 
+#include "board_config.h"
+
 SYSCONFIG_WEAK void SYSCFG_DL_init(void)
 {
     SYSCFG_DL_initPower();
@@ -10,8 +12,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_LogUart_init();
     SYSCFG_DL_JY61P_init();
     SYSCFG_DL_Exchange_init();
+#if (CAR_GRAY_INPUT_DIGITAL == 0U)
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();
+#endif
 }
 
 SYSCONFIG_WEAK bool SYSCFG_DL_saveConfiguration(void)
@@ -33,8 +37,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_UART_Main_reset(LogUart_INST);
     DL_UART_Main_reset(JY61P_INST);
     DL_UART_Main_reset(Exchange_INST);
+#if (CAR_GRAY_INPUT_DIGITAL == 0U)
     DL_ADC12_reset(GRAY_ADC0_INST);
     DL_ADC12_reset(GRAY_ADC1_INST);
+#endif
 
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
@@ -43,8 +49,10 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_UART_Main_enablePower(LogUart_INST);
     DL_UART_Main_enablePower(JY61P_INST);
     DL_UART_Main_enablePower(Exchange_INST);
+#if (CAR_GRAY_INPUT_DIGITAL == 0U)
     DL_ADC12_enablePower(GRAY_ADC0_INST);
     DL_ADC12_enablePower(GRAY_ADC1_INST);
+#endif
     delay_cycles(POWER_STARTUP_DELAY);
 }
 
@@ -91,6 +99,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_initPeripheralInputFunction(
         GPIO_Exchange_IOMUX_RX, GPIO_Exchange_IOMUX_RX_FUNC);
 
+#if (CAR_GRAY_INPUT_DIGITAL == 0U)
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S1_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S2_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S3_IOMUX);
@@ -98,6 +107,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S5_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S6_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S7_IOMUX);
+#endif
 
     DL_GPIO_initDigitalInputFeatures(KEY_1_IOMUX,
         DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_DOWN,

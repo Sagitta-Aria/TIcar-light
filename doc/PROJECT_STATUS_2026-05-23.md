@@ -1,6 +1,6 @@
 # light-car ccs1.2 工程状态
 
-最后更新：2026-05-23
+最后更新：2026-05-24
 
 本文记录 CCS 版 `ccs1.2` 的当前结构、启动现象和硬件安全策略。
 
@@ -34,7 +34,7 @@
 
 保持正常模式时，主流程为：
 
-1. `Board_Init()`：初始化电源、GPIO、OLED、时钟、步进 GPIO、UART、ADC 和硬件模块。
+1. `Board_Init()`：初始化电源、GPIO、OLED、时钟、步进 GPIO、UART、灰度输入和硬件模块。
 2. 无致命错误时执行 `App_Init()`。
 3. 主循环持续执行 `Board_Task()`，无致命错误时执行 `App_Task()`。
 
@@ -47,6 +47,7 @@
 - PB9/PB8 按键已加约 40ms 软件消抖，菜单切换不再依赖临时 PA14 翻转调试。
 - OLED 菜单和启动探针页避开顶部黄色区域；滚动菜单当前项固定在中间行。
 - 四个闭环步进电机已改成 `STEP/DIR` 控制框架，STEP 输出迁到 TIMG0 50us 定时器中断，不再由主循环补发脉冲。
+- 灰度传感器当前默认按数字量模块处理，MCU 直接读 PA15/PA16/PA17/PA24/PA25/PA26/PA27 的 GPIO 电平；ADC 阈值逻辑只作为模拟灰度备用。
 
 ## 开机 OLED 探针
 
@@ -55,7 +56,7 @@ OLED 上电会在下半区显示启动阶段，用来定位初始化卡点；顶
 - `RUN Clock`
 - `RUN Stepper`
 - `RUN UART`
-- `RUN Gray ADC`
+- `RUN Gray GPIO`
 - `RUN Stepper TIM`
 - `RUN Motor`
 - `RUN Gray`

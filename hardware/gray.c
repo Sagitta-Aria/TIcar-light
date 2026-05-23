@@ -3,11 +3,41 @@
 #include "log_uart.h"
 #include "pin_map.h"
 
+#define GRAY_CALIBRATION_MIN_SPAN   (64U)
+
+#if CAR_GRAY_INPUT_DIGITAL
+#if GRAY_DIGITAL_INPUT_PULL_UP
+#define GRAY_DIGITAL_RESISTOR       DL_GPIO_RESISTOR_PULL_UP
+#else
+#define GRAY_DIGITAL_RESISTOR       DL_GPIO_RESISTOR_NONE
+#endif
+#endif
+
+#if CAR_GRAY_INPUT_DIGITAL
+typedef struct {
+    GPIO_Regs *port;
+    uint32_t pin;
+    uint32_t iomux;
+} GrayDigitalSlot;
+#else
 typedef struct {
     ADC12_Regs *adc;
     DL_ADC12_MEM_IDX mem;
 } GrayAdcSlot;
+#endif
 
+#if CAR_GRAY_INPUT_DIGITAL
+/* g_grayDigitalMap：把从左到右的 7 路数字灰度输出映射到 GPIO。 */
+static const GrayDigitalSlot g_grayDigitalMap[GRAY_SENSOR_COUNT] = {
+    {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_1, PIN_GRAY_1_IOMUX},
+    {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_2, PIN_GRAY_2_IOMUX},
+    {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_3, PIN_GRAY_3_IOMUX},
+    {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_4, PIN_GRAY_4_IOMUX},
+    {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_5, PIN_GRAY_5_IOMUX},
+    {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_6, PIN_GRAY_6_IOMUX},
+    {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_7, PIN_GRAY_7_IOMUX},
+};
+#else
 /* g_grayMap：把从左到右的 7 路传感器映射到对应 ADC 和 MEM 槽位。 */
 static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
     {PIN_GRAY_ADC1, GRAY_ADC1_MEM_GRAY1},
@@ -18,24 +48,28 @@ static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
     {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY6},
     {PIN_GRAY_ADC0, GRAY_ADC0_MEM_GRAY7},
 };
+#endif
 
 /* g_grayWeight：线路位置权重，负数表示偏左，正数表示偏右。 */
 static const int16_t g_grayWeight[GRAY_SENSOR_COUNT] = {
     -3, -2, -1, 0, 1, 2, 3
 };
 
-/* g_grayRaw：最新的平均 ADC 原始值。 */
+/* g_grayRaw：最新原始采样值；数字模式下只会是 0 或 4095。 */
 static uint16_t g_grayRaw[GRAY_SENSOR_COUNT];
 
 /* g_grayDigital：每一路防抖后的黑白结果。 */
 static uint8_t g_grayDigital[GRAY_SENSOR_COUNT];
 
-/* g_grayThreshold：每一路的阈值。 */
+/* g_grayThreshold：模拟模式阈值；数字模式下保留但不参与黑白判断。 */
 static uint16_t g_grayThreshold[GRAY_SENSOR_COUNT];
 
 /* g_grayMin/g_grayMax：校准时记录的最小值和最大值。 */
 static uint16_t g_grayMin[GRAY_SENSOR_COUNT];
 static uint16_t g_grayMax[GRAY_SENSOR_COUNT];
+
+/* g_grayCalibrationComplete：校准完成状态位，供 OLED 菜单只读显示。 */
+static uint8_t g_grayCalibrationComplete;
 
 /* g_grayCandidate：等待确认的候选黑白状态。 */
 static uint8_t g_grayCandidate[GRAY_SENSOR_COUNT];
@@ -46,7 +80,7 @@ static uint8_t g_grayConfirmCount[GRAY_SENSOR_COUNT];
 /* g_grayMask：把黑白结果压缩成 bit0~bit6。 */
 static uint8_t g_grayMask;
 
-/* g_grayValid：上一轮 ADC 更新是否成功。 */
+/* g_grayValid：上一轮灰度更新是否成功。 */
 static uint8_t g_grayValid;
 
 /* g_grayFilterReady：第一次采样后，黑白防抖才开始生效。 */
@@ -55,6 +89,26 @@ static uint8_t g_grayFilterReady;
 static uint8_t Gray_IsValidChannel(GrayChannel channel)
 {
     return ((uint32_t)channel < GRAY_SENSOR_COUNT) ? 1U : 0U;
+}
+
+/*
+ * 作用：刷新灰度校准完成状态位。
+ * 使用场景：校准采样更新 min/max 后调用。
+ * 说明：这里只判断每一路都看到过高低变化，不负责保存阈值。
+ */
+static void Gray_UpdateCalibrationComplete(void)
+{
+    uint32_t i;
+
+    for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
+        if ((uint32_t)g_grayMax[i] <=
+            ((uint32_t)g_grayMin[i] + GRAY_CALIBRATION_MIN_SPAN)) {
+            g_grayCalibrationComplete = 0U;
+            return;
+        }
+    }
+
+    g_grayCalibrationComplete = 1U;
 }
 
 static void Gray_LoadDefaultThresholds(void)
@@ -66,6 +120,40 @@ static void Gray_LoadDefaultThresholds(void)
     }
 }
 
+#if CAR_GRAY_INPUT_DIGITAL
+/*
+ * 作用：把灰度引脚切成数字 GPIO 输入。
+ * 使用场景：模块已经输出 0/1 黑白结果时。
+ */
+static void Gray_ConfigDigitalInputs(void)
+{
+    uint32_t i;
+
+    for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
+        DL_GPIO_initDigitalInputFeatures(g_grayDigitalMap[i].iomux,
+            DL_GPIO_INVERSION_DISABLE, GRAY_DIGITAL_RESISTOR,
+            DL_GPIO_HYSTERESIS_ENABLE, DL_GPIO_WAKEUP_DISABLE);
+    }
+}
+
+/*
+ * 作用：读取某一路数字灰度是否压线。
+ * 使用场景：Gray_Update 里把模块输出的数字量转换成 g_grayDigital。
+ */
+static uint8_t Gray_ReadDigitalActive(uint32_t index)
+{
+    uint8_t levelHigh =
+        ((DL_GPIO_readPins(g_grayDigitalMap[index].port,
+             g_grayDigitalMap[index].pin) & g_grayDigitalMap[index].pin) !=
+            0U) ? 1U : 0U;
+
+#if GRAY_DIGITAL_ACTIVE_HIGH
+    return levelHigh;
+#else
+    return (levelHigh == 0U) ? 1U : 0U;
+#endif
+}
+#else
 /*
  * 作用：等待 ADC 序列完成。
  * 使用场景：Gray_Update 里检查 ADC0/ADC1 是否采样结束。
@@ -111,6 +199,7 @@ static uint8_t Gray_ReadRawOnce(uint16_t values[GRAY_SENSOR_COUNT])
 
     return 1U;
 }
+#endif
 
 /*
  * 作用：把某一路原始值和阈值转换成 0/1 黑白状态。
@@ -119,15 +208,23 @@ static uint8_t Gray_ReadRawOnce(uint16_t values[GRAY_SENSOR_COUNT])
  */
 static uint8_t Gray_RawToDigital(uint16_t raw, uint16_t threshold)
 {
+#if CAR_GRAY_INPUT_DIGITAL
+    (void)threshold;
+    return (raw != 0U) ? 1U : 0U;
+#else
 #if GRAY_ACTIVE_HIGH
     return (raw >= threshold) ? 1U : 0U;
 #else
     return (raw < threshold) ? 1U : 0U;
 #endif
+#endif
 }
 
 static uint16_t Gray_GetLineStrength(uint32_t index)
 {
+#if CAR_GRAY_INPUT_DIGITAL
+    return (g_grayDigital[index] != 0U) ? 1U : 0U;
+#else
     uint16_t raw;
     uint16_t threshold;
 
@@ -143,12 +240,13 @@ static uint16_t Gray_GetLineStrength(uint32_t index)
 #else
     return (raw < threshold) ? (uint16_t)(threshold - raw) : 1U;
 #endif
+#endif
 }
 
 /*
  * 作用：重新拼接 7 路黑白状态的位图。
  * 使用场景：任何黑白状态更新后。
- * 不要用于：原始 ADC 更新阶段还没完成时。
+ * 不要用于：原始采样更新阶段还没完成时。
  */
 static void Gray_RebuildMask(void)
 {
@@ -206,25 +304,34 @@ static void Gray_UpdateDigitalFromRaw(void)
  * 作用：初始化灰度传感器模块。
  * 使用场景：Board_Init 后、进入循迹前调用一次。
  * 说明：会清掉滤波状态、加载默认阈值、重置校准数据并立即采样一次。
+ * 数字模式下阈值不参与判断，模块输出电平就是最终黑白结果。
  */
 void Gray_Init(void)
 {
     g_grayFilterReady = 0U;
     Gray_LoadDefaultThresholds();
     Gray_CalibrationReset();
+#if CAR_GRAY_INPUT_DIGITAL
+    Gray_ConfigDigitalInputs();
+#else
     DL_ADC12_enableConversions(PIN_GRAY_ADC0);
     DL_ADC12_enableConversions(PIN_GRAY_ADC1);
+#endif
     (void)Gray_Update();
 }
 
 void Gray_StartConversion(void)
 {
+#if CAR_GRAY_INPUT_DIGITAL
+    /* 数字灰度模式下没有 ADC 转换需要启动。 */
+#else
     if (!DL_ADC12_isConversionStarted(PIN_GRAY_ADC0)) {
         DL_ADC12_startConversion(PIN_GRAY_ADC0);
     }
     if (!DL_ADC12_isConversionStarted(PIN_GRAY_ADC1)) {
         DL_ADC12_startConversion(PIN_GRAY_ADC1);
     }
+#endif
 }
 
 /*
@@ -235,6 +342,18 @@ void Gray_StartConversion(void)
  */
 uint8_t Gray_Update(void)
 {
+#if CAR_GRAY_INPUT_DIGITAL
+    uint32_t i;
+
+    for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
+        g_grayRaw[i] = (Gray_ReadDigitalActive(i) != 0U) ?
+            GRAY_ADC_MAX_VALUE : 0U;
+    }
+
+    Gray_UpdateDigitalFromRaw();
+    g_grayValid = 1U;
+    return 1U;
+#else
     uint16_t rawOnce[GRAY_SENSOR_COUNT];
     uint32_t sum[GRAY_SENSOR_COUNT];
     uint32_t i;
@@ -263,6 +382,7 @@ uint8_t Gray_Update(void)
     Gray_UpdateDigitalFromRaw();
     g_grayValid = 1U;
     return 1U;
+#endif
 }
 
 uint16_t Gray_GetRaw(GrayChannel channel)
@@ -318,10 +438,10 @@ uint8_t Gray_GetLineError(int16_t *error)
 }
 
 /*
- * 作用：根据 ADC 强度计算加权循迹偏差。
+ * 作用：根据灰度强度计算加权循迹偏差。
  * 使用场景：正式循迹主逻辑，配合左右电机差速控制。
  * 不要用于：只想看某一路是否亮/灭的简单判断。
- * 说明：中间值接近 0，越偏左越负，越偏右越正。
+ * 说明：中间值接近 0，越偏左越负，越偏右越正；数字模式下每路有效权重相同。
  */
 uint8_t Gray_GetWeightedLineError(int16_t *error)
 {
@@ -361,6 +481,7 @@ uint8_t Gray_IsLineLost(void)
  * 作用：手动修改某一路阈值。
  * 使用场景：你已经知道某一路应该更高或更低的阈值时。
  * 不要用于：还没确定传感器极性和黑白方向的时候。
+ * 说明：数字灰度模式不使用该阈值，保留接口只是为了兼容模拟模式。
  */
 void Gray_SetThreshold(GrayChannel channel, uint16_t threshold)
 {
@@ -385,8 +506,9 @@ uint16_t Gray_GetThreshold(GrayChannel channel)
 }
 
 /*
- * 作用：把当前一轮滤波后的 ADC 值复制出来。
+ * 作用：把当前一轮滤波后的原始值复制出来。
  * 使用场景：调试、打印、临时查看原始传感器数据。
+ * 说明：数字模式下返回值为 0 或 4095，便于沿用原有串口打印格式。
  */
 void Gray_ReadRaw(uint16_t values[GRAY_SENSOR_COUNT])
 {
@@ -432,6 +554,7 @@ void Gray_CalibrationReset(void)
         g_grayMin[i] = GRAY_ADC_MAX_VALUE;
         g_grayMax[i] = 0U;
     }
+    g_grayCalibrationComplete = 0U;
     LOG_LINE("gray calibration: reset");
 }
 
@@ -455,14 +578,27 @@ void Gray_CalibrationSample(void)
             g_grayMax[i] = g_grayRaw[i];
         }
     }
+    Gray_UpdateCalibrationComplete();
+}
+
+uint8_t Gray_IsCalibrationComplete(void)
+{
+    return g_grayCalibrationComplete;
 }
 
 /*
- * 作用：把校准得到的最小/最大值转成阈值。
+ * 作用：应用灰度校准结果。
  * 使用场景：校准采样结束后统一应用。
+ * 说明：数字模式下模块已经完成比较，这里只刷新状态，不再生成阈值。
  */
 void Gray_CalibrationApply(void)
 {
+#if CAR_GRAY_INPUT_DIGITAL
+    if (g_grayValid) {
+        Gray_UpdateDigitalFromRaw();
+    }
+    LOG_LINE("gray digital check: apply");
+#else
     uint32_t i;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
@@ -475,4 +611,5 @@ void Gray_CalibrationApply(void)
         Gray_UpdateDigitalFromRaw();
     }
     LOG_LINE("gray calibration: apply");
+#endif
 }

@@ -197,10 +197,30 @@
 #define CAR_MOTOR_TEST_RUN_TICKS \
     ((CAR_MOTOR_TEST_RUN_MS + CAR_APP_LOOP_DELAY_MS - 1U) / CAR_APP_LOOP_DELAY_MS)
 
+/*
+ * CAR_GRAY_INPUT_DIGITAL：灰度模块输入模式。
+ * 1：模块已经把黑白比较做好，MCU 直接读取数字 GPIO 高低电平。
+ * 0：模块输出模拟电压，MCU 通过 ADC 原始值和阈值转换黑白。
+ */
+#define CAR_GRAY_INPUT_DIGITAL         (1U)
+
+/*
+ * GRAY_DIGITAL_ACTIVE_HIGH：数字灰度输入的有效电平。
+ * 1：GPIO 高电平表示压到黑线。
+ * 0：GPIO 低电平表示压到黑线。当前按“灯灭为黑、灯亮为白”的常见接法先用 0。
+ */
+#define GRAY_DIGITAL_ACTIVE_HIGH       (0U)
+
+/*
+ * GRAY_DIGITAL_INPUT_PULL_UP：数字灰度输入是否打开内部弱上拉。
+ * 对开漏/比较器输出更稳；若模块是强推挽输出，弱上拉通常也不影响。
+ */
+#define GRAY_DIGITAL_INPUT_PULL_UP     (1U)
+
 /* GRAY_SENSOR_COUNT：灰度传感器通道总数。 */
 #define GRAY_SENSOR_COUNT               (7U)
 
-/* GRAY_ACTIVE_HIGH：1 表示 ADC 越大越像压线，0 表示相反。 */
+/* GRAY_ACTIVE_HIGH：模拟 ADC 模式下，1 表示 ADC 越大越像压线，0 表示相反。 */
 #define GRAY_ACTIVE_HIGH                (1U)
 
 /* GRAY_ADC_MAX_VALUE：12 位 ADC 的最大值。 */

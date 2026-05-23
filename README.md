@@ -16,7 +16,7 @@ D:\Ti\light-car1.0ccs
 ## 当前结构
 
 - `app/`：菜单、状态机、循迹、速度命令、步进电机测试入口。
-- `hardware/`：OLED、按键、四步进电机、灰度 ADC、日志/JY61P/视觉 UART 模块驱动。
+- `hardware/`：OLED、按键、四步进电机、数字灰度输入、日志/JY61P/视觉 UART 模块驱动。
 - `system/`：板级初始化、延时、中断入口和错误兜底。
 - `config/`：工程参数和引脚映射。
 - `generated/`：CCS/SysConfig 风格生成层。

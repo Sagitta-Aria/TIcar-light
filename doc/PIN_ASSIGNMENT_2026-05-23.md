@@ -53,19 +53,21 @@
 
 当前 `hardware/motor.c` 管 DIR 和速度命令，`hardware/stepper_pulse.c` 通过 TIMG0 定时器中断输出 STEP；接线仍是 PA7/PA8/PA12/PA13，不需要因为本次改动重新接线。
 
-## 灰度传感器 ADC
+## 灰度传感器
 
 PA14 已固定作 LED，PA18 保留 BSL，PA21/PA23 保留 VREF，因此灰度只接下面 7 路。
 
-| 灰度 | MCU 管脚 | ADC 配置 |
-| --- | --- | --- |
-| S1 | PA15 | ADC1 CH0 / MEM0 |
-| S2 | PA16 | ADC1 CH1 / MEM1 |
-| S3 | PA17 | ADC1 CH2 / MEM2 |
-| S4 | PA24 | ADC0 CH3 / MEM0 |
-| S5 | PA25 | ADC0 CH2 / MEM1 |
-| S6 | PA26 | ADC0 CH1 / MEM2 |
-| S7 | PA27 | ADC0 CH0 / MEM3 |
+当前默认 `CAR_GRAY_INPUT_DIGITAL = 1`，适配模块已经输出 0/1 黑白结果的数字灰度传感器。若以后改回模拟输出，再把 `CAR_GRAY_INPUT_DIGITAL` 改成 0，下面这些脚仍可作为 ADC 通道使用。
+
+| 灰度 | MCU 管脚 | 当前模式 | ADC 备用配置 |
+| --- | --- | --- | --- |
+| S1 | PA15 | GPIO 数字输入 | ADC1 CH0 / MEM0 |
+| S2 | PA16 | GPIO 数字输入 | ADC1 CH1 / MEM1 |
+| S3 | PA17 | GPIO 数字输入 | ADC1 CH2 / MEM2 |
+| S4 | PA24 | GPIO 数字输入 | ADC0 CH3 / MEM0 |
+| S5 | PA25 | GPIO 数字输入 | ADC0 CH2 / MEM1 |
+| S6 | PA26 | GPIO 数字输入 | ADC0 CH1 / MEM2 |
+| S7 | PA27 | GPIO 数字输入 | ADC0 CH0 / MEM3 |
 
 ## 暂未分配的可用口
 

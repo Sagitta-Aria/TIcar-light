@@ -20,7 +20,7 @@ ccs1.2 后需要重点使用：
 - `01_clock_sysosc_probe`：只测内部 32MHz SYSOSC。
 - `02_oled_i2c_probe`：测 OLED/I2C0，必须带超时。
 - `03_uart_all_probe`：测 UART0/UART1/UART3。
-- `04_gray_adc_probe`：按 ccs1.2 灰度引脚测 PA15/PA16/PA17/PA24/PA25/PA26/PA27。
+- `04_gray_adc_probe`：旧版模拟灰度 ADC 测试；当前数字灰度模式优先在主工程里读 GPIO 电平。
 - `05_stepper_safe_probe`：四路 STEP/DIR 安全脉冲测试。
 
 下载 demo 前仍建议用各自 `tools\jlink_download_halt.jlink`，下载后先 halt，再手动 reset/run。

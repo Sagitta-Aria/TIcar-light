@@ -45,4 +45,20 @@
 #define PIN_GRAY_ADC0                   GRAY_ADC0_INST
 #define PIN_GRAY_ADC1                   GRAY_ADC1_INST
 
+#define PIN_GRAY_DIGITAL_PORT           GPIOA
+#define PIN_GRAY_1                      DL_GPIO_PIN_15
+#define PIN_GRAY_2                      DL_GPIO_PIN_16
+#define PIN_GRAY_3                      DL_GPIO_PIN_17
+#define PIN_GRAY_4                      DL_GPIO_PIN_24
+#define PIN_GRAY_5                      DL_GPIO_PIN_25
+#define PIN_GRAY_6                      DL_GPIO_PIN_26
+#define PIN_GRAY_7                      DL_GPIO_PIN_27
+#define PIN_GRAY_1_IOMUX                GRAY_S1_IOMUX
+#define PIN_GRAY_2_IOMUX                GRAY_S2_IOMUX
+#define PIN_GRAY_3_IOMUX                GRAY_S3_IOMUX
+#define PIN_GRAY_4_IOMUX                GRAY_S4_IOMUX
+#define PIN_GRAY_5_IOMUX                GRAY_S5_IOMUX
+#define PIN_GRAY_6_IOMUX                GRAY_S6_IOMUX
+#define PIN_GRAY_7_IOMUX                GRAY_S7_IOMUX
+
 #endif

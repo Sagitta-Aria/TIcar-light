@@ -47,9 +47,9 @@ static void App_HandleKeyEvent(KeyEvent event)
 
     if (state == CAR_STATE_GRAY_CALIBRATION) {
         if (event == KEY_EVENT_1) {
-            StateMachine_Dispatch(CAR_EVENT_GRAY_CALIBRATION_APPLY);
+            StateMachine_Dispatch(Menu_GrayCalibrationConfirm());
         } else if (event == KEY_EVENT_2) {
-            StateMachine_Dispatch(CAR_EVENT_BACK);
+            Menu_GrayCalibrationNext();
         }
         return;
     }
@@ -89,7 +89,7 @@ static void App_HandleKeyEvent(KeyEvent event)
 
 void App_Init(void)
 {
-    Board_ShowBootProgress("I2C OK", "UART OK", "ADC OK", "APP...", "");
+    Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP...", "");
     LOG_LINE("app: init begin");
     delay_ms(100U);
 
@@ -106,7 +106,7 @@ void App_Init(void)
     LOG_LINE("light-car ccs1.2 init ok");
     StateMachine_Init();
 
-    Board_ShowBootProgress("I2C OK", "UART OK", "ADC OK", "APP OK", "");
+    Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP OK", "");
     delay_ms(200U);
 
     OLED_Clear();

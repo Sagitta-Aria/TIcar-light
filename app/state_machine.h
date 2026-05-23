@@ -1,6 +1,8 @@
 #ifndef STATE_MACHINE_H
 #define STATE_MACHINE_H
 
+#include <stdint.h>
+
 /* CarState：整车顶层状态，负责决定当前跑哪个任务。 */
 typedef enum {
     CAR_STATE_INIT = 0,
@@ -10,10 +12,6 @@ typedef enum {
     CAR_STATE_TRACKING,
     CAR_STATE_TRACKING_TEST,
     CAR_STATE_MOTOR_TEST,
-    CAR_STATE_PID_MONITOR,
-    CAR_STATE_GRAY_MONITOR,
-    CAR_STATE_EXCHANGE_MONITOR,
-    CAR_STATE_ENCODER_MONITOR,
     CAR_STATE_MISSION,
     CAR_STATE_FINISHED,
     CAR_STATE_STOP,
@@ -32,17 +30,16 @@ typedef enum {
     CAR_EVENT_GRAY_CALIBRATION_APPLY,
     CAR_EVENT_MOTOR_TEST_NEXT,
     CAR_EVENT_TRACKING_TEST_START,
-    CAR_EVENT_PID_MONITOR_START,
-    CAR_EVENT_GRAY_MONITOR_START,
-    CAR_EVENT_EXCHANGE_MONITOR_START,
-    CAR_EVENT_ENCODER_MONITOR_START,
-    CAR_EVENT_MISSION_START,
+    CAR_EVENT_MISSION_1_START,
+    CAR_EVENT_MISSION_2_START,
+    CAR_EVENT_MISSION_3_START,
+    CAR_EVENT_MISSION_4_START,
     CAR_EVENT_TRACKING_DONE,
     CAR_EVENT_ERROR,
     CAR_EVENT_CLEAR_ERROR
 } CarEvent;
 
-/* StateMachine_Init：初始化顶层状态机，默认进入空闲状态。 */
+/* StateMachine_Init：初始化顶层状态机，默认进入菜单状态。 */
 void StateMachine_Init(void);
 
 /* StateMachine_Dispatch：向状态机发送一个事件。 */
@@ -56,5 +53,8 @@ CarState StateMachine_GetState(void);
 
 /* StateMachine_GetStateName：把状态转成字符串，便于串口/OLED 调试。 */
 const char *StateMachine_GetStateName(CarState state);
+
+/* StateMachine_GetMissionId：读取当前任务编号，0 表示还没有选择任务。 */
+uint8_t StateMachine_GetMissionId(void);
 
 #endif
