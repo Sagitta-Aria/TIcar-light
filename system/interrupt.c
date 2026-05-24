@@ -2,6 +2,7 @@
 
 #include "jy61p.h"
 #include "key.h"
+#include "link.h"
 #include "stepper_pulse.h"
 #include "ti_msp_dl_config.h"
 
@@ -74,7 +75,7 @@ void UART1_IRQHandler(void)
 
 void UART3_IRQHandler(void)
 {
-    Interrupt_ClearUART(Exchange_INST);
+    Link_HandleUARTInterrupt();
 }
 
 void TIMG0_IRQHandler(void)

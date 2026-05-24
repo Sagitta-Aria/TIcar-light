@@ -1,55 +1,292 @@
-# light-car ccs1.2
+# light-car CCS
 
-TI CCS / TI Arm Clang version of the MSPM0G3507 laser tracking car firmware.
+MSPM0G3507 laser tracking car firmware for TI CCS / TI Arm Clang.
 
-当前最新开发分支：`ccs1.2`
-最后整理：2026-05-23
-
-当前仓库路径仍是：
+当前工作工程：
 
 ```powershell
 D:\Ti\light-car1.0ccs
 ```
 
-但 GitHub 版本线已经升级为 `ccs1.2`。这一版面向地猛星 MSPM0G3507 最小系统板，当前电机控制采用四个闭环步进驱动器的 `STEP/DIR` 方案。
+当前开发分支：`1.2ccsadc`
 
-## 当前结构
+固件版本线：`ccs1.2`
 
-- `app/`：菜单、状态机、循迹、速度命令和任务框架。
-- `hardware/`：OLED、按键、四步进电机、数字灰度输入、日志/JY61P/视觉 UART 模块驱动。
-- `system/`：板级初始化、延时、中断入口和错误兜底。
+最后整理：2026-05-24
+
+Keil 旧工程在 `D:\激光循迹\light-car1.0`，不要和本 CCS 工程混用。
+
+## 当前目标
+
+这一版面向地猛星 MSPM0G3507 最小系统板，电机控制采用四个闭环步进驱动器的 `STEP/DIR` 方案。
+
+当前重点：
+
+- 底盘左右步进电机用于循迹和任务运动。
+- 云台两个步进电机用于激光方向控制。
+- 视觉模块通过 UART3/Link 提供激光点或目标点坐标。
+- 墙面画圆优先走视觉闭环：摄像头识别墙面/激光点，MCU 根据视觉误差驱动云台。
+- 底盘位姿解算已保留，用于后续一边走一边补偿墙面目标，但当前不强依赖它。
+
+## 工程结构
+
+- `app/`：应用层逻辑，包含菜单、状态机、循迹、路线、云台控制、云台测试、车体位姿解算。
+- `hardware/`：硬件驱动，包含 OLED、按键、四步进电机、STEP 定时器调度、灰度输入、JY61P、Link、日志串口。
+- `system/`：板级初始化、延时、中断入口、错误状态。
 - `config/`：工程参数和引脚映射。
-- `generated/`：CCS/SysConfig 风格生成层。
-- `targetConfigs/`：J-Link / BSL 目标配置。
-- `tools/`：命令行构建和下载辅助脚本。
-- `doc/`：接线表、状态说明和代码风格。
+- `generated/`：CCS/SysConfig 风格生成代码。
+- `targetConfigs/`：J-Link / XDS110 / BSL 目标配置。
+- `tools/`：构建、下载、恢复辅助脚本。
+- `doc/`：接线表、状态说明、恢复记录和代码风格。
 
-## 当前进度
+## 主流程
 
-- 主流程已恢复为完整小车固件：`CAR_RECOVERY_SAFE_BUILD = 0U`。
-- OLED/I2C 已加超时、错误兜底和 bus clear，不会因为 OLED 线松死等。
-- PA14 是状态灯：慢闪表示主循环存活，快闪表示非致命错误，常亮表示致命错误。
-- Type-C CH340 日志走 `UART0 PA10/PA11`，正常 115200。
-- JY61P 使用 `UART1 PB6/PB7`；视觉/Exchange 使用 `UART3 PB2/PB3`；JQ8400 语音模块暂停。
-- 按键 PB9/PB8 已加软件消抖；OLED 菜单只用下半区，选中项固定在中间行。
-- 四个闭环步进电机已切到 STEP/DIR 框架，STEP 脉冲由 TIMG0 定时器中断调度。
-- 路线距离不再读外部编码器，直接使用底盘左右 STEP 输出计数。
-
-## 日志开关
-
-正常调试时，所有行为日志走 Type-C CH340：
+`app/main.c` 保持干净，只做板级初始化、应用初始化和主循环调度：
 
 ```c
-#define CAR_ENABLE_LOG_UART            (1U)
+Board_Init();
+if (Board_HasFatalError() == 0U) {
+    App_Init();
+}
+
+while (1) {
+    Board_Task();
+    if (Board_HasFatalError() == 0U) {
+        App_Task();
+    }
+}
 ```
 
-不想打印时，只需要在 `config/board_config.h` 改成：
+## 菜单
+
+OLED 当前主菜单：
+
+```text
+Gray Calib
+Track Test
+Gimbal Test
+Mission
+```
+
+`Mission` 二级菜单：
+
+```text
+Mission 1
+Mission 2
+Mission 3
+Mission 4
+Back
+```
+
+灰度校准页：
+
+```text
+Cal Done: YES/NO
+Save Exit
+No Save Exit
+```
+
+说明：
+
+- `Gray Calib`：灰度校准，当前数字灰度模式下主要保留流程。
+- `Track Test`：只跑灰度循迹，不跑完整任务路线。
+- `Gimbal Test`：接收 UART3/Link 视觉数据，驱动云台追踪。
+- `Mission 1~4`：任务入口，具体任务流程后续继续补。
+
+## 主要模块
+
+### 电机与 STEP 调度
+
+- `hardware/motor.c/h`
+  - 负责四个步进电机的速度命令、DIR 方向、停车和命令读取。
+  - 逻辑电机编号：
+    - `MOTOR_CHASSIS_LEFT`
+    - `MOTOR_CHASSIS_RIGHT`
+    - `MOTOR_GIMBAL_1`
+    - `MOTOR_GIMBAL_2`
+
+- `hardware/stepper_pulse.c/h`
+  - 使用 TIMG0 每 50us 中断调度 STEP 脉冲。
+  - 20kHz tick。
+  - 支持读取各电机累计 STEP 输出计数。
+  - 4000 命令当前约等于 400 step/s，参数偏保守，实车可逐步调高。
+
+STEP 接线：
+
+```text
+底盘左：PA7  STEP，PB18 DIR
+底盘右：PA8  STEP，PA9  DIR
+云台 1：PA12 STEP，PA22 DIR
+云台 2：PA13 STEP，PB24 DIR
+```
+
+### 云台控制
+
+- `app/gimbal.c/h`
+  - 二维云台闭环控制。
+  - 接口以视觉目标点和当前点为核心：
 
 ```c
-#define CAR_ENABLE_LOG_UART            (0U)
+Gimbal_UpdateFromVision(targetX, targetY, currentX, currentY);
 ```
 
-关闭后 `LOG_*` 宏会变成空操作。PA10/PA11 仍保留给 Type-C/BSL，不建议改接其它外设。
+控制逻辑：
+
+```text
+errorX = targetX - currentX
+errorY = targetY - currentY
+误差进入死区：停止对应轴
+误差超过死区：按比例输出 STEP 命令
+```
+
+当前默认映射：
+
+```text
+X 轴 -> MOTOR_GIMBAL_1
+Y 轴 -> MOTOR_GIMBAL_2
+```
+
+方向反了优先改：
+
+```c
+CAR_GIMBAL_X_REVERSE
+CAR_GIMBAL_Y_REVERSE
+```
+
+### 云台测试
+
+- `app/gimbal_test.c/h`
+  - 菜单进入 `Gimbal Test` 后启用。
+  - 清空 Link 接收缓存。
+  - 接收视觉数据并调用 `Gimbal_UpdateFromVision()`。
+
+支持两种视觉输入行，行尾用 `\n` 或 `\r`：
+
+```text
+targetX,targetY,currentX,currentY
+```
+
+或简化为：
+
+```text
+currentX,currentY
+```
+
+简化格式会使用默认目标点：
+
+```c
+CAR_GIMBAL_TEST_TARGET_X
+CAR_GIMBAL_TEST_TARGET_Y
+```
+
+默认是 `160,120`，可按摄像头分辨率修改。
+
+实车现象：
+
+- 进入 `Gimbal Test` 后底盘停车。
+- 未收到视觉数据：OLED 显示 `Waiting Link`，云台不动。
+- 收到有效坐标：OLED 显示 `Tracking`，云台按视觉误差追踪。
+- 连续约 200ms 没有视觉更新，云台自动停止。
+
+### Link / 视觉串口
+
+- `hardware/link.c/h`
+  - 使用 UART3。
+  - PB2 TX，PB3 RX。
+  - 115200。
+  - 中断里只收字节并拼行，不做业务解析、不打印日志。
+  - 主循环通过 `Link_PopLine()` 取完整行。
+
+当前 Link 主要给云台测试使用，后续可扩展为视觉协议层。
+
+### 车体位姿解算
+
+- `app/pose_solver.c/h`
+  - 用底盘左右 STEP 输出计数估算位移。
+  - 用 JY61P yaw 作为车体朝向。
+  - 输出车体相对零点的 `xMm/yMm/travelMm/yawDeg`。
+
+坐标约定：
+
+```text
+yMm：yaw=0 时车头前进方向
+xMm：车体右侧方向
+yawDeg：相对启动或 PoseSolver_Reset() 时的航向角
+```
+
+当前 STEP 到毫米比例只是占位：
+
+```c
+CAR_POSE_STEP_TO_MM_NUMERATOR
+CAR_POSE_STEP_TO_MM_DENOMINATOR
+```
+
+默认 `4 step = 1 mm`，后续必须用尺子实车标定。
+
+注意：
+
+- 这个模块只解算车体位姿，不解算云台绝对姿态。
+- 云台当前没有独立编码器或回零开关，不能可靠知道绝对角度。
+- 墙面画圆当前推荐视觉闭环，不优先做复杂三维几何模型。
+
+### JY61P
+
+- `hardware/jy61p.c/h`
+  - UART1，PB6 TX / PB7 RX。
+  - 解析 JY61P 角度帧。
+  - 当前缓存 roll/pitch/yaw。
+  - `PoseSolver` 主要使用 yaw。
+
+### 灰度输入与循迹
+
+- `hardware/gray.c/h`
+  - 当前默认数字灰度输入模式。
+  - 传感器模块自己完成黑白比较，MCU 读取 GPIO 高低电平。
+
+- `app/tracking.c/h`
+  - 根据灰度数字量计算循迹误差。
+  - 输出底盘左右 STEP 命令。
+
+- `app/tracking_exception.c/h`
+  - 处理丢线、搜线、传感器异常等情况。
+
+### 路线
+
+- `app/route.c/h`
+  - 使用底盘 STEP 输出计数估算路线距离。
+  - 不再使用旧编码器模块。
+  - 当前仍是任务路线框架，后续按实车继续标定距离和状态机。
+
+## UART 分配
+
+```text
+UART0：PA10 TX / PA11 RX，Type-C CH340 日志，115200
+UART1：PB6  TX / PB7  RX，JY61P，115200
+UART3：PB2  TX / PB3  RX，视觉/Exchange/Link，115200
+```
+
+JQ8400 语音模块当前暂停接入，不占串口。
+
+## 当前保留和禁止复用引脚
+
+- PA0 / PA1：OLED I2C0，开漏释放，必须上拉。
+- PA5 / PA6：外部晶振硬件保留，当前软件默认不用 PLL。
+- PA10 / PA11：Type-C CH340 日志 UART0，同时也是 BSL 数据线。
+- PA18：BSL invoke，保留恢复入口。
+- PA14：状态 LED。
+- PA19 / PA20：SWD 下载调试脚，禁止复用。
+- PA21 / PA23：VREF 相关，暂不做普通 GPIO/ADC。
+- PB14 / PB15 / PB16 / PB17：板载 SPI Flash，禁止应用层复用。
+
+## 状态 LED
+
+PA14：
+
+```text
+慢闪：主循环存活
+快闪：非致命错误，例如 OLED/I2C 超时
+常亮：致命错误，例如时钟失败
+```
 
 ## 构建
 
@@ -57,36 +294,20 @@ D:\Ti\light-car1.0ccs
 & "D:\Ti\light-car1.0ccs\tools\build_ccs.ps1" -Clean
 ```
 
-构建只编译链接，不下载、不擦除芯片。成功输出：
+构建只编译链接，不下载、不擦除芯片。成功输出类似：
 
 ```text
-D:\Ti\light-car1.0ccs\Debug\codex-build\light-car-ccs1.2.out
+Build OK: D:\Ti\light-car1.0ccs\Debug\codex-build\light-car-ccs1.2.out
 ```
 
-## 恢复安全模式开关
+## 下载和恢复
 
-正常小车固件下，当前 `config/board_config.h` 中：
+默认不要随便下载、擦除或 Factory Reset。
 
-```c
-#define CAR_RECOVERY_SAFE_BUILD       (0U)
-```
-
-如果要做救板子或首次恢复下载，再临时改成 `1U`。此模式下主工程只初始化 PA14 和三路 UART 心跳，不进入 `App_Init/App_Task`，也不初始化 OLED/I2C/PLL/灰度输入/步进电机。串口默认 115200，会周期打印 `RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK`。
-
-## XDS110 安全下载
-
-当前已验证：XDS110 执行 DSSM Factory Reset 后，安全版 MAIN 程序可下载成功，PA14 已实测慢闪。
-
-普通安全下载命令：
+普通 XDS110 安全下载脚本：
 
 ```powershell
 & "D:\Ti\light-car1.0ccs\tools\flash_xds110_safe.ps1" -SkipBuild
-```
-
-读取 Boot Diagnostic：
-
-```powershell
-& "D:\Ti\ccs\ccs_base\scripting\bin\dss.bat" "D:\Ti\light-car1.0ccs\tools\read_boot_diag.js"
 ```
 
 Factory Reset 必须显式确认：
@@ -95,40 +316,34 @@ Factory Reset 必须显式确认：
 & "D:\Ti\light-car1.0ccs\tools\factory_reset_xds110.ps1" -ConfirmFactoryReset
 ```
 
-完整恢复记录见 `doc/XDS110_RECOVERY_DEBUG_LOG_2026-05-23.md`。
+恢复安全模式开关：
 
-## 下载建议
-
-如果要用 J-Link，优先用下载后保持 halt 的脚本：
-
-```powershell
-JLink.exe -CommandFile "D:\Ti\light-car1.0ccs\tools\jlink_download_halt.jlink"
+```c
+#define CAR_RECOVERY_SAFE_BUILD       (0U)
 ```
 
-该脚本 `loadfile` 后会停住 CPU，不会下载完立刻跑飞固件。构建脚本本身不会触碰硬件。
+只有救板子或首次恢复下载时才临时改成 `1U`。此模式只初始化 PA14 和三路 UART 心跳，不进入 App，不初始化 OLED/I2C/PLL/灰度/步进电机。
 
-## ccs1.2 安全策略
+## 安全策略
 
-- 默认使用内部 `SYSOSC 32MHz`，不启用外部 HFXT / SYSPLL。
-- OLED I2C0 使用 PA0/PA1，软件等待都有超时。
-- OLED 超时后会做 bus clear：临时切 GPIO 开漏、打 9 个 SCL 脉冲、生成 STOP，再恢复 I2C。
-- PA14 固定作为状态灯，灰度 S1 已迁走。
-- UART0 使用 PA10/PA11 走 Type-C CH340 日志，PA18 拉低时仍可进入 BSL。
-- JY61P 使用 UART1 PB6/PB7；JQ8400 暂停接入，不初始化、不占串口。
-- Link/Exchange 使用 UART3 PB2/PB3，留给视觉模块。
-- STEP 定时器使用 TIMG0 50us 周期中断，不改变 PA7/PA8/PA12/PA13 接线。
-- PA19/PA20 是 SWD 下载脚，工程不复用。
-- PB14/PB15/PB16/PB17 是板载 SPI Flash，工程不复用。
+- 默认使用内部 `SYSOSC 32MHz`，不启用 HFXT/SYSPLL。
+- OLED/I2C 所有等待都有超时。
+- I2C 异常时执行 bus clear，不允许死等。
+- 中断里不打印日志、不刷 OLED、不做 I2C/UART 阻塞等待。
+- TIMG0 只负责 STEP 调度。
+- UART3 中断只收字节入缓存，业务解析放主循环。
+- 不写 NONMAIN，不改 BSL 配置，不做 mass erase。
 
-详细接线和当前状态见：
+## GitHub 分支
 
-- `doc/PIN_ASSIGNMENT_2026-05-23.md`
-- `doc/PROJECT_STATUS_2026-05-23.md`
-- `doc/ROADMAP_2026-05-23.md`
-- `doc/CODE_STYLE_CCS1_2_2026-05-23.md`
-- `doc/TIMER_STEPPER_CCS1_2_2026-05-23.md`
-- `doc/XDS110_RECOVERY_DEBUG_LOG_2026-05-23.md`
+当前推送分支：`1.2ccsadc`。
 
-## GitHub 分支说明
+如果 GitHub 首页仍显示旧代码，需要在 GitHub 仓库设置里把默认分支改到当前需要展示的 CCS 分支。
 
-`ccs1.2` 是当前最新 CCS 版本线；`keil1.0` 保留 Keil 版本线；`main` 若仍指向早期内容，打开仓库首页会显得版本很老。GitHub 仓库默认分支建议改成 `ccs1.2`。
+## 后续计划
+
+- 实车测试 `Gimbal Test` 的视觉追踪方向、死区和增益。
+- 确认视觉模块实际输出协议，必要时把 Link 从“行解析”升级为正式帧协议。
+- 做墙面画圆任务框架：视觉给圆心/当前激光点，MCU 生成圆周目标点并驱动云台追踪。
+- 标定底盘 STEP 到毫米比例。
+- 如后续需要云台开环角度，再增加云台回零、step/deg 标定和 `GimbalPose`。

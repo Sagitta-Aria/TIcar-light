@@ -1,5 +1,6 @@
 #include "state_machine.h"
 
+#include "gimbal_test.h"
 #include "gray.h"
 #include "log_uart.h"
 #include "motion.h"
@@ -29,6 +30,8 @@ static const char *StateMachine_GetEventName(CarEvent event)
         return "gray_calibration_apply";
     case CAR_EVENT_TRACKING_TEST_START:
         return "tracking_test_start";
+    case CAR_EVENT_GIMBAL_TEST_START:
+        return "gimbal_test_start";
     case CAR_EVENT_MISSION_1_START:
         return "mission_1_start";
     case CAR_EVENT_MISSION_2_START:
@@ -76,6 +79,7 @@ static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
 static void StateMachine_StopMotionModules(void)
 {
     Tracking_SetEnabled(0U);
+    GimbalTest_Stop();
     Route_Stop();
     Motion_Stop();
 }
@@ -134,6 +138,19 @@ static void StateMachine_EnterTrackingTest(void)
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
     LOG_LINE("state: tracking test");
+}
+
+/*
+ * 作用：进入云台测试状态。
+ * 使用场景：菜单里的 Gimbal Test，只接收视觉 Link 数据并追踪目标。
+ */
+static void StateMachine_EnterGimbalTest(void)
+{
+    Tracking_SetEnabled(0U);
+    Route_Stop();
+    Motion_Stop();
+    GimbalTest_Start();
+    LOG_LINE("state: gimbal test");
 }
 
 /*
@@ -206,6 +223,9 @@ static void StateMachine_Enter(CarState nextState)
     case CAR_STATE_TRACKING_TEST:
         StateMachine_EnterTrackingTest();
         break;
+    case CAR_STATE_GIMBAL_TEST:
+        StateMachine_EnterGimbalTest();
+        break;
     case CAR_STATE_MISSION:
         StateMachine_EnterMission();
         break;
@@ -264,6 +284,11 @@ static void StateMachine_TrackingTestTask(void)
 {
     Tracking_Task();
     StateMachine_CheckTrackingException();
+}
+
+static void StateMachine_GimbalTestTask(void)
+{
+    GimbalTest_Task();
 }
 
 static void StateMachine_MissionTask(void)
@@ -327,6 +352,8 @@ void StateMachine_Dispatch(CarEvent event)
             StateMachine_Enter(CAR_STATE_GRAY_CALIBRATION);
         } else if (event == CAR_EVENT_TRACKING_TEST_START) {
             StateMachine_Enter(CAR_STATE_TRACKING_TEST);
+        } else if (event == CAR_EVENT_GIMBAL_TEST_START) {
+            StateMachine_Enter(CAR_STATE_GIMBAL_TEST);
         } else if (event == CAR_EVENT_MENU) {
             StateMachine_Enter(CAR_STATE_MENU);
         }
@@ -345,6 +372,7 @@ void StateMachine_Dispatch(CarEvent event)
 
     case CAR_STATE_TRACKING:
     case CAR_STATE_TRACKING_TEST:
+    case CAR_STATE_GIMBAL_TEST:
     case CAR_STATE_MISSION:
         if (event == CAR_EVENT_BACK) {
             StateMachine_Enter(CAR_STATE_MENU);
@@ -396,6 +424,9 @@ void StateMachine_Task(void)
     case CAR_STATE_TRACKING_TEST:
         StateMachine_TrackingTestTask();
         break;
+    case CAR_STATE_GIMBAL_TEST:
+        StateMachine_GimbalTestTask();
+        break;
     case CAR_STATE_MISSION:
         StateMachine_MissionTask();
         break;
@@ -434,6 +465,8 @@ const char *StateMachine_GetStateName(CarState state)
         return "tracking";
     case CAR_STATE_TRACKING_TEST:
         return "tracking_test";
+    case CAR_STATE_GIMBAL_TEST:
+        return "gimbal_test";
     case CAR_STATE_MISSION:
         return "mission";
     case CAR_STATE_FINISHED:

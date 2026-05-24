@@ -21,10 +21,24 @@ void JY61P_SendBytes(const uint8_t *data, uint16_t length);
 /* JY61P_SetYawDeg：保存当前航向角，后续解析模块可直接写入。 */
 void JY61P_SetYawDeg(int16_t yawDeg);
 
+/* JY61P_SetAnglesDeg：保存当前 roll/pitch/yaw 姿态角。 */
+void JY61P_SetAnglesDeg(int16_t rollDeg, int16_t pitchDeg, int16_t yawDeg);
+
+/* JY61P_GetRollDeg/PitchDeg：读取当前保存的横滚角和俯仰角。 */
+int16_t JY61P_GetRollDeg(void);
+int16_t JY61P_GetPitchDeg(void);
+
+/* JY61P_GetAnglesDeg：一次性复制当前姿态角，返回 1 表示数据有效。 */
+uint8_t JY61P_GetAnglesDeg(int16_t *rollDeg, int16_t *pitchDeg,
+    int16_t *yawDeg);
+
 /* JY61P_GetYawDeg：读取当前保存的航向角。 */
 int16_t JY61P_GetYawDeg(void);
 
 /* JY61P_HasYaw：判断是否已经收到过有效航向角。 */
 uint8_t JY61P_HasYaw(void);
+
+/* JY61P_HasAngles：判断是否已经收到过完整姿态角。 */
+uint8_t JY61P_HasAngles(void);
 
 #endif

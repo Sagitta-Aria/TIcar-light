@@ -13,17 +13,32 @@
 #define JY61P_IRQ_SERVICE_LIMIT       (16U)
 #define JY61P_IRQ_RX_DRAIN_LIMIT      (64U)
 
-/* g_jy61pYawDeg：当前缓存的航向角。 */
+/* g_jy61pRollDeg/PitchDeg/YawDeg：当前缓存的姿态角。 */
+static volatile int16_t g_jy61pRollDeg;
+static volatile int16_t g_jy61pPitchDeg;
 static volatile int16_t g_jy61pYawDeg;
 
-/* g_jy61pYawValid：是否已经写入过有效航向角。 */
+/* g_jy61pAnglesValid：是否已经写入过有效姿态角。 */
 static volatile uint8_t g_jy61pYawValid;
+static volatile uint8_t g_jy61pAnglesValid;
 
 /* g_jy61pFrame：串口中断里拼出的当前 JY61P 数据帧。 */
 static uint8_t g_jy61pFrame[JY61P_FRAME_LENGTH];
 
 /* g_jy61pFrameIndex：当前已经接收到的数据帧位置。 */
 static uint8_t g_jy61pFrameIndex;
+
+static uint32_t JY61P_EnterCritical(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    return primask;
+}
+
+static void JY61P_ExitCritical(uint32_t primask)
+{
+    __set_PRIMASK(primask);
+}
 
 /*
  * 作用：带超时发送 JY61P 串口数据。
@@ -83,8 +98,12 @@ static int16_t JY61P_RawAngleToDeg(int16_t rawAngle)
  */
 static void JY61P_HandleAngleFrame(const uint8_t *frame)
 {
+    int16_t rawRoll = JY61P_ReadInt16LE(frame[2], frame[3]);
+    int16_t rawPitch = JY61P_ReadInt16LE(frame[4], frame[5]);
     int16_t rawYaw = JY61P_ReadInt16LE(frame[6], frame[7]);
-    JY61P_SetYawDeg(JY61P_RawAngleToDeg(rawYaw));
+
+    JY61P_SetAnglesDeg(JY61P_RawAngleToDeg(rawRoll),
+        JY61P_RawAngleToDeg(rawPitch), JY61P_RawAngleToDeg(rawYaw));
 }
 
 /*
@@ -125,8 +144,11 @@ void JY61P_Init(void)
     DL_UART_Main_enableInterrupt(JY61P_INST, DL_UART_MAIN_INTERRUPT_RX);
     NVIC_ClearPendingIRQ(JY61P_INST_INT_IRQN);
     NVIC_EnableIRQ(JY61P_INST_INT_IRQN);
+    g_jy61pRollDeg = 0;
+    g_jy61pPitchDeg = 0;
     g_jy61pYawDeg = 0;
     g_jy61pYawValid = 0U;
+    g_jy61pAnglesValid = 0U;
     g_jy61pFrameIndex = 0U;
 }
 
@@ -181,6 +203,44 @@ void JY61P_SetYawDeg(int16_t yawDeg)
     g_jy61pYawValid = 1U;
 }
 
+void JY61P_SetAnglesDeg(int16_t rollDeg, int16_t pitchDeg, int16_t yawDeg)
+{
+    g_jy61pRollDeg = rollDeg;
+    g_jy61pPitchDeg = pitchDeg;
+    g_jy61pYawDeg = yawDeg;
+    g_jy61pYawValid = 1U;
+    g_jy61pAnglesValid = 1U;
+}
+
+int16_t JY61P_GetRollDeg(void)
+{
+    return g_jy61pRollDeg;
+}
+
+int16_t JY61P_GetPitchDeg(void)
+{
+    return g_jy61pPitchDeg;
+}
+
+uint8_t JY61P_GetAnglesDeg(int16_t *rollDeg, int16_t *pitchDeg,
+    int16_t *yawDeg)
+{
+    uint8_t valid;
+    uint32_t primask;
+
+    if ((rollDeg == 0) || (pitchDeg == 0) || (yawDeg == 0)) {
+        return 0U;
+    }
+
+    primask = JY61P_EnterCritical();
+    *rollDeg = g_jy61pRollDeg;
+    *pitchDeg = g_jy61pPitchDeg;
+    *yawDeg = g_jy61pYawDeg;
+    valid = g_jy61pAnglesValid;
+    JY61P_ExitCritical(primask);
+    return valid;
+}
+
 int16_t JY61P_GetYawDeg(void)
 {
     return g_jy61pYawDeg;
@@ -189,4 +249,9 @@ int16_t JY61P_GetYawDeg(void)
 uint8_t JY61P_HasYaw(void)
 {
     return g_jy61pYawValid;
+}
+
+uint8_t JY61P_HasAngles(void)
+{
+    return g_jy61pAnglesValid;
 }

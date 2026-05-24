@@ -49,6 +49,41 @@
 /* CAR_STEPPER_PULSE_HIGH_TICKS：STEP 高电平保持几个定时器 tick。 */
 #define CAR_STEPPER_PULSE_HIGH_TICKS    (1U)
 
+/* CAR_GIMBAL_COMMAND_MAX：云台单轴最大速度命令。 */
+#define CAR_GIMBAL_COMMAND_MAX          (1800U)
+
+/* CAR_GIMBAL_MIN_ACTIVE_COMMAND：云台超过死区后的最小启动命令。 */
+#define CAR_GIMBAL_MIN_ACTIVE_COMMAND   (120U)
+
+/* CAR_GIMBAL_DEADBAND_X/Y：视觉误差死区，单位由视觉坐标决定。 */
+#define CAR_GIMBAL_DEADBAND_X           (3U)
+#define CAR_GIMBAL_DEADBAND_Y           (3U)
+
+/* CAR_GIMBAL_GAIN_SCALE：云台比例增益缩放基准。 */
+#define CAR_GIMBAL_GAIN_SCALE           (100U)
+
+/* CAR_GIMBAL_X_KP/Y_KP：视觉误差到 STEP 命令的比例增益。 */
+#define CAR_GIMBAL_X_KP                 (80U)
+#define CAR_GIMBAL_Y_KP                 (80U)
+
+/* CAR_GIMBAL_X_REVERSE/Y_REVERSE：实车方向相反时改成 1。 */
+#define CAR_GIMBAL_X_REVERSE            (0U)
+#define CAR_GIMBAL_Y_REVERSE            (0U)
+
+/* CAR_GIMBAL_VISION_TIMEOUT_TICKS：连续多少轮没有视觉更新就停云台。 */
+#define CAR_GIMBAL_VISION_TIMEOUT_TICKS (20U)
+
+/* CAR_GIMBAL_TEST_TARGET_X/Y：云台测试中只收到当前位置时使用的默认目标点。 */
+#define CAR_GIMBAL_TEST_TARGET_X        (160)
+#define CAR_GIMBAL_TEST_TARGET_Y        (120)
+
+/*
+ * CAR_POSE_STEP_TO_MM_NUMERATOR/DENOMINATOR：底盘 STEP 到毫米的换算比例。
+ * 当前先按 4 step = 1 mm 占位，实车用尺子标定后再改。
+ */
+#define CAR_POSE_STEP_TO_MM_NUMERATOR   (1)
+#define CAR_POSE_STEP_TO_MM_DENOMINATOR (4)
+
 /* CAR_TRACK_BASE_COMMAND：基础循迹时的默认底盘速度命令。 */
 #define CAR_TRACK_BASE_COMMAND          (900)
 

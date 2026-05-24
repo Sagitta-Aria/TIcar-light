@@ -1,6 +1,7 @@
 #include "menu.h"
 
 #include "board_config.h"
+#include "gimbal_test.h"
 #include "gray.h"
 #include "log_uart.h"
 #include "oled.h"
@@ -21,6 +22,7 @@ typedef enum {
 typedef enum {
     MENU_MAIN_GRAY_CALIB = 0,
     MENU_MAIN_TRACK_TEST,
+    MENU_MAIN_GIMBAL_TEST,
     MENU_MAIN_MISSION,
     MENU_MAIN_COUNT
 } MenuMainItem;
@@ -43,6 +45,7 @@ typedef enum {
 static const char *const g_mainItems[MENU_MAIN_COUNT] = {
     "Gray Calib",
     "Track Test",
+    "Gimbal Test",
     "Mission"
 };
 
@@ -269,6 +272,13 @@ static void Menu_RenderTrackingTest(void)
     Menu_RenderLines("Track Test", "Running", "K2 Back", "");
 }
 
+static void Menu_RenderGimbalTest(void)
+{
+    Menu_RenderLines("Gimbal Test",
+        (GimbalTest_HasVision() != 0U) ? "Tracking" : "Waiting Link",
+        "K2 Back", "");
+}
+
 static void Menu_RenderMission(void)
 {
     char line1[MENU_LINE_BUFFER_SIZE];
@@ -300,6 +310,9 @@ static void Menu_RenderByState(CarState state)
         break;
     case CAR_STATE_TRACKING_TEST:
         Menu_RenderTrackingTest();
+        break;
+    case CAR_STATE_GIMBAL_TEST:
+        Menu_RenderGimbalTest();
         break;
     case CAR_STATE_MISSION:
         Menu_RenderMission();
@@ -363,6 +376,8 @@ CarEvent Menu_Confirm(void)
             return CAR_EVENT_GRAY_CALIBRATION_START;
         case MENU_MAIN_TRACK_TEST:
             return CAR_EVENT_TRACKING_TEST_START;
+        case MENU_MAIN_GIMBAL_TEST:
+            return CAR_EVENT_GIMBAL_TEST_START;
         case MENU_MAIN_MISSION:
             g_menuPage = MENU_PAGE_MISSION;
             g_missionIndex = MENU_MISSION_1;

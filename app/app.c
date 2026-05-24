@@ -3,12 +3,15 @@
 #include "board.h"
 #include "board_config.h"
 #include "delay.h"
+#include "gimbal.h"
+#include "gimbal_test.h"
 #include "key.h"
 #include "link.h"
 #include "log_uart.h"
 #include "menu.h"
 #include "motor.h"
 #include "oled.h"
+#include "pose_solver.h"
 #include "route.h"
 #include "state_machine.h"
 #include "tracking.h"
@@ -86,6 +89,12 @@ void App_Init(void)
     LOG_LINE("app: tracking init ok");
     Route_Init();
     LOG_LINE("app: route init ok");
+    Gimbal_Init();
+    LOG_LINE("app: gimbal init ok");
+    GimbalTest_Init();
+    LOG_LINE("app: gimbal test init ok");
+    PoseSolver_Init();
+    LOG_LINE("app: pose solver init ok");
     Menu_Init();
     LOG_LINE("app: menu init ok");
     LOG_LINE("light-car ccs1.2 init ok");
@@ -108,6 +117,8 @@ void App_Task(void)
     Menu_Task(StateMachine_GetState());
     LogUart_Task();
     Link_Task();
+    PoseSolver_Task();
+    Gimbal_Task();
     Motor_Task();
     delay_ms(CAR_APP_LOOP_DELAY_MS);
 }
