@@ -6,6 +6,7 @@
 /*
  * MotorId：四个闭环步进驱动器的逻辑编号。
  * 底盘左右电机放在前两个编号，云台两个电机放在后两个编号。
+ * MOTOR_GIMBAL_1 为左右轴，MOTOR_GIMBAL_2 为上下轴。
  */
 typedef enum {
     MOTOR_CHASSIS_LEFT = 0,

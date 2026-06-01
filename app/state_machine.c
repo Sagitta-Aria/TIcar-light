@@ -1,9 +1,11 @@
 #include "state_machine.h"
 
+#include "gimbal_motor_test.h"
 #include "gimbal_test.h"
 #include "gray.h"
 #include "log_uart.h"
 #include "motion.h"
+#include "motor_enable_test.h"
 #include "route.h"
 #include "tracking.h"
 #include "tracking_exception.h"
@@ -32,6 +34,10 @@ static const char *StateMachine_GetEventName(CarEvent event)
         return "tracking_test_start";
     case CAR_EVENT_GIMBAL_TEST_START:
         return "gimbal_test_start";
+    case CAR_EVENT_GIMBAL_MOTOR_TEST_START:
+        return "gimbal_motor_test_start";
+    case CAR_EVENT_MOTOR_ENABLE_TEST_START:
+        return "motor_enable_test_start";
     case CAR_EVENT_MISSION_1_START:
         return "mission_1_start";
     case CAR_EVENT_MISSION_2_START:
@@ -80,6 +86,8 @@ static void StateMachine_StopMotionModules(void)
 {
     Tracking_SetEnabled(0U);
     GimbalTest_Stop();
+    GimbalMotorTest_Stop();
+    MotorEnableTest_Stop();
     Route_Stop();
     Motion_Stop();
 }
@@ -149,8 +157,38 @@ static void StateMachine_EnterGimbalTest(void)
     Tracking_SetEnabled(0U);
     Route_Stop();
     Motion_Stop();
+    GimbalMotorTest_Stop();
     GimbalTest_Start();
     LOG_LINE("state: gimbal test");
+}
+
+/*
+ * 作用：进入云台电机测试状态。
+ * 使用场景：菜单里的 Gimbal Test / Motor Test，上电记零后慢速转 90 度。
+ */
+static void StateMachine_EnterGimbalMotorTest(void)
+{
+    Tracking_SetEnabled(0U);
+    Route_Stop();
+    Motion_Stop();
+    GimbalTest_Stop();
+    GimbalMotorTest_Start();
+    LOG_LINE("state: gimbal motor test");
+}
+
+/*
+ * 作用：进入四电机使能测试状态。
+ * 使用场景：菜单里的 Gimbal Test / Enable Test，只拉 EN，不发 STEP。
+ */
+static void StateMachine_EnterMotorEnableTest(void)
+{
+    Tracking_SetEnabled(0U);
+    Route_Stop();
+    Motion_Stop();
+    GimbalTest_Stop();
+    GimbalMotorTest_Stop();
+    MotorEnableTest_Start();
+    LOG_LINE("state: motor enable test");
 }
 
 /*
@@ -226,6 +264,12 @@ static void StateMachine_Enter(CarState nextState)
     case CAR_STATE_GIMBAL_TEST:
         StateMachine_EnterGimbalTest();
         break;
+    case CAR_STATE_GIMBAL_MOTOR_TEST:
+        StateMachine_EnterGimbalMotorTest();
+        break;
+    case CAR_STATE_MOTOR_ENABLE_TEST:
+        StateMachine_EnterMotorEnableTest();
+        break;
     case CAR_STATE_MISSION:
         StateMachine_EnterMission();
         break;
@@ -291,6 +335,16 @@ static void StateMachine_GimbalTestTask(void)
     GimbalTest_Task();
 }
 
+static void StateMachine_GimbalMotorTestTask(void)
+{
+    GimbalMotorTest_Task();
+}
+
+static void StateMachine_MotorEnableTestTask(void)
+{
+    MotorEnableTest_Task();
+}
+
 static void StateMachine_MissionTask(void)
 {
 }
@@ -354,6 +408,10 @@ void StateMachine_Dispatch(CarEvent event)
             StateMachine_Enter(CAR_STATE_TRACKING_TEST);
         } else if (event == CAR_EVENT_GIMBAL_TEST_START) {
             StateMachine_Enter(CAR_STATE_GIMBAL_TEST);
+        } else if (event == CAR_EVENT_GIMBAL_MOTOR_TEST_START) {
+            StateMachine_Enter(CAR_STATE_GIMBAL_MOTOR_TEST);
+        } else if (event == CAR_EVENT_MOTOR_ENABLE_TEST_START) {
+            StateMachine_Enter(CAR_STATE_MOTOR_ENABLE_TEST);
         } else if (event == CAR_EVENT_MENU) {
             StateMachine_Enter(CAR_STATE_MENU);
         }
@@ -373,6 +431,8 @@ void StateMachine_Dispatch(CarEvent event)
     case CAR_STATE_TRACKING:
     case CAR_STATE_TRACKING_TEST:
     case CAR_STATE_GIMBAL_TEST:
+    case CAR_STATE_GIMBAL_MOTOR_TEST:
+    case CAR_STATE_MOTOR_ENABLE_TEST:
     case CAR_STATE_MISSION:
         if (event == CAR_EVENT_BACK) {
             StateMachine_Enter(CAR_STATE_MENU);
@@ -427,6 +487,12 @@ void StateMachine_Task(void)
     case CAR_STATE_GIMBAL_TEST:
         StateMachine_GimbalTestTask();
         break;
+    case CAR_STATE_GIMBAL_MOTOR_TEST:
+        StateMachine_GimbalMotorTestTask();
+        break;
+    case CAR_STATE_MOTOR_ENABLE_TEST:
+        StateMachine_MotorEnableTestTask();
+        break;
     case CAR_STATE_MISSION:
         StateMachine_MissionTask();
         break;
@@ -467,6 +533,10 @@ const char *StateMachine_GetStateName(CarState state)
         return "tracking_test";
     case CAR_STATE_GIMBAL_TEST:
         return "gimbal_test";
+    case CAR_STATE_GIMBAL_MOTOR_TEST:
+        return "gimbal_motor_test";
+    case CAR_STATE_MOTOR_ENABLE_TEST:
+        return "motor_enable_test";
     case CAR_STATE_MISSION:
         return "mission";
     case CAR_STATE_FINISHED:

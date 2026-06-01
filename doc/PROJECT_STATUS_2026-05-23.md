@@ -91,10 +91,10 @@ OLED 上电会在下半区显示启动阶段，用来定位初始化卡点；顶
 
 | 电机 | STEP | DIR |
 | --- | --- | --- |
-| 底盘左 | PA7 | PB18 |
-| 底盘右 | PA8 | PA9 |
-| 云台 1 | PA12 | PA22 |
-| 云台 2 | PA13 | PB24 |
+| 底盘左 | PA12 | PA22 |
+| 底盘右 | PA13 | PB24 |
+| 云台左右轴 | PA7 | PB18 |
+| 云台上下轴 | PA8 | PA9 |
 
 当前不接 EN。`hardware/motor.c` 只负责速度命令和 DIR 方向，`hardware/stepper_pulse.c` 使用 TIMG0 定时器中断输出四路 STEP。后续如果要极高速度/硬件全自动脉冲，再评估定时器 PWM/CCP 输出。
 

@@ -12,6 +12,22 @@
 static volatile uint8_t g_keyEventMask;
 static volatile uint8_t g_keyDebounceTicks[KEY_ID_COUNT];
 
+/*
+ * 作用：保护主循环和 GPIO 中断共享的按键事件状态。
+ * 使用场景：Key_Task / Key_PopEvent 与 Key_HandleGPIOInterrupt 并发访问时。
+ */
+static uint32_t Key_EnterCritical(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    return primask;
+}
+
+static void Key_ExitCritical(uint32_t primask)
+{
+    __set_PRIMASK(primask);
+}
+
 static uint32_t Key_PinFromId(KeyId key)
 {
     return (key == KEY_ID_1) ? PIN_KEY_1 : PIN_KEY_2;
@@ -52,12 +68,14 @@ void Key_Init(void)
 void Key_Task(void)
 {
     uint8_t i;
+    uint32_t primask = Key_EnterCritical();
 
     for (i = 0U; i < (uint8_t)KEY_ID_COUNT; ++i) {
         if (g_keyDebounceTicks[i] > 0U) {
             --g_keyDebounceTicks[i];
         }
     }
+    Key_ExitCritical(primask);
 }
 
 uint8_t Key_IsPressed(KeyId key)
@@ -68,15 +86,21 @@ uint8_t Key_IsPressed(KeyId key)
 
 KeyEvent Key_PopEvent(void)
 {
-    if ((g_keyEventMask & KEY_EVENT_MASK_1) != 0U) {
-        g_keyEventMask &= (uint8_t)(~KEY_EVENT_MASK_1);
-        return KEY_EVENT_1;
+    KeyEvent event = KEY_EVENT_NONE;
+    uint8_t mask;
+    uint32_t primask = Key_EnterCritical();
+
+    mask = g_keyEventMask;
+    if ((mask & KEY_EVENT_MASK_1) != 0U) {
+        g_keyEventMask = (uint8_t)(mask & (uint8_t)(~KEY_EVENT_MASK_1));
+        event = KEY_EVENT_1;
+    } else if ((mask & KEY_EVENT_MASK_2) != 0U) {
+        g_keyEventMask = (uint8_t)(mask & (uint8_t)(~KEY_EVENT_MASK_2));
+        event = KEY_EVENT_2;
     }
-    if ((g_keyEventMask & KEY_EVENT_MASK_2) != 0U) {
-        g_keyEventMask &= (uint8_t)(~KEY_EVENT_MASK_2);
-        return KEY_EVENT_2;
-    }
-    return KEY_EVENT_NONE;
+
+    Key_ExitCritical(primask);
+    return event;
 }
 
 void Key_HandleGPIOInterrupt(void)

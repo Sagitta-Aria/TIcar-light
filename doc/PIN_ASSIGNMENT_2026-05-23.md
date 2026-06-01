@@ -46,12 +46,12 @@
 
 | 电机 | STEP | DIR | EN |
 | --- | --- | --- | --- |
-| 底盘左电机 | PA7 | PB18 | 不接，驱动器菜单保持使能 |
-| 底盘右电机 | PA8 | PA9 | 不接，驱动器菜单保持使能 |
-| 云台电机 1 | PA12 | PA22 | 不接，驱动器菜单保持使能 |
-| 云台电机 2 | PA13 | PB24 | 不接，驱动器菜单保持使能 |
+| 底盘左电机 | PA12 | PA22 | PA2，默认低有效 |
+| 底盘右电机 | PA13 | PB24 | PA28，默认低有效 |
+| 云台左右轴 | PA7 | PB18 | PA31，默认低有效 |
+| 云台上下轴 | PA8 | PA9 | PB19，默认低有效 |
 
-当前 `hardware/motor.c` 管 DIR 和速度命令，`hardware/stepper_pulse.c` 通过 TIMG0 定时器中断输出 STEP；接线仍是 PA7/PA8/PA12/PA13，不需要因为本次改动重新接线。
+当前 `hardware/motor.c` 管 DIR 和速度命令，`hardware/stepper_pulse.c` 通过 TIMG0 定时器中断输出 STEP，`hardware/motor_enable.c` 管四路 EN。默认上电不使能 EN，进入 `Gimbal Test / Enable Test` 后才把 EN 拉到使能电平。
 
 ## 灰度传感器
 
@@ -73,10 +73,6 @@ PA14 已固定作 LED，PA18 保留 BSL，PA21/PA23 保留 VREF，因此灰度�
 
 | 管脚 | 建议用途 |
 | --- | --- |
-| PA2 | 普通 GPIO 或后续调试输入 |
-| PA28 | 普通 GPIO 备用；UART0 已给 PA10/PA11 日志，不再接 JY61P |
-| PA31 | 普通 GPIO 备用；UART0 已给 PA10/PA11 日志，不再接 JY61P |
-| PB19 | 普通 GPIO，后续可做步进报警输入 |
 | PB20 | 普通 GPIO，后续可做步进到位/报警输入 |
 
 如果后续要恢复 JQ8400，需要重新分配一组真实可用的 UART 引脚；不要直接抢 PB6/PB7，否则会和 JY61P 冲突。

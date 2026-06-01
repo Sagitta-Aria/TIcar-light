@@ -1,6 +1,7 @@
 #include "motor.h"
 
 #include "board_config.h"
+#include "motor_enable.h"
 #include "pin_map.h"
 #include "stepper_pulse.h"
 
@@ -84,6 +85,7 @@ static void Motor_ApplyDirection(MotorStepper *motor, MotorDir dir)
 
 void Motor_Init(void)
 {
+    MotorEnable_Init();
     Motor_SetAllStop();
     StepperPulse_Init();
 }

@@ -70,6 +70,15 @@ Mission
 
 `Mission` 二级菜单：
 
+`Gimbal Test` 二级菜单：
+
+```text
+Enable Test
+Motor Test
+Vision Test
+Back
+```
+
 ```text
 Mission 1
 Mission 2
@@ -90,7 +99,8 @@ No Save Exit
 
 - `Gray Calib`：灰度校准，当前数字灰度模式下主要保留流程。
 - `Track Test`：只跑灰度循迹，不跑完整任务路线。
-- `Gimbal Test`：接收 UART3/Link 视觉数据，驱动云台追踪。
+- `Gimbal Test / Vision Test`：接收 UART3/Link 视觉数据，驱动云台追踪。
+- `Gimbal Test / Motor Test`：上电记零后，依次控制左右轴、上下轴慢速转 90 度。
 - `Mission 1~4`：任务入口，具体任务流程后续继续补。
 
 ## 主要模块
@@ -114,10 +124,10 @@ No Save Exit
 STEP 接线：
 
 ```text
-底盘左：PA7  STEP，PB18 DIR
-底盘右：PA8  STEP，PA9  DIR
-云台 1：PA12 STEP，PA22 DIR
-云台 2：PA13 STEP，PB24 DIR
+底盘左：PA12 STEP，PA22 DIR
+底盘右：PA13 STEP，PB24 DIR
+云台左右轴：PA7 STEP，PB18 DIR
+云台上下轴：PA8 STEP，PA9 DIR
 ```
 
 ### 云台控制
@@ -142,8 +152,8 @@ errorY = targetY - currentY
 当前默认映射：
 
 ```text
-X 轴 -> MOTOR_GIMBAL_1
-Y 轴 -> MOTOR_GIMBAL_2
+X 轴/左右 -> MOTOR_GIMBAL_1 -> PA7 STEP / PB18 DIR / PA31 EN
+Y 轴/上下 -> MOTOR_GIMBAL_2 -> PA8 STEP / PA9 DIR / PB19 EN
 ```
 
 方向反了优先改：
@@ -156,7 +166,7 @@ CAR_GIMBAL_Y_REVERSE
 ### 云台测试
 
 - `app/gimbal_test.c/h`
-  - 菜单进入 `Gimbal Test` 后启用。
+  - 菜单进入 `Gimbal Test / Vision Test` 后启用。
   - 清空 Link 接收缓存。
   - 接收视觉数据并调用 `Gimbal_UpdateFromVision()`。
 
@@ -187,6 +197,66 @@ CAR_GIMBAL_TEST_TARGET_Y
 - 未收到视觉数据：OLED 显示 `Waiting Link`，云台不动。
 - 收到有效坐标：OLED 显示 `Tracking`，云台按视觉误差追踪。
 - 连续约 200ms 没有视觉更新，云台自动停止。
+
+### 云台电机测试
+
+- `app/gimbal_motor_test.c/h`
+  - 菜单进入 `Gimbal Test / Motor Test` 后启用。
+  - 先把当前上电位置记为零点。
+  - 再控制左右轴 `MOTOR_GIMBAL_1` 慢速转 90 度。
+  - 然后控制上下轴 `MOTOR_GIMBAL_2` 慢速转 90 度。
+  - 接着跑一串内置仿真视觉坐标，调用 `Gimbal_UpdateFromVision()` 测试闭环追踪方向。
+  - 最后用两轴开环速度相位表让激光近似画圆。
+  - 通过云台 STEP 输出计数判断“脉冲是否发够”，不代表驱动器和电机真实转到 90 度。
+  - OLED 显示当前阶段和进度百分比。
+
+关键参数：
+
+```c
+CAR_GIMBAL_MOTOR_TEST_COMMAND
+CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90
+CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90
+CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS
+CAR_GIMBAL_MOTOR_TEST_REVERSE
+CAR_GIMBAL_MOTOR_TEST_RUN_UP_DOWN
+CAR_GIMBAL_MOTOR_TEST_RUN_SIM_TRACK
+CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE
+CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS
+CAR_GIMBAL_MOTOR_TEST_CIRCLE_COMMAND
+CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS
+CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES
+```
+
+注意：当前没有限位开关或绝对编码器，所谓“调零”是把上电当前位置记为软件零点，不是自动寻找机械零点。
+
+当前实测方向：上下轴为向上仰角，左右轴为顺时针向右。上下轴 800 step 幅度基本合适，左右轴先按 1200 step 做 90 度测试。
+
+实车现象：
+
+- `Zero`：只记软件零点，不找机械零点。
+- `LR 90` / `UD 90`：只验证云台两个轴能按 STEP/DIR 动起来。
+- `SimTrack`：不需要摄像头，固件自己生成一串假视觉误差，云台会来回追踪。
+- `Circle`：不需要摄像头，两个轴按开环速度表运动，墙上激光点会近似转圈；这不是最终比赛用的视觉闭环圆。
+
+### 四电机使能测试
+
+- `hardware/motor_enable.c/h`
+  - 管四路步进驱动器 EN 输出。
+  - 默认按 ZDT 示例配置为低电平使能。
+- `app/motor_enable_test.c/h`
+  - 菜单进入 `Gimbal Test / Enable Test` 后启用。
+  - 只拉四路 EN，不输出 STEP 脉冲。
+
+接线：
+
+```text
+底盘左 EN  -> PA2
+底盘右 EN  -> PA28
+云台左右 EN -> PA31
+云台上下 EN -> PB19
+```
+
+实车现象：进入 `Enable Test` 后，如果驱动器供电、COM、GND、EN 极性都正确，四个电机会立刻抱住；退出后会释放。
 
 ### Link / 视觉串口
 

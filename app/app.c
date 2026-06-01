@@ -4,16 +4,19 @@
 #include "board_config.h"
 #include "delay.h"
 #include "gimbal.h"
+#include "gimbal_motor_test.h"
 #include "gimbal_test.h"
 #include "key.h"
 #include "link.h"
 #include "log_uart.h"
 #include "menu.h"
 #include "motor.h"
+#include "motor_enable_test.h"
 #include "oled.h"
 #include "pose_solver.h"
 #include "route.h"
 #include "state_machine.h"
+#include "stepper_pin_test.h"
 #include "tracking.h"
 
 /*
@@ -81,6 +84,11 @@ static void App_HandleKeyEvent(KeyEvent event)
 
 void App_Init(void)
 {
+#if CAR_GIMBAL_PIN_TEST_BUILD
+    StepperPinTest_Start();
+    return;
+#endif
+
     Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP...", "");
     LOG_LINE("app: init begin");
     delay_ms(100U);
@@ -93,6 +101,10 @@ void App_Init(void)
     LOG_LINE("app: gimbal init ok");
     GimbalTest_Init();
     LOG_LINE("app: gimbal test init ok");
+    GimbalMotorTest_Init();
+    LOG_LINE("app: gimbal motor test init ok");
+    MotorEnableTest_Init();
+    LOG_LINE("app: motor enable test init ok");
     PoseSolver_Init();
     LOG_LINE("app: pose solver init ok");
     Menu_Init();
@@ -109,6 +121,11 @@ void App_Init(void)
 
 void App_Task(void)
 {
+#if CAR_GIMBAL_PIN_TEST_BUILD
+    StepperPinTest_Task();
+    return;
+#endif
+
     Key_Task();
     App_HandleKeyEvent(Key_PopEvent());
 

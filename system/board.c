@@ -9,6 +9,7 @@
 #include "log_uart.h"
 #include "motor.h"
 #include "oled.h"
+#include "stepper_pin_test.h"
 #include "ti_msp_dl_config.h"
 
 #define BOARD_BOOT_STEP_DELAY_MS    (80U)
@@ -295,7 +296,24 @@ void Board_Init(void)
 {
     g_boardErrors = BOARD_ERROR_NONE;
 
-#if CAR_RECOVERY_SAFE_BUILD
+#if CAR_GIMBAL_PIN_TEST_BUILD
+    /*
+     * 云台引脚测试模式：
+     * 只打开 SYSOSC、GPIOA/GPIOB、PA14 和两路云台 STEP/DIR。
+     * 不初始化 OLED/I2C、UART、灰度、按键、TIMG0，避免复杂外设干扰排查。
+     */
+    DL_SYSCTL_setBORThreshold(DL_SYSCTL_BOR_THRESHOLD_LEVEL_0);
+    DL_SYSCTL_setSYSOSCFreq(DL_SYSCTL_SYSOSC_FREQ_BASE);
+    DL_SYSCTL_disableHFXT();
+    DL_SYSCTL_disableSYSPLL();
+
+    DL_GPIO_enablePower(GPIOA);
+    DL_GPIO_enablePower(GPIOB);
+    delay_cycles(POWER_STARTUP_DELAY);
+    Board_DebugLedInit();
+    StepperPinTest_InitPins();
+    return;
+#elif CAR_RECOVERY_SAFE_BUILD
     /*
      * 恢复安全模式：
      * 只用内部 SYSOSC，关闭 HFXT/PLL，只给 GPIOA/GPIOB 上电并配置 PA14、UART。

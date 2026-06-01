@@ -15,6 +15,21 @@
 #define CAR_RECOVERY_SAFE_BUILD       (0U)
 
 /*
+ * CAR_GIMBAL_PIN_TEST_BUILD：云台 STEP/DIR 最小引脚测试固件。
+ *
+ * 1：不初始化 OLED/I2C、UART、灰度、视觉、菜单、TIMG0 步进调度。
+ *    只使用 GPIO 直接输出云台两轴 STEP/DIR 脉冲，用来排除复杂工程逻辑。
+ * 0：正常小车固件。
+ *
+ * 当前用于排查云台驱动器接线和芯片异常，测试完成后应改回 0。
+ */
+#define CAR_GIMBAL_PIN_TEST_BUILD     (0U)
+
+#if (CAR_RECOVERY_SAFE_BUILD != 0U) && (CAR_GIMBAL_PIN_TEST_BUILD != 0U)
+#error "CAR_RECOVERY_SAFE_BUILD and CAR_GIMBAL_PIN_TEST_BUILD cannot both be enabled"
+#endif
+
+/*
  * CAR_ENABLE_LOG_UART：工程日志总开关。
  *
  * 1：启用 Type-C CH340 日志串口，启动、按键、状态机、路线阶段、循迹异常等行为都会打印。
@@ -49,6 +64,18 @@
 /* CAR_STEPPER_PULSE_HIGH_TICKS：STEP 高电平保持几个定时器 tick。 */
 #define CAR_STEPPER_PULSE_HIGH_TICKS    (1U)
 
+/*
+ * CAR_STEPPER_ENABLE_ACTIVE_LOW：步进驱动器 EN 使能电平。
+ * ZDT 官方 PUL 示例默认 En_Pin 拉低使能，因此这里先按低有效测试。
+ */
+#define CAR_STEPPER_ENABLE_ACTIVE_LOW   (1U)
+
+/*
+ * CAR_STEPPER_ENABLE_DEFAULT_ON：上电后是否默认使能四个驱动器。
+ * 当前用于查线，默认保持 0；进入云台 Enable Test 菜单后才拉使能。
+ */
+#define CAR_STEPPER_ENABLE_DEFAULT_ON   (0U)
+
 /* CAR_GIMBAL_COMMAND_MAX：云台单轴最大速度命令。 */
 #define CAR_GIMBAL_COMMAND_MAX          (1800U)
 
@@ -76,6 +103,47 @@
 /* CAR_GIMBAL_TEST_TARGET_X/Y：云台测试中只收到当前位置时使用的默认目标点。 */
 #define CAR_GIMBAL_TEST_TARGET_X        (160)
 #define CAR_GIMBAL_TEST_TARGET_Y        (120)
+
+/* CAR_GIMBAL_MOTOR_TEST_COMMAND：云台电机测试的慢速命令。 */
+#define CAR_GIMBAL_MOTOR_TEST_COMMAND   (2000U)
+
+/* CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90：云台左右轴转 90 度需要的 STEP 数。 */
+#define CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90 (1200U)
+
+/* CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90：云台上下轴转 90 度需要的 STEP 数。 */
+#define CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90 (800U)
+
+/* CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS：上电记零状态保持多少轮主循环。 */
+#define CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS (20U)
+
+/* CAR_GIMBAL_MOTOR_TEST_REVERSE：云台电机测试方向反了就改成 1。 */
+#define CAR_GIMBAL_MOTOR_TEST_REVERSE   (0U)
+
+/* CAR_GIMBAL_MOTOR_TEST_RUN_UP_DOWN：1 表示左右轴完成后继续测试上下轴。 */
+#define CAR_GIMBAL_MOTOR_TEST_RUN_UP_DOWN (1U)
+
+/* CAR_GIMBAL_MOTOR_TEST_RUN_SIM_TRACK：1 表示 90 度测试后继续跑仿真视觉跟踪。 */
+#define CAR_GIMBAL_MOTOR_TEST_RUN_SIM_TRACK (1U)
+
+/* CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE：1 表示仿真视觉跟踪后继续跑开环画圆。 */
+#define CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE (1U)
+
+/* CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS：每个仿真视觉点保持多少轮主循环。 */
+#define CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS (40U)
+
+/* CAR_GIMBAL_MOTOR_TEST_CIRCLE_COMMAND：开环画圆时两轴的最大速度命令。 */
+#define CAR_GIMBAL_MOTOR_TEST_CIRCLE_COMMAND (900U)
+
+/* CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS：画圆相位表每一格保持多少轮主循环。 */
+#define CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS (12U)
+
+/* CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES：画圆测试跑几圈。 */
+#define CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES (2U)
+
+/* 云台最小引脚测试：每段动作的 STEP 数、脉冲间隔和换向停顿。 */
+#define CAR_GIMBAL_PIN_TEST_STEPS_PER_MOVE (400U)
+#define CAR_GIMBAL_PIN_TEST_PERIOD_MS      (4U)
+#define CAR_GIMBAL_PIN_TEST_PAUSE_TICKS    (80U)
 
 /*
  * CAR_POSE_STEP_TO_MM_NUMERATOR/DENOMINATOR：底盘 STEP 到毫米的换算比例。

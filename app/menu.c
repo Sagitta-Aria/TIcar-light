@@ -1,9 +1,11 @@
 #include "menu.h"
 
 #include "board_config.h"
+#include "gimbal_motor_test.h"
 #include "gimbal_test.h"
 #include "gray.h"
 #include "log_uart.h"
+#include "motor_enable_test.h"
 #include "oled.h"
 
 #define MENU_OLED_FONT_SIZE        (12U)
@@ -16,6 +18,7 @@
 
 typedef enum {
     MENU_PAGE_MAIN = 0,
+    MENU_PAGE_GIMBAL,
     MENU_PAGE_MISSION
 } MenuPage;
 
@@ -35,6 +38,14 @@ typedef enum {
     MENU_MISSION_BACK,
     MENU_MISSION_COUNT
 } MenuMissionItem;
+
+typedef enum {
+    MENU_GIMBAL_ENABLE_TEST = 0,
+    MENU_GIMBAL_MOTOR_TEST,
+    MENU_GIMBAL_VISION_TEST,
+    MENU_GIMBAL_BACK,
+    MENU_GIMBAL_COUNT
+} MenuGimbalItem;
 
 typedef enum {
     MENU_GRAY_SAVE_EXIT = 0,
@@ -57,9 +68,17 @@ static const char *const g_missionItems[MENU_MISSION_COUNT] = {
     "Back"
 };
 
+static const char *const g_gimbalItems[MENU_GIMBAL_COUNT] = {
+    "Enable Test",
+    "Motor Test",
+    "Vision Test",
+    "Back"
+};
+
 static MenuPage g_menuPage;
 static uint8_t g_mainIndex;
 static uint8_t g_missionIndex;
+static uint8_t g_gimbalIndex;
 static uint8_t g_grayActionIndex;
 static uint8_t g_forceRefresh;
 static uint16_t g_refreshTicks;
@@ -245,6 +264,12 @@ static void Menu_RenderMissionMenu(void)
         g_missionIndex);
 }
 
+static void Menu_RenderGimbalMenu(void)
+{
+    Menu_RenderCenteredList(g_gimbalItems, MENU_GIMBAL_COUNT,
+        g_gimbalIndex);
+}
+
 static void Menu_RenderGrayCalibration(void)
 {
     char statusLine[MENU_LINE_BUFFER_SIZE];
@@ -274,9 +299,30 @@ static void Menu_RenderTrackingTest(void)
 
 static void Menu_RenderGimbalTest(void)
 {
-    Menu_RenderLines("Gimbal Test",
+    Menu_RenderLines("Vision Test",
         (GimbalTest_HasVision() != 0U) ? "Tracking" : "Waiting Link",
         "K2 Back", "");
+}
+
+static void Menu_RenderGimbalMotorTest(void)
+{
+    char line1[MENU_LINE_BUFFER_SIZE];
+    char *write = line1;
+    char *end = &line1[MENU_LINE_BUFFER_SIZE - 1U];
+
+    write = Menu_AppendText(write, end, GimbalMotorTest_GetStageName());
+    write = Menu_AppendText(write, end, " ");
+    write = Menu_AppendUnsigned(write, end,
+        GimbalMotorTest_GetProgressPercent());
+    (void)Menu_AppendText(write, end, "%");
+
+    Menu_RenderLines("Motor Test", line1, "Open Loop", "K2 Back");
+}
+
+static void Menu_RenderMotorEnableTest(void)
+{
+    Menu_RenderLines("Enable Test", MotorEnableTest_GetEnableLine(),
+        "No Step Pulse", "K2 Back");
 }
 
 static void Menu_RenderMission(void)
@@ -299,7 +345,9 @@ static void Menu_RenderByState(CarState state)
 {
     switch (state) {
     case CAR_STATE_MENU:
-        if (g_menuPage == MENU_PAGE_MISSION) {
+        if (g_menuPage == MENU_PAGE_GIMBAL) {
+            Menu_RenderGimbalMenu();
+        } else if (g_menuPage == MENU_PAGE_MISSION) {
             Menu_RenderMissionMenu();
         } else {
             Menu_RenderMainMenu();
@@ -313,6 +361,12 @@ static void Menu_RenderByState(CarState state)
         break;
     case CAR_STATE_GIMBAL_TEST:
         Menu_RenderGimbalTest();
+        break;
+    case CAR_STATE_GIMBAL_MOTOR_TEST:
+        Menu_RenderGimbalMotorTest();
+        break;
+    case CAR_STATE_MOTOR_ENABLE_TEST:
+        Menu_RenderMotorEnableTest();
         break;
     case CAR_STATE_MISSION:
         Menu_RenderMission();
@@ -344,6 +398,7 @@ void Menu_Init(void)
     g_menuPage = MENU_PAGE_MAIN;
     g_mainIndex = MENU_MAIN_GRAY_CALIB;
     g_missionIndex = MENU_MISSION_1;
+    g_gimbalIndex = MENU_GIMBAL_ENABLE_TEST;
     g_grayActionIndex = MENU_GRAY_SAVE_EXIT;
     g_forceRefresh = 1U;
     g_refreshTicks = CAR_MENU_REFRESH_TICKS;
@@ -352,7 +407,12 @@ void Menu_Init(void)
 
 void Menu_Next(void)
 {
-    if (g_menuPage == MENU_PAGE_MISSION) {
+    if (g_menuPage == MENU_PAGE_GIMBAL) {
+        g_gimbalIndex = (uint8_t)((g_gimbalIndex + 1U) %
+            MENU_GIMBAL_COUNT);
+        LOG_RAW("menu: select ");
+        LOG_LINE(g_gimbalItems[g_gimbalIndex]);
+    } else if (g_menuPage == MENU_PAGE_MISSION) {
         g_missionIndex = (uint8_t)((g_missionIndex + 1U) %
             MENU_MISSION_COUNT);
         LOG_RAW("menu: select ");
@@ -377,10 +437,33 @@ CarEvent Menu_Confirm(void)
         case MENU_MAIN_TRACK_TEST:
             return CAR_EVENT_TRACKING_TEST_START;
         case MENU_MAIN_GIMBAL_TEST:
-            return CAR_EVENT_GIMBAL_TEST_START;
+            g_menuPage = MENU_PAGE_GIMBAL;
+            g_gimbalIndex = MENU_GIMBAL_ENABLE_TEST;
+            g_forceRefresh = 1U;
+            return CAR_EVENT_NONE;
         case MENU_MAIN_MISSION:
             g_menuPage = MENU_PAGE_MISSION;
             g_missionIndex = MENU_MISSION_1;
+            g_forceRefresh = 1U;
+            return CAR_EVENT_NONE;
+        default:
+            return CAR_EVENT_NONE;
+        }
+    }
+
+    if (g_menuPage == MENU_PAGE_GIMBAL) {
+        LOG_RAW("menu: confirm ");
+        LOG_LINE(g_gimbalItems[g_gimbalIndex]);
+        switch (g_gimbalIndex) {
+        case MENU_GIMBAL_ENABLE_TEST:
+            return CAR_EVENT_MOTOR_ENABLE_TEST_START;
+        case MENU_GIMBAL_VISION_TEST:
+            return CAR_EVENT_GIMBAL_TEST_START;
+        case MENU_GIMBAL_MOTOR_TEST:
+            return CAR_EVENT_GIMBAL_MOTOR_TEST_START;
+        case MENU_GIMBAL_BACK:
+            g_menuPage = MENU_PAGE_MAIN;
+            g_mainIndex = MENU_MAIN_GIMBAL_TEST;
             g_forceRefresh = 1U;
             return CAR_EVENT_NONE;
         default:

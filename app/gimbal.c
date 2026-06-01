@@ -110,6 +110,7 @@ static void Gimbal_ApplyControl(void)
     g_gimbal.commandX = commandX;
     g_gimbal.commandY = commandY;
 
+    /* X 视觉误差控制左右轴，Y 视觉误差控制上下轴。 */
     Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
     Gimbal_SetAxis(MOTOR_GIMBAL_2, commandY);
 }
