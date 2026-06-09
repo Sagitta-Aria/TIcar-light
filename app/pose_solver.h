@@ -31,10 +31,19 @@ void PoseSolver_Task(void);
 /* PoseSolver_GetPose：复制当前位姿快照。 */
 void PoseSolver_GetPose(PoseSolverPose *pose);
 
+/* PoseSolver_GetXmm：返回相对零点的 x 方向位移，单位毫米。 */
 int32_t PoseSolver_GetXmm(void);
+
+/* PoseSolver_GetYmm：返回相对零点的 y 方向位移，单位毫米。 */
 int32_t PoseSolver_GetYmm(void);
+
+/* PoseSolver_GetTravelMm：返回累计前进里程估计，单位毫米。 */
 int32_t PoseSolver_GetTravelMm(void);
+
+/* PoseSolver_GetYawDeg：返回相对零点的 yaw 角，单位度。 */
 int16_t PoseSolver_GetYawDeg(void);
+
+/* PoseSolver_HasImu：返回当前是否有可用 JY61P 姿态数据。 */
 uint8_t PoseSolver_HasImu(void);
 
 #endif

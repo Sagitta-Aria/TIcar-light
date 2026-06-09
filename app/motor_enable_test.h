@@ -18,7 +18,10 @@ void MotorEnableTest_Stop(void);
 /* MotorEnableTest_Task：预留周期任务，目前不做阻塞动作。 */
 void MotorEnableTest_Task(void);
 
+/* MotorEnableTest_IsRunning：读取当前是否处于四电机使能测试状态。 */
 uint8_t MotorEnableTest_IsRunning(void);
+
+/* MotorEnableTest_GetEnableLine：返回 OLED 上显示的 EN 状态行。 */
 const char *MotorEnableTest_GetEnableLine(void);
 
 #endif

@@ -15,6 +15,12 @@ void MotorEnable_Init(void);
  */
 void MotorEnable_SetAll(uint8_t enabled);
 
+/*
+ * MotorEnable_SetGimbal：只设置云台两路 EN。
+ * 使用场景：视觉闭环或云台单独测试，避免误使能底盘驱动器。
+ */
+void MotorEnable_SetGimbal(uint8_t enabled);
+
 /* MotorEnable_IsAllEnabled：读取四路 EN 是否都处于使能状态。 */
 uint8_t MotorEnable_IsAllEnabled(void);
 

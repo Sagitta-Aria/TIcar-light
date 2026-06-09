@@ -2,41 +2,58 @@
 
 #include "motor.h"
 
-static int16_t Motion_ToSignedCommand(uint16_t command)
+/*
+ * 作用：把无符号 SPS 压到 int16_t 可表达范围。
+ * 使用场景：Motion_Forward/Backward/Turn* 把速度转成左右轮有符号 SPS。
+ */
+static int16_t Motion_ToSignedSpeed(uint16_t speedSps)
 {
-    return (command > 32767U) ? 32767 : (int16_t)command;
+    return (speedSps > 32767U) ? 32767 : (int16_t)speedSps;
 }
 
+/*
+ * 作用：停止所有电机速度输出。
+ * 使用场景：状态机退出运动状态、错误状态或人工返回菜单时。
+ * 说明：这里调用 Motor_Stop，会影响底盘和云台，云台单独停止请用 gimbal 模块接口。
+ */
 void Motion_Stop(void)
 {
     Motor_Stop();
 }
 
-void Motion_SetChassisCommand(int16_t leftCommand, int16_t rightCommand)
+/*
+ * 作用：设置底盘左右轮的有符号 SPS。
+ * 使用场景：循迹、路线外环或手写运动动作需要直接控制底盘时。
+ */
+void Motion_SetChassisCommand(int16_t leftSpeedSps, int16_t rightSpeedSps)
 {
-    Motor_SetChassisCommand(leftCommand, rightCommand);
+    Motor_SetChassisCommand(leftSpeedSps, rightSpeedSps);
 }
 
-void Motion_Forward(uint16_t command)
+/* 作用：让底盘以相同 SPS 前进。 */
+void Motion_Forward(uint16_t speedSps)
 {
-    int16_t speed = Motion_ToSignedCommand(command);
+    int16_t speed = Motion_ToSignedSpeed(speedSps);
     Motion_SetChassisCommand(speed, speed);
 }
 
-void Motion_Backward(uint16_t command)
+/* 作用：让底盘以相同 SPS 后退。 */
+void Motion_Backward(uint16_t speedSps)
 {
-    int16_t speed = Motion_ToSignedCommand(command);
+    int16_t speed = Motion_ToSignedSpeed(speedSps);
     Motion_SetChassisCommand((int16_t)-speed, (int16_t)-speed);
 }
 
-void Motion_TurnLeft(uint16_t command)
+/* 作用：让底盘原地左转，主要用于测试或后续任务动作。 */
+void Motion_TurnLeft(uint16_t speedSps)
 {
-    int16_t speed = Motion_ToSignedCommand(command);
+    int16_t speed = Motion_ToSignedSpeed(speedSps);
     Motion_SetChassisCommand((int16_t)-speed, speed);
 }
 
-void Motion_TurnRight(uint16_t command)
+/* 作用：让底盘原地右转，主要用于测试或后续任务动作。 */
+void Motion_TurnRight(uint16_t speedSps)
 {
-    int16_t speed = Motion_ToSignedCommand(command);
+    int16_t speed = Motion_ToSignedSpeed(speedSps);
     Motion_SetChassisCommand(speed, (int16_t)-speed);
 }

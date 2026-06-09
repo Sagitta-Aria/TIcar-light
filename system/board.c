@@ -21,6 +21,8 @@
 #define BOARD_SIGNAL_BLINK_TICKS    (50U)
 /* 非致命错误用更快频率提示，例如 OLED/I2C 超时。 */
 #define BOARD_ERROR_BLINK_TICKS     (10U)
+#define BOARD_OLED_RECOVER_PERIOD_TICKS (200U)
+#define BOARD_OLED_RECOVER_MAX_TRIES    (3U)
 #define BOARD_RECOVERY_BLINK_CYCLES (16000000U)
 #define BOARD_RECOVERY_POWER_DELAY  (16U)
 #define BOARD_RECOVERY_UART_TIMEOUT (100000U)
@@ -33,6 +35,8 @@
 #define BOARD_BOOT_LINE_STEP        (12U)
 
 static uint32_t g_boardErrors;
+static uint8_t g_boardOledRecoverTries;
+static uint8_t g_boardOledDisabled;
 
 #if CAR_RECOVERY_SAFE_BUILD
 static void Board_RecoveryUartInit(void);
@@ -48,6 +52,7 @@ static void Board_LogErrorChange(uint32_t errors)
 {
 #if CAR_ENABLE_LOG_UART
     if (errors == BOARD_ERROR_NONE) {
+        LOG_LINE("board error mask=0x00000000 CLEAR");
         return;
     }
 
@@ -63,6 +68,73 @@ static void Board_LogErrorChange(uint32_t errors)
 #else
     (void)errors;
 #endif
+}
+
+/* 作用：清除已经恢复的板级错误位。 */
+static void Board_ClearError(BoardErrorCode error)
+{
+    g_boardErrors &= ~((uint32_t)error);
+}
+
+/*
+ * 作用：同步 OLED 驱动错误和板级 OLED/I2C 错误位。
+ * 说明：启动早期 OLED 可能短暂未应答；后续初始化成功后必须清掉旧错误位。
+ */
+static uint8_t Board_UpdateOledError(void)
+{
+    if (g_boardOledDisabled != 0U) {
+        Board_ReportError(BOARD_ERROR_OLED_I2C);
+        return 0U;
+    }
+
+    if (OLED_HasError() == 0U) {
+        Board_ClearError(BOARD_ERROR_OLED_I2C);
+        g_boardOledRecoverTries = 0U;
+        g_boardOledDisabled = 0U;
+        return 1U;
+    }
+
+    Board_ReportError(BOARD_ERROR_OLED_I2C);
+    return 0U;
+}
+
+/*
+ * 作用：尝试恢复 OLED I2C，并按结果更新板级错误位。
+ * 使用场景：启动探针或运行时发现 OLED/I2C 错误后低频自救。
+ */
+static uint8_t Board_TryRecoverOled(void)
+{
+    if (g_boardOledDisabled != 0U) {
+        Board_ReportError(BOARD_ERROR_OLED_I2C);
+        return 0U;
+    }
+
+    if (OLED_HasError() == 0U) {
+        Board_ClearError(BOARD_ERROR_OLED_I2C);
+        g_boardOledRecoverTries = 0U;
+        g_boardOledDisabled = 0U;
+        return 1U;
+    }
+
+    if (g_boardOledRecoverTries >= BOARD_OLED_RECOVER_MAX_TRIES) {
+        g_boardOledDisabled = 1U;
+        Board_ReportError(BOARD_ERROR_OLED_I2C);
+        return 0U;
+    }
+
+    ++g_boardOledRecoverTries;
+    if ((OLED_TryRecover() != 0U) && (OLED_HasError() == 0U)) {
+        Board_ClearError(BOARD_ERROR_OLED_I2C);
+        g_boardOledRecoverTries = 0U;
+        g_boardOledDisabled = 0U;
+        return 1U;
+    }
+
+    if (g_boardOledRecoverTries >= BOARD_OLED_RECOVER_MAX_TRIES) {
+        g_boardOledDisabled = 1U;
+    }
+    Board_ReportError(BOARD_ERROR_OLED_I2C);
+    return 0U;
 }
 
 /*
@@ -122,14 +194,12 @@ static void Board_ShowBootLine(uint8_t line, const char *text)
 void Board_ShowBootProgress(const char *clkStatus, const char *i2cStatus,
     const char *uartStatus, const char *adcStatus, const char *appStatus)
 {
-    if (OLED_HasError() != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
+    if (Board_TryRecoverOled() == 0U) {
         return;
     }
     OLED_ColorTurn(0U);
     OLED_DisplayTurn(0U);
-    if (OLED_HasError() != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
+    if (Board_TryRecoverOled() == 0U) {
         return;
     }
     Board_ClearBootArea();
@@ -139,9 +209,7 @@ void Board_ShowBootProgress(const char *clkStatus, const char *i2cStatus,
     Board_ShowBootLine(3U, adcStatus);
     (void)appStatus;
     OLED_Refresh();
-    if (OLED_HasError() != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
-    }
+    (void)Board_UpdateOledError();
 }
 
 /*
@@ -151,8 +219,7 @@ void Board_ShowBootProgress(const char *clkStatus, const char *i2cStatus,
 static void Board_ShowBootStep(const char *done, const char *running,
     const char *waiting1, const char *waiting2)
 {
-    if (OLED_HasError() != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
+    if (Board_TryRecoverOled() == 0U) {
         return;
     }
     Board_ShowBootProgress(done, running, waiting1, waiting2, "");
@@ -287,14 +354,27 @@ uint32_t Board_GetErrors(void)
     return g_boardErrors;
 }
 
-uint8_t Board_HasFatalError(void)
+uint8_t Board_HasFatalError(void)  //有致命错误返回 1，没有返回 0
 {
     return ((g_boardErrors & BOARD_FATAL_ERROR_MASK) != 0U) ? 1U : 0U;
+}
+
+uint8_t Board_IsOledAvailable(void)
+{
+    if (g_boardOledDisabled != 0U) {
+        return 0U;
+    }
+    if ((g_boardErrors & BOARD_ERROR_OLED_I2C) != 0U) {
+        return 0U;
+    }
+    return (OLED_HasError() == 0U) ? 1U : 0U;
 }
 
 void Board_Init(void)
 {
     g_boardErrors = BOARD_ERROR_NONE;
+    g_boardOledRecoverTries = 0U;
+    g_boardOledDisabled = 0U;
 
 #if CAR_GIMBAL_PIN_TEST_BUILD
     /*
@@ -342,8 +422,8 @@ void Board_Init(void)
     Board_DebugLedInit();
     SYSCFG_DL_OLED_init();
     OLED_Init();
-    if (OLED_HasError() != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
+    if (Board_UpdateOledError() == 0U) {
+        (void)Board_TryRecoverOled();
     } else {
         OLED_ColorTurn(0U);
         OLED_DisplayTurn(0U);
@@ -366,9 +446,7 @@ void Board_Init(void)
 
     SYSCFG_DL_OLED_init();
     OLED_Init();
-    if (OLED_HasError() != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
-    }
+    (void)Board_UpdateOledError();
     Board_ShowBootStep("OK Clock OLED", "RUN Stepper", "WAIT UART Gray",
         "WAIT Drivers");
 
@@ -445,6 +523,7 @@ void Board_Task(void)
     static uint32_t signalCounter;
     static uint32_t errorCounter;
     static uint32_t lastLoggedErrors;
+    static uint16_t oledRecoverTicks;
 
 #if CAR_RECOVERY_SAFE_BUILD
     delay_cycles(BOARD_RECOVERY_BLINK_CYCLES);
@@ -471,6 +550,14 @@ void Board_Task(void)
             lastLoggedErrors = g_boardErrors;
             Board_LogErrorChange(g_boardErrors);
         }
+        if (((g_boardErrors & BOARD_ERROR_OLED_I2C) != 0U) &&
+            (g_boardOledRecoverTries < BOARD_OLED_RECOVER_MAX_TRIES)) {
+            ++oledRecoverTicks;
+            if (oledRecoverTicks >= BOARD_OLED_RECOVER_PERIOD_TICKS) {
+                oledRecoverTicks = 0U;
+                (void)Board_TryRecoverOled();
+            }
+        }
         ++errorCounter;
         if (errorCounter >= BOARD_ERROR_BLINK_TICKS) {
             errorCounter = 0U;
@@ -479,6 +566,11 @@ void Board_Task(void)
 #endif
         }
     } else {
+        if (lastLoggedErrors != BOARD_ERROR_NONE) {
+            lastLoggedErrors = BOARD_ERROR_NONE;
+            Board_LogErrorChange(BOARD_ERROR_NONE);
+        }
+        oledRecoverTicks = 0U;
         errorCounter = 0U;
         ++signalCounter;
         if (signalCounter >= BOARD_SIGNAL_BLINK_TICKS) {

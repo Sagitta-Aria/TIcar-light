@@ -7,10 +7,14 @@ static TrackingExceptionState g_trackingExceptionState;
 static uint16_t g_lostTicks;
 static uint16_t g_sensorFaultTicks;
 static int8_t g_lastLineSide;
-static int16_t g_lastLeftCommand;
-static int16_t g_lastRightCommand;
-static uint8_t g_hasLastCommand;
+static int16_t g_lastLeftSpeedSps;
+static int16_t g_lastRightSpeedSps;
+static uint8_t g_hasLastSpeed;
 
+/*
+ * 作用：把循迹异常状态转成日志字符串。
+ * 使用场景：状态变化时串口打印，后续也可用于 OLED 调试页。
+ */
 static const char *TrackingException_StateText(TrackingExceptionState state)
 {
     switch (state) {
@@ -33,6 +37,10 @@ static const char *TrackingException_StateText(TrackingExceptionState state)
     }
 }
 
+/*
+ * 作用：切换异常状态并在变化时打印日志。
+ * 使用场景：丢线、宽线、灰度故障等状态迁移。
+ */
 static void TrackingException_SetState(TrackingExceptionState state)
 {
     if (g_trackingExceptionState != state) {
@@ -43,18 +51,18 @@ static void TrackingException_SetState(TrackingExceptionState state)
 }
 
 /*
- * 作用：限制电机命令范围。
+ * 作用：限制电机 SPS 范围。
  * 使用场景：异常处理器自己生成保持/搜线速度时。
  */
-static int16_t TrackingException_ClampCommand(int32_t command)
+static int16_t TrackingException_ClampSpeedSps(int32_t speedSps)
 {
-    if (command > (int32_t)CAR_MOTOR_COMMAND_MAX) {
-        return (int16_t)CAR_MOTOR_COMMAND_MAX;
+    if (speedSps > (int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
+        return (int16_t)CAR_STEPPER_SPEED_MAX_SPS;
     }
-    if (command < -(int32_t)CAR_MOTOR_COMMAND_MAX) {
-        return (int16_t)(-(int32_t)CAR_MOTOR_COMMAND_MAX);
+    if (speedSps < -(int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
+        return (int16_t)(-(int32_t)CAR_STEPPER_SPEED_MAX_SPS);
     }
-    return (int16_t)command;
+    return (int16_t)speedSps;
 }
 
 /*
@@ -76,14 +84,15 @@ static uint8_t TrackingException_CountActiveSensors(uint8_t digitalMask)
 }
 
 /*
- * 作用：保存最近一次有效电机命令。
+ * 作用：保存最近一次有效电机 SPS。
  * 使用场景：短暂丢线时先保持上一拍输出，避免遇到小断点就急停。
  */
-static void TrackingException_SaveCommand(int16_t leftCommand, int16_t rightCommand)
+static void TrackingException_SaveSpeed(int16_t leftSpeedSps,
+    int16_t rightSpeedSps)
 {
-    g_lastLeftCommand = leftCommand;
-    g_lastRightCommand = rightCommand;
-    g_hasLastCommand = 1U;
+    g_lastLeftSpeedSps = leftSpeedSps;
+    g_lastRightSpeedSps = rightSpeedSps;
+    g_hasLastSpeed = 1U;
 }
 
 /*
@@ -104,12 +113,12 @@ static uint8_t TrackingException_ShouldSearchLeft(void)
 }
 
 /*
- * 作用：生成正常循迹时的左右轮命令。
+ * 作用：生成正常循迹时的左右轮 SPS。
  * 使用场景：灰度数据有效且能看到线时。
  */
-static void TrackingException_BuildNormalCommand(int16_t lineError,
-    uint16_t baseCommand, uint16_t turnLimit, int16_t *leftCommand,
-    int16_t *rightCommand)
+static void TrackingException_BuildNormalSpeed(int16_t lineError,
+    uint16_t baseSpeedSps, uint16_t turnLimit, int16_t *leftSpeedSps,
+    int16_t *rightSpeedSps)
 {
     int16_t correction =
         (int16_t)((lineError * CAR_TRACK_TURN_GAIN) / GRAY_LINE_ERROR_SCALE);
@@ -120,39 +129,39 @@ static void TrackingException_BuildNormalCommand(int16_t lineError,
         correction = -(int16_t)turnLimit;
     }
 
-    *leftCommand = TrackingException_ClampCommand(
-        (int32_t)baseCommand + (int32_t)correction);
-    *rightCommand = TrackingException_ClampCommand(
-        (int32_t)baseCommand - (int32_t)correction);
+    *leftSpeedSps = TrackingException_ClampSpeedSps(
+        (int32_t)baseSpeedSps + (int32_t)correction);
+    *rightSpeedSps = TrackingException_ClampSpeedSps(
+        (int32_t)baseSpeedSps - (int32_t)correction);
 }
 
 /*
- * 作用：生成丢线后的温和搜线命令。
+ * 作用：生成丢线后的温和搜线 SPS。
  * 使用场景：短暂保持仍没找回线时。
  * 说明：只做前进差速搜线，不直接原地反转，避免动作过猛。
  */
-static void TrackingException_BuildSearchCommand(uint8_t searchLeft,
-    int16_t *leftCommand, int16_t *rightCommand)
+static void TrackingException_BuildSearchSpeed(uint8_t searchLeft,
+    int16_t *leftSpeedSps, int16_t *rightSpeedSps)
 {
-    int32_t slowCommand = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_COMMAND -
-        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_COMMAND;
-    int32_t fastCommand = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_COMMAND +
-        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_COMMAND;
+    int32_t slowSpeedSps = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_SPEED_SPS -
+        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_SPS;
+    int32_t fastSpeedSps = (int32_t)CAR_TRACK_LOST_SEARCH_BASE_SPEED_SPS +
+        (int32_t)CAR_TRACK_LOST_SEARCH_DELTA_SPS;
 
-    if (slowCommand < 0) {
-        slowCommand = 0;
+    if (slowSpeedSps < 0) {
+        slowSpeedSps = 0;
     }
-    if (fastCommand > (int32_t)CAR_MOTOR_COMMAND_MAX) {
-        fastCommand = (int32_t)CAR_MOTOR_COMMAND_MAX;
+    if (fastSpeedSps > (int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
+        fastSpeedSps = (int32_t)CAR_STEPPER_SPEED_MAX_SPS;
     }
 
     if (searchLeft) {
-        *leftCommand = (int16_t)slowCommand;
-        *rightCommand = (int16_t)fastCommand;
+        *leftSpeedSps = (int16_t)slowSpeedSps;
+        *rightSpeedSps = (int16_t)fastSpeedSps;
         TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_SEARCH_LEFT);
     } else {
-        *leftCommand = (int16_t)fastCommand;
-        *rightCommand = (int16_t)slowCommand;
+        *leftSpeedSps = (int16_t)fastSpeedSps;
+        *rightSpeedSps = (int16_t)slowSpeedSps;
         TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_SEARCH_RIGHT);
     }
 }
@@ -162,7 +171,7 @@ static void TrackingException_BuildSearchCommand(uint8_t searchLeft,
  * 使用场景：Gray_Update 返回失败时。
  */
 static TrackingExceptionAction TrackingException_HandleSensorFault(
-    int16_t *leftCommand, int16_t *rightCommand)
+    int16_t *leftSpeedSps, int16_t *rightSpeedSps)
 {
     if (g_sensorFaultTicks < 0xFFFFU) {
         ++g_sensorFaultTicks;
@@ -170,14 +179,14 @@ static TrackingExceptionAction TrackingException_HandleSensorFault(
 
     TrackingException_SetState(TRACKING_EXCEPTION_STATE_SENSOR_FAULT);
     if ((g_sensorFaultTicks < CAR_TRACK_SENSOR_FAULT_STOP_TICKS) &&
-        g_hasLastCommand) {
-        *leftCommand = g_lastLeftCommand;
-        *rightCommand = g_lastRightCommand;
+        g_hasLastSpeed) {
+        *leftSpeedSps = g_lastLeftSpeedSps;
+        *rightSpeedSps = g_lastRightSpeedSps;
         return TRACKING_EXCEPTION_ACTION_RUN;
     }
 
-    *leftCommand = 0;
-    *rightCommand = 0;
+    *leftSpeedSps = 0;
+    *rightSpeedSps = 0;
     return TRACKING_EXCEPTION_ACTION_STOP;
 }
 
@@ -186,7 +195,7 @@ static TrackingExceptionAction TrackingException_HandleSensorFault(
  * 使用场景：digitalMask 为 0 时。
  */
 static TrackingExceptionAction TrackingException_HandleLostLine(
-    int16_t *leftCommand, int16_t *rightCommand)
+    int16_t *leftSpeedSps, int16_t *rightSpeedSps)
 {
     uint16_t searchStopTicks =
         (uint16_t)(CAR_TRACK_LOST_HOLD_TICKS +
@@ -198,71 +207,84 @@ static TrackingExceptionAction TrackingException_HandleLostLine(
 
     if (g_lostTicks <= CAR_TRACK_LOST_HOLD_TICKS) {
         TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_HOLD);
-        if (g_hasLastCommand) {
-            *leftCommand = g_lastLeftCommand;
-            *rightCommand = g_lastRightCommand;
+        if (g_hasLastSpeed) {
+            *leftSpeedSps = g_lastLeftSpeedSps;
+            *rightSpeedSps = g_lastRightSpeedSps;
         } else {
-            *leftCommand = 0;
-            *rightCommand = 0;
+            *leftSpeedSps = 0;
+            *rightSpeedSps = 0;
         }
         return TRACKING_EXCEPTION_ACTION_RUN;
     }
 
     if (g_lostTicks <= searchStopTicks) {
-        TrackingException_BuildSearchCommand(
-            TrackingException_ShouldSearchLeft(), leftCommand, rightCommand);
-        TrackingException_SaveCommand(*leftCommand, *rightCommand);
+        TrackingException_BuildSearchSpeed(
+            TrackingException_ShouldSearchLeft(), leftSpeedSps, rightSpeedSps);
+        TrackingException_SaveSpeed(*leftSpeedSps, *rightSpeedSps);
         return TRACKING_EXCEPTION_ACTION_RUN;
     }
 
 #if CAR_TRACK_LOST_STOP
     TrackingException_SetState(TRACKING_EXCEPTION_STATE_LOST_STOP);
-    *leftCommand = 0;
-    *rightCommand = 0;
+    *leftSpeedSps = 0;
+    *rightSpeedSps = 0;
     return TRACKING_EXCEPTION_ACTION_STOP;
 #else
-    TrackingException_BuildSearchCommand(
-        TrackingException_ShouldSearchLeft(), leftCommand, rightCommand);
-    TrackingException_SaveCommand(*leftCommand, *rightCommand);
+    TrackingException_BuildSearchSpeed(
+        TrackingException_ShouldSearchLeft(), leftSpeedSps, rightSpeedSps);
+    TrackingException_SaveSpeed(*leftSpeedSps, *rightSpeedSps);
     return TRACKING_EXCEPTION_ACTION_RUN;
 #endif
 }
 
+/*
+ * 作用：初始化循迹异常处理器。
+ * 使用场景：Tracking_Init 调用一次。
+ */
 void TrackingException_Init(void)
 {
     TrackingException_Reset();
 }
 
+/*
+ * 作用：清空丢线、灰度故障和上一拍命令缓存。
+ * 使用场景：每次重新启用循迹或退出循迹时。
+ */
 void TrackingException_Reset(void)
 {
     g_trackingExceptionState = TRACKING_EXCEPTION_STATE_NORMAL;
     g_lostTicks = 0U;
     g_sensorFaultTicks = 0U;
     g_lastLineSide = 0;
-    g_lastLeftCommand = 0;
-    g_lastRightCommand = 0;
-    g_hasLastCommand = 0U;
+    g_lastLeftSpeedSps = 0;
+    g_lastRightSpeedSps = 0;
+    g_hasLastSpeed = 0U;
 }
 
+/*
+ * 作用：根据灰度采样结果生成安全的左右轮 SPS。
+ * 使用场景：Tracking_Task 每轮调用。
+ * 说明：输入命令指针不能为空；返回 STOP 时调用者应立即停车。
+ */
 TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
-    uint8_t digitalMask, int16_t lineError, uint16_t baseCommand,
-    uint16_t turnLimit, int16_t *leftCommand, int16_t *rightCommand)
+    uint8_t digitalMask, int16_t lineError, uint16_t baseSpeedSps,
+    uint16_t turnLimit, int16_t *leftSpeedSps, int16_t *rightSpeedSps)
 {
     uint8_t activeCount;
 
-    if ((leftCommand == 0) || (rightCommand == 0)) {
+    if ((leftSpeedSps == 0) || (rightSpeedSps == 0)) {
         return TRACKING_EXCEPTION_ACTION_STOP;
     }
 
     if (!sampleOk) {
-        return TrackingException_HandleSensorFault(leftCommand, rightCommand);
+        return TrackingException_HandleSensorFault(leftSpeedSps, rightSpeedSps);
     }
 
     g_sensorFaultTicks = 0U;
     activeCount = TrackingException_CountActiveSensors(digitalMask);
 
     if (activeCount == 0U) {
-        return TrackingException_HandleLostLine(leftCommand, rightCommand);
+        return TrackingException_HandleLostLine(leftSpeedSps, rightSpeedSps);
     }
 
     g_lostTicks = 0U;
@@ -272,9 +294,9 @@ TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
         g_lastLineSide = 1;
     }
 
-    TrackingException_BuildNormalCommand(
-        lineError, baseCommand, turnLimit, leftCommand, rightCommand);
-    TrackingException_SaveCommand(*leftCommand, *rightCommand);
+    TrackingException_BuildNormalSpeed(
+        lineError, baseSpeedSps, turnLimit, leftSpeedSps, rightSpeedSps);
+    TrackingException_SaveSpeed(*leftSpeedSps, *rightSpeedSps);
 
     if (activeCount >= CAR_TRACK_WIDE_LINE_ACTIVE_COUNT) {
         TrackingException_SetState(TRACKING_EXCEPTION_STATE_WIDE_LINE);
@@ -285,21 +307,25 @@ TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
     return TRACKING_EXCEPTION_ACTION_RUN;
 }
 
+/* 作用：读取当前循迹异常状态。 */
 TrackingExceptionState TrackingException_GetState(void)
 {
     return g_trackingExceptionState;
 }
 
+/* 作用：把指定异常状态转成字符串。 */
 const char *TrackingException_GetStateName(TrackingExceptionState state)
 {
     return TrackingException_StateText(state);
 }
 
+/* 作用：读取连续丢线计数。 */
 uint16_t TrackingException_GetLostTicks(void)
 {
     return g_lostTicks;
 }
 
+/* 作用：读取连续灰度采样失败计数。 */
 uint16_t TrackingException_GetSensorFaultTicks(void)
 {
     return g_sensorFaultTicks;

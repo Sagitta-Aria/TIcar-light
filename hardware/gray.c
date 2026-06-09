@@ -91,6 +91,13 @@ static uint8_t Gray_IsValidChannel(GrayChannel channel)
     return ((uint32_t)channel < GRAY_SENSOR_COUNT) ? 1U : 0U;
 }
 
+/* 作用：判断某一路灰度是否参与循迹计算。 */
+static uint8_t Gray_IsTrackSensorEnabled(uint32_t index)
+{
+    return ((CAR_GRAY_TRACK_SENSOR_MASK & (uint8_t)(1U << index)) != 0U) ?
+        1U : 0U;
+}
+
 /*
  * 作用：刷新灰度校准完成状态位。
  * 使用场景：校准采样更新 min/max 后调用。
@@ -101,6 +108,9 @@ static void Gray_UpdateCalibrationComplete(void)
     uint32_t i;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
+        if (Gray_IsTrackSensorEnabled(i) == 0U) {
+            continue;
+        }
         if ((uint32_t)g_grayMax[i] <=
             ((uint32_t)g_grayMin[i] + GRAY_CALIBRATION_MIN_SPAN)) {
             g_grayCalibrationComplete = 0U;
@@ -254,7 +264,7 @@ static void Gray_RebuildMask(void)
 
     g_grayMask = 0U;
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
-        if (g_grayDigital[i]) {
+        if ((Gray_IsTrackSensorEnabled(i) != 0U) && g_grayDigital[i]) {
             g_grayMask |= (uint8_t)(1U << i);
         }
     }
@@ -271,6 +281,13 @@ static void Gray_UpdateDigitalFromRaw(void)
     uint8_t sampleDigital;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
+        if (Gray_IsTrackSensorEnabled(i) == 0U) {
+            g_grayDigital[i] = 0U;
+            g_grayCandidate[i] = 0U;
+            g_grayConfirmCount[i] = GRAY_DIGITAL_CONFIRM_COUNT;
+            continue;
+        }
+
         sampleDigital = Gray_RawToDigital(g_grayRaw[i], g_grayThreshold[i]);
 
         if (!g_grayFilterReady) {
@@ -346,6 +363,10 @@ uint8_t Gray_Update(void)
     uint32_t i;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
+        if (Gray_IsTrackSensorEnabled(i) == 0U) {
+            g_grayRaw[i] = 0U;
+            continue;
+        }
         g_grayRaw[i] = (Gray_ReadDigitalActive(i) != 0U) ?
             GRAY_ADC_MAX_VALUE : 0U;
     }
@@ -377,6 +398,9 @@ uint8_t Gray_Update(void)
         g_grayRaw[i] =
             (uint16_t)((sum[i] + (GRAY_FILTER_SAMPLE_COUNT / 2U)) /
                 GRAY_FILTER_SAMPLE_COUNT);
+        if (Gray_IsTrackSensorEnabled(i) == 0U) {
+            g_grayRaw[i] = 0U;
+        }
     }
 
     Gray_UpdateDigitalFromRaw();
@@ -418,7 +442,7 @@ uint8_t Gray_GetLineError(int16_t *error)
     uint32_t i;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
-        if (g_grayDigital[i]) {
+        if ((Gray_IsTrackSensorEnabled(i) != 0U) && g_grayDigital[i]) {
             sum = (int16_t)(sum + g_grayWeight[i]);
             ++activeCount;
         }
@@ -451,6 +475,9 @@ uint8_t Gray_GetWeightedLineError(int16_t *error)
     uint16_t strength;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
+        if (Gray_IsTrackSensorEnabled(i) == 0U) {
+            continue;
+        }
         strength = Gray_GetLineStrength(i);
         if (strength > 0U) {
             weightedSum += (int32_t)g_grayWeight[i] * (int32_t)strength;

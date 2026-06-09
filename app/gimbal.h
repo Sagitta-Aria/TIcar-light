@@ -5,7 +5,7 @@
 
 /*
  * GimbalPoint：视觉坐标点。
- * 使用场景：目标点和当前识别点都用同一坐标系，例如摄像头像素坐标。
+ * 使用场景：目标点和当前识别点都用同一坐标系，当前单位为 0.1 像素。
  */
 typedef struct {
     int16_t x;
@@ -24,10 +24,10 @@ void Gimbal_SetEnabled(uint8_t enabled);
 /* Gimbal_IsEnabled：读取云台闭环是否启用。 */
 uint8_t Gimbal_IsEnabled(void);
 
-/* Gimbal_SetTarget：单独设置目标位置。 */
+/* Gimbal_SetTarget：单独设置目标位置，当前单位为 0.1 像素。 */
 void Gimbal_SetTarget(int16_t x, int16_t y);
 
-/* Gimbal_SetCurrent：单独设置当前位置。 */
+/* Gimbal_SetCurrent：单独设置当前位置，当前单位为 0.1 像素。 */
 void Gimbal_SetCurrent(int16_t x, int16_t y);
 
 /*
@@ -38,17 +38,33 @@ void Gimbal_SetCurrent(int16_t x, int16_t y);
 void Gimbal_UpdateFromVision(int16_t targetX, int16_t targetY,
     int16_t currentX, int16_t currentY);
 
+/*
+ * Gimbal_UpdateFromLaserError：用视觉端发来的“激光点 - 目标点”误差更新云台。
+ * 使用场景：视觉脚本发送 dx,dy，而不是 target/current 绝对坐标。
+ * 说明：输入单位为 0.1 像素；视觉误差为 current - target，本模块内部会转成 target - current。
+ */
+void Gimbal_UpdateFromLaserError(int16_t laserMinusTargetX,
+    int16_t laserMinusTargetY);
+
+/*
+ * Gimbal_UpdateFromCameraError：用视觉端发来的“目标点 - 当前点”误差更新云台。
+ * 使用场景：CanMV 脚本发送 160-x,120-y 这类中心参考误差。
+ * 说明：输入单位为 0.1 像素；符号已经等于控制内部的 target - current，不再取反。
+ */
+void Gimbal_UpdateFromCameraError(int16_t targetMinusCurrentX,
+    int16_t targetMinusCurrentY);
+
 /* Gimbal_Task：云台周期控制任务。 */
 void Gimbal_Task(void);
 
 /* Gimbal_Stop：停止两个云台轴，不影响底盘。 */
 void Gimbal_Stop(void);
 
-/* Gimbal_GetErrorX/Y：读取最近一帧视觉误差，等于 target - current。 */
+/* Gimbal_GetErrorX/Y：读取最近一帧视觉误差，等于 target - current，单位为 0.1 像素。 */
 int16_t Gimbal_GetErrorX(void);
 int16_t Gimbal_GetErrorY(void);
 
-/* Gimbal_GetCommandX/Y：读取最近一次输出到云台轴的有符号命令。 */
+/* Gimbal_GetCommandX/Y：读取最近一次输出到云台轴的有符号 SPS。 */
 int16_t Gimbal_GetCommandX(void);
 int16_t Gimbal_GetCommandY(void);
 

@@ -4,96 +4,30 @@
 #include "gimbal.h"
 #include "log_uart.h"
 #include "motor.h"
-
-#if (CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90 == 0U)
-#error "CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90 must be greater than 0"
-#endif
-
-#if (CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90 == 0U)
-#error "CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90 must be greater than 0"
-#endif
-
-#if (CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS == 0U)
-#error "CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS must be greater than 0"
-#endif
-
-#if (CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS == 0U)
-#error "CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS must be greater than 0"
-#endif
-
-#if (CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS == 0U)
-#error "CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS must be greater than 0"
-#endif
-
-#if (CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES == 0U)
-#error "CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES must be greater than 0"
-#endif
-
-#define GIMBAL_MOTOR_TEST_CIRCLE_PHASE_COUNT (16U)
-
-typedef struct {
-    int16_t currentX;
-    int16_t currentY;
-} GimbalMotorTestVisionPoint;
+#include "motor_enable.h"
 
 typedef struct {
     GimbalMotorTestStage stage;
-    int32_t axisBaseStep;
-    uint16_t zeroTicks;
-    uint32_t stageTicks;
+    uint16_t yawSpeedSps;
+    uint16_t pitchSpeedSps;
     uint8_t running;
 } GimbalMotorTestState;
 
 static GimbalMotorTestState g_gimbalMotorTest;
 
-/* 不接摄像头时，用这组假坐标模拟“激光点偏离目标点”。 */
-static const GimbalMotorTestVisionPoint g_simVisionScript[] = {
-    { (int16_t)(CAR_GIMBAL_TEST_TARGET_X - 1200),
-      CAR_GIMBAL_TEST_TARGET_Y },
-    { (int16_t)(CAR_GIMBAL_TEST_TARGET_X + 1200),
-      CAR_GIMBAL_TEST_TARGET_Y },
-    { CAR_GIMBAL_TEST_TARGET_X,
-      (int16_t)(CAR_GIMBAL_TEST_TARGET_Y - 900) },
-    { CAR_GIMBAL_TEST_TARGET_X,
-      (int16_t)(CAR_GIMBAL_TEST_TARGET_Y + 900) },
-    { (int16_t)(CAR_GIMBAL_TEST_TARGET_X - 850),
-      (int16_t)(CAR_GIMBAL_TEST_TARGET_Y - 650) },
-    { (int16_t)(CAR_GIMBAL_TEST_TARGET_X + 850),
-      (int16_t)(CAR_GIMBAL_TEST_TARGET_Y - 650) },
-    { (int16_t)(CAR_GIMBAL_TEST_TARGET_X + 850),
-      (int16_t)(CAR_GIMBAL_TEST_TARGET_Y + 650) },
-    { (int16_t)(CAR_GIMBAL_TEST_TARGET_X - 850),
-      (int16_t)(CAR_GIMBAL_TEST_TARGET_Y + 650) },
-    { CAR_GIMBAL_TEST_TARGET_X, CAR_GIMBAL_TEST_TARGET_Y }
-};
-
-/* 两轴速度相位表：按速度积分近似画圆，真实圆度后续靠视觉闭环修正。 */
-static const int16_t g_circleVelocityTable[GIMBAL_MOTOR_TEST_CIRCLE_PHASE_COUNT][2] = {
-    {     0,  1000 },
-    {  -383,   924 },
-    {  -707,   707 },
-    {  -924,   383 },
-    { -1000,     0 },
-    {  -924,  -383 },
-    {  -707,  -707 },
-    {  -383,  -924 },
-    {     0, -1000 },
-    {   383,  -924 },
-    {   707,  -707 },
-    {   924,  -383 },
-    {  1000,     0 },
-    {   924,   383 },
-    {   707,   707 },
-    {   383,   924 }
-};
-
-const char *GimbalMotorTest_GetStageName(void);
-
-static uint32_t GimbalMotorTest_Abs32(int32_t value)
+/* 作用：把菜单调速值限制在统一的步进速度范围内。 */
+static uint16_t GimbalMotorTest_ClampSpeed(uint32_t speedSps)
 {
-    return (value < 0) ? (uint32_t)(-value) : (uint32_t)value;
+    if (speedSps < CAR_STEPPER_SPEED_MIN_SPS) {
+        return CAR_STEPPER_SPEED_MIN_SPS;
+    }
+    if (speedSps > CAR_STEPPER_SPEED_MAX_SPS) {
+        return CAR_STEPPER_SPEED_MAX_SPS;
+    }
+    return (uint16_t)speedSps;
 }
 
+/* 作用：读取测试方向配置，便于实车方向相反时统一反相。 */
 static MotorDir GimbalMotorTest_GetDirection(void)
 {
     return (CAR_GIMBAL_MOTOR_TEST_REVERSE != 0U) ?
@@ -111,342 +45,151 @@ static void GimbalMotorTest_StopAxes(void)
     Motor_Set(MOTOR_GIMBAL_2, MOTOR_COAST, 0U);
 }
 
-static MotorId GimbalMotorTest_GetStageMotor(GimbalMotorTestStage stage)
+/* 作用：把当前 yaw/pitch SPS 写到云台两个轴。 */
+static void GimbalMotorTest_ApplySpeed(void)
 {
-    return (stage == GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90) ?
-        MOTOR_GIMBAL_2 : MOTOR_GIMBAL_1;
-}
-
-static uint32_t GimbalMotorTest_GetStageTargetSteps(void)
-{
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90) {
-        return CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90;
-    }
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_LEFT_RIGHT_90) {
-        return CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90;
-    }
-    return 1U;
-}
-
-static uint32_t GimbalMotorTest_GetScriptCount(void)
-{
-    return (uint32_t)(sizeof(g_simVisionScript) /
-        sizeof(g_simVisionScript[0]));
-}
-
-static uint32_t GimbalMotorTest_GetSimTotalTicks(void)
-{
-    return GimbalMotorTest_GetScriptCount() *
-        (uint32_t)CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS;
-}
-
-static uint32_t GimbalMotorTest_GetCircleTotalTicks(void)
-{
-    return (uint32_t)GIMBAL_MOTOR_TEST_CIRCLE_PHASE_COUNT *
-        (uint32_t)CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS *
-        (uint32_t)CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES;
-}
-
-static void GimbalMotorTest_ApplySimVision(uint32_t scriptIndex)
-{
-    const GimbalMotorTestVisionPoint *point;
-
-    if (scriptIndex >= GimbalMotorTest_GetScriptCount()) {
-        scriptIndex = GimbalMotorTest_GetScriptCount() - 1U;
-    }
-
-    point = &g_simVisionScript[scriptIndex];
-    Gimbal_UpdateFromVision(CAR_GIMBAL_TEST_TARGET_X,
-        CAR_GIMBAL_TEST_TARGET_Y, point->currentX, point->currentY);
-}
-
-static int16_t GimbalMotorTest_ScaleCircleCommand(int16_t value)
-{
-    int32_t command = ((int32_t)value *
-        (int32_t)CAR_GIMBAL_MOTOR_TEST_CIRCLE_COMMAND) / 1000;
-
-    if (command > (int32_t)CAR_MOTOR_COMMAND_MAX) {
-        command = (int32_t)CAR_MOTOR_COMMAND_MAX;
-    }
-    if (command < -(int32_t)CAR_MOTOR_COMMAND_MAX) {
-        command = -(int32_t)CAR_MOTOR_COMMAND_MAX;
-    }
-    return (int16_t)command;
-}
-
-static void GimbalMotorTest_SetAxisCommand(MotorId motor, int16_t command)
-{
-    if (command > 0) {
-        Motor_Set(motor, MOTOR_FORWARD, (uint16_t)command);
-    } else if (command < 0) {
-        Motor_Set(motor, MOTOR_REVERSE, (uint16_t)(-(int32_t)command));
-    } else {
-        Motor_Set(motor, MOTOR_COAST, 0U);
-    }
-}
-
-static void GimbalMotorTest_ApplyCircle(uint32_t phase)
-{
-    int16_t commandX;
-    int16_t commandY;
-
-    phase %= GIMBAL_MOTOR_TEST_CIRCLE_PHASE_COUNT;
-    commandX = GimbalMotorTest_ScaleCircleCommand(
-        g_circleVelocityTable[phase][0]);
-    commandY = GimbalMotorTest_ScaleCircleCommand(
-        g_circleVelocityTable[phase][1]);
-
-    GimbalMotorTest_SetAxisCommand(MOTOR_GIMBAL_1, commandX);
-    GimbalMotorTest_SetAxisCommand(MOTOR_GIMBAL_2, commandY);
-}
-
-static void GimbalMotorTest_EnterStage(GimbalMotorTestStage stage)
-{
-    MotorId motor;
-
-    GimbalMotorTest_StopAxes();
-    g_gimbalMotorTest.stage = stage;
-    g_gimbalMotorTest.zeroTicks = 0U;
-    g_gimbalMotorTest.stageTicks = 0U;
-    LOG_RAW("gimbal motor test: stage ");
-    LOG_LINE(GimbalMotorTest_GetStageName());
-
-    if (stage == GIMBAL_MOTOR_TEST_STAGE_ZERO) {
-        Motor_ResetStepCount(MOTOR_GIMBAL_1);
-        Motor_ResetStepCount(MOTOR_GIMBAL_2);
-        g_gimbalMotorTest.axisBaseStep = 0;
-        LOG_LINE("gimbal motor test: software zero");
+    if (g_gimbalMotorTest.running == 0U) {
         return;
     }
 
-    if (stage == GIMBAL_MOTOR_TEST_STAGE_SIM_TRACK) {
-        Gimbal_SetTarget(CAR_GIMBAL_TEST_TARGET_X, CAR_GIMBAL_TEST_TARGET_Y);
-        GimbalMotorTest_ApplySimVision(0U);
-        Gimbal_SetEnabled(1U);
-        LOG_LINE("gimbal motor test: simulated vision script");
-        return;
-    }
-
-    if (stage == GIMBAL_MOTOR_TEST_STAGE_CIRCLE) {
-        GimbalMotorTest_ApplyCircle(0U);
-        LOG_LINE("gimbal motor test: open loop circle");
-        return;
-    }
-
-    if ((stage != GIMBAL_MOTOR_TEST_STAGE_LEFT_RIGHT_90) &&
-        (stage != GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90)) {
-        g_gimbalMotorTest.running = 0U;
-        return;
-    }
-
-    motor = GimbalMotorTest_GetStageMotor(stage);
-    g_gimbalMotorTest.axisBaseStep = Motor_GetStepCount(motor);
-    Motor_Set(motor, GimbalMotorTest_GetDirection(),
-        CAR_GIMBAL_MOTOR_TEST_COMMAND);
-    LOG_RAW("gimbal motor test: command ");
-    LogUart_SendUnsigned(CAR_GIMBAL_MOTOR_TEST_COMMAND);
-    LOG_LINE("");
+    Motor_Set(MOTOR_GIMBAL_1, GimbalMotorTest_GetDirection(),
+        g_gimbalMotorTest.yawSpeedSps);
+    Motor_Set(MOTOR_GIMBAL_2, GimbalMotorTest_GetDirection(),
+        g_gimbalMotorTest.pitchSpeedSps);
 }
 
-static uint32_t GimbalMotorTest_GetAxisDelta(void)
-{
-    MotorId motor;
-    int32_t currentStep;
-
-    /*
-     * 这里读的是 STEP 调度器的软件计数，只能证明 MCU 发过多少个脉冲。
-     * 没有驱动器反馈/限位/编码器时，不能据此证明云台真实转到 90 度。
-     */
-    if ((g_gimbalMotorTest.stage != GIMBAL_MOTOR_TEST_STAGE_LEFT_RIGHT_90) &&
-        (g_gimbalMotorTest.stage != GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90)) {
-        return 0U;
-    }
-
-    motor = GimbalMotorTest_GetStageMotor(g_gimbalMotorTest.stage);
-    currentStep = Motor_GetStepCount(motor);
-    return GimbalMotorTest_Abs32(currentStep -
-        g_gimbalMotorTest.axisBaseStep);
-}
-
-static void GimbalMotorTest_AdvanceStage(void)
-{
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_ZERO) {
-        GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_LEFT_RIGHT_90);
-        return;
-    }
-
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_LEFT_RIGHT_90) {
-        if (CAR_GIMBAL_MOTOR_TEST_RUN_UP_DOWN != 0U) {
-            GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90);
-            return;
-        }
-        if (CAR_GIMBAL_MOTOR_TEST_RUN_SIM_TRACK != 0U) {
-            GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_SIM_TRACK);
-            return;
-        }
-        if (CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE != 0U) {
-            GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_CIRCLE);
-            return;
-        }
-    }
-
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90) {
-        if (CAR_GIMBAL_MOTOR_TEST_RUN_SIM_TRACK != 0U) {
-            GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_SIM_TRACK);
-            return;
-        }
-        if (CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE != 0U) {
-            GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_CIRCLE);
-            return;
-        }
-    }
-
-    if ((g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_SIM_TRACK) &&
-        (CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE != 0U)) {
-        GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_CIRCLE);
-        return;
-    }
-
-    GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_DONE);
-}
-
+/* 作用：初始化云台电机 SPS 测试状态，默认不输出速度。 */
 void GimbalMotorTest_Init(void)
 {
     g_gimbalMotorTest.stage = GIMBAL_MOTOR_TEST_STAGE_IDLE;
-    g_gimbalMotorTest.axisBaseStep = 0;
-    g_gimbalMotorTest.zeroTicks = 0U;
-    g_gimbalMotorTest.stageTicks = 0U;
+    g_gimbalMotorTest.yawSpeedSps = CAR_GIMBAL_TEST_YAW_SPEED_SPS;
+    g_gimbalMotorTest.pitchSpeedSps = CAR_GIMBAL_TEST_PITCH_SPEED_SPS;
     g_gimbalMotorTest.running = 0U;
 }
 
+/*
+ * 作用：开始云台电机 SPS 测试。
+ * 使用场景：菜单 Gimbal 进入时调用。
+ * 说明：yaw 默认 2500 SPS，pitch 默认 1500 SPS，K1/K2 可同时按 500 SPS 微调。
+ */
 void GimbalMotorTest_Start(void)
 {
+    Motor_ResetStepCount(MOTOR_GIMBAL_1);
+    Motor_ResetStepCount(MOTOR_GIMBAL_2);
+    g_gimbalMotorTest.stage = GIMBAL_MOTOR_TEST_STAGE_SPEED;
+    g_gimbalMotorTest.yawSpeedSps =
+        GimbalMotorTest_ClampSpeed(CAR_GIMBAL_TEST_YAW_SPEED_SPS);
+    g_gimbalMotorTest.pitchSpeedSps =
+        GimbalMotorTest_ClampSpeed(CAR_GIMBAL_TEST_PITCH_SPEED_SPS);
     g_gimbalMotorTest.running = 1U;
-    GimbalMotorTest_EnterStage(GIMBAL_MOTOR_TEST_STAGE_ZERO);
+
+    MotorEnable_SetGimbal(1U);
+    GimbalMotorTest_ApplySpeed();
+
+    LOG_RAW("gimbal test: yaw=");
+    LogUart_SendUnsigned(g_gimbalMotorTest.yawSpeedSps);
+    LOG_RAW(" pitch=");
+    LogUart_SendUnsigned(g_gimbalMotorTest.pitchSpeedSps);
+    LOG_LINE("");
 }
 
+/* 作用：停止云台电机 SPS 测试并恢复默认 EN 状态。 */
 void GimbalMotorTest_Stop(void)
 {
-    GimbalMotorTest_StopAxes();
+    if (g_gimbalMotorTest.running != 0U) {
+        GimbalMotorTest_StopAxes();
+        MotorEnable_SetGimbal(CAR_STEPPER_ENABLE_DEFAULT_ON);
+    }
     g_gimbalMotorTest.stage = GIMBAL_MOTOR_TEST_STAGE_IDLE;
-    g_gimbalMotorTest.axisBaseStep = 0;
-    g_gimbalMotorTest.zeroTicks = 0U;
-    g_gimbalMotorTest.stageTicks = 0U;
     g_gimbalMotorTest.running = 0U;
 }
 
+/*
+ * 作用：保持当前 SPS 输出。
+ * 使用场景：状态机处于 Gimbal 测试时每轮调用。
+ */
 void GimbalMotorTest_Task(void)
 {
-    if (!g_gimbalMotorTest.running) {
-        return;
-    }
-
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_ZERO) {
-        ++g_gimbalMotorTest.zeroTicks;
-        if (g_gimbalMotorTest.zeroTicks >= CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS) {
-            GimbalMotorTest_AdvanceStage();
-        }
-        return;
-    }
-
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_SIM_TRACK) {
-        uint32_t scriptIndex;
-
-        ++g_gimbalMotorTest.stageTicks;
-        if (g_gimbalMotorTest.stageTicks >=
-            GimbalMotorTest_GetSimTotalTicks()) {
-            GimbalMotorTest_AdvanceStage();
-            return;
-        }
-
-        scriptIndex = (uint32_t)g_gimbalMotorTest.stageTicks /
-            (uint32_t)CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS;
-        GimbalMotorTest_ApplySimVision(scriptIndex);
-        return;
-    }
-
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_CIRCLE) {
-        uint32_t phase;
-
-        ++g_gimbalMotorTest.stageTicks;
-        if (g_gimbalMotorTest.stageTicks >=
-            GimbalMotorTest_GetCircleTotalTicks()) {
-            GimbalMotorTest_AdvanceStage();
-            return;
-        }
-
-        phase = ((uint32_t)g_gimbalMotorTest.stageTicks /
-            (uint32_t)CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS) %
-            (uint32_t)GIMBAL_MOTOR_TEST_CIRCLE_PHASE_COUNT;
-        GimbalMotorTest_ApplyCircle(phase);
-        return;
-    }
-
-    if (GimbalMotorTest_GetAxisDelta() >=
-        GimbalMotorTest_GetStageTargetSteps()) {
-        GimbalMotorTest_AdvanceStage();
-    }
+    GimbalMotorTest_ApplySpeed();
 }
 
+/* 作用：按配置步长提高云台测试速度。 */
+void GimbalMotorTest_IncreaseSpeed(void)
+{
+    g_gimbalMotorTest.yawSpeedSps = GimbalMotorTest_ClampSpeed(
+        (uint32_t)g_gimbalMotorTest.yawSpeedSps +
+            CAR_STEPPER_SPEED_STEP_SPS);
+    g_gimbalMotorTest.pitchSpeedSps = GimbalMotorTest_ClampSpeed(
+        (uint32_t)g_gimbalMotorTest.pitchSpeedSps +
+            CAR_STEPPER_SPEED_STEP_SPS);
+    GimbalMotorTest_ApplySpeed();
+}
+
+/* 作用：按配置步长降低云台测试速度。 */
+void GimbalMotorTest_DecreaseSpeed(void)
+{
+    uint32_t yawSpeedSps = 0U;
+    uint32_t pitchSpeedSps = 0U;
+
+    if (g_gimbalMotorTest.yawSpeedSps > CAR_STEPPER_SPEED_STEP_SPS) {
+        yawSpeedSps = (uint32_t)g_gimbalMotorTest.yawSpeedSps -
+            CAR_STEPPER_SPEED_STEP_SPS;
+    }
+    if (g_gimbalMotorTest.pitchSpeedSps > CAR_STEPPER_SPEED_STEP_SPS) {
+        pitchSpeedSps = (uint32_t)g_gimbalMotorTest.pitchSpeedSps -
+            CAR_STEPPER_SPEED_STEP_SPS;
+    }
+    g_gimbalMotorTest.yawSpeedSps =
+        GimbalMotorTest_ClampSpeed(yawSpeedSps);
+    g_gimbalMotorTest.pitchSpeedSps =
+        GimbalMotorTest_ClampSpeed(pitchSpeedSps);
+    GimbalMotorTest_ApplySpeed();
+}
+
+/* 作用：兼容旧接口，返回 yaw 当前测试速度，单位 step/s。 */
+uint16_t GimbalMotorTest_GetSpeedSps(void)
+{
+    return g_gimbalMotorTest.yawSpeedSps;
+}
+
+/* 作用：读取 yaw 当前测试速度，单位 step/s。 */
+uint16_t GimbalMotorTest_GetYawSpeedSps(void)
+{
+    return g_gimbalMotorTest.yawSpeedSps;
+}
+
+/* 作用：读取 pitch 当前测试速度，单位 step/s。 */
+uint16_t GimbalMotorTest_GetPitchSpeedSps(void)
+{
+    return g_gimbalMotorTest.pitchSpeedSps;
+}
+
+/* 作用：返回云台电机测试是否正在输出速度。 */
 uint8_t GimbalMotorTest_IsRunning(void)
 {
     return g_gimbalMotorTest.running;
 }
 
+/* 作用：返回当前测试阶段枚举。 */
 GimbalMotorTestStage GimbalMotorTest_GetStage(void)
 {
     return g_gimbalMotorTest.stage;
 }
 
+/* 作用：返回当前测试阶段名称，用于 OLED 和日志。 */
 const char *GimbalMotorTest_GetStageName(void)
 {
     switch (g_gimbalMotorTest.stage) {
-    case GIMBAL_MOTOR_TEST_STAGE_ZERO:
-        return "Zero";
-    case GIMBAL_MOTOR_TEST_STAGE_LEFT_RIGHT_90:
-        return "LR 90";
-    case GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90:
-        return "UD 90";
-    case GIMBAL_MOTOR_TEST_STAGE_SIM_TRACK:
-        return "SimTrack";
-    case GIMBAL_MOTOR_TEST_STAGE_CIRCLE:
-        return "Circle";
-    case GIMBAL_MOTOR_TEST_STAGE_DONE:
-        return "Done";
+    case GIMBAL_MOTOR_TEST_STAGE_SPEED:
+        return "Speed";
     case GIMBAL_MOTOR_TEST_STAGE_IDLE:
     default:
         return "Idle";
     }
 }
 
+/* 作用：兼容旧显示接口；当前持续调速模式不计算百分比。 */
 uint8_t GimbalMotorTest_GetProgressPercent(void)
 {
-    uint32_t delta = GimbalMotorTest_GetAxisDelta();
-    uint32_t percent;
-
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_DONE) {
-        return 100U;
-    }
-    if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_ZERO) {
-        percent = ((uint32_t)g_gimbalMotorTest.zeroTicks * 100U) /
-            CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS;
-        return (percent > 100U) ? 100U : (uint8_t)percent;
-    }
-    if ((g_gimbalMotorTest.stage != GIMBAL_MOTOR_TEST_STAGE_LEFT_RIGHT_90) &&
-        (g_gimbalMotorTest.stage != GIMBAL_MOTOR_TEST_STAGE_UP_DOWN_90)) {
-        if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_SIM_TRACK) {
-            percent = ((uint32_t)g_gimbalMotorTest.stageTicks * 100U) /
-                GimbalMotorTest_GetSimTotalTicks();
-            return (percent > 100U) ? 100U : (uint8_t)percent;
-        }
-        if (g_gimbalMotorTest.stage == GIMBAL_MOTOR_TEST_STAGE_CIRCLE) {
-            percent = ((uint32_t)g_gimbalMotorTest.stageTicks * 100U) /
-                GimbalMotorTest_GetCircleTotalTicks();
-            return (percent > 100U) ? 100U : (uint8_t)percent;
-        }
-        return 0U;
-    }
-
-    percent = (delta * 100U) / GimbalMotorTest_GetStageTargetSteps();
-    return (percent > 100U) ? 100U : (uint8_t)percent;
+    return 0U;
 }

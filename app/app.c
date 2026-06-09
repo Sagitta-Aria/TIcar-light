@@ -17,12 +17,13 @@
 #include "route.h"
 #include "state_machine.h"
 #include "stepper_pin_test.h"
+#include "track_step_test.h"
 #include "tracking.h"
 
 /*
  * 作用：把两个实体按键翻译成菜单/状态机事件。
  * 使用场景：App_Task 每轮取到按键事件后调用。
- * 说明：菜单内 KEY1 为确认、KEY2 为下一个；任务页里 KEY2 作为返回。
+ * 说明：菜单内 K1 为确认、K2 为下一个；测试页短按调 SPS，长按退出。
  */
 static void App_HandleKeyEvent(KeyEvent event)
 {
@@ -32,14 +33,29 @@ static void App_HandleKeyEvent(KeyEvent event)
         return;
     }
 
-    /* 按键测试日志：如果一按出现多行，说明硬件抖动或中断消抖还要继续加强。 */
+    /* 按键测试日志：如果一按出现多行，说明硬件抖动或消抖还要继续加强。 */
     if (event == KEY_EVENT_1) {
         LOG_LINE("key: K1 PB9");
     } else if (event == KEY_EVENT_2) {
         LOG_LINE("key: K2 PB8");
+    } else if (event == KEY_EVENT_1_LONG) {
+        LOG_LINE("key: K1 long");
+    } else if (event == KEY_EVENT_2_LONG) {
+        LOG_LINE("key: K2 long");
     }
 
     state = StateMachine_GetState();
+    if ((event == KEY_EVENT_1_LONG) || (event == KEY_EVENT_2_LONG)) {
+        if ((state == CAR_STATE_TRACKING_TEST) ||
+            (state == CAR_STATE_GIMBAL_MOTOR_TEST) ||
+            (state == CAR_STATE_GIMBAL_TEST) ||
+            (state == CAR_STATE_MOTOR_ENABLE_TEST) ||
+            (state == CAR_STATE_MISSION)) {
+            StateMachine_Dispatch(CAR_EVENT_BACK);
+        }
+        return;
+    }
+
     if (state == CAR_STATE_MENU) {
         if (event == KEY_EVENT_1) {
             StateMachine_Dispatch(Menu_Confirm());
@@ -54,6 +70,28 @@ static void App_HandleKeyEvent(KeyEvent event)
             StateMachine_Dispatch(Menu_GrayCalibrationConfirm());
         } else if (event == KEY_EVENT_2) {
             Menu_GrayCalibrationNext();
+        }
+        return;
+    }
+
+    if (state == CAR_STATE_TRACKING_TEST) {
+        if (event == KEY_EVENT_1) {
+            TrackStepTest_IncreaseSpeed();
+            Menu_RequestRefresh();
+        } else if (event == KEY_EVENT_2) {
+            TrackStepTest_DecreaseSpeed();
+            Menu_RequestRefresh();
+        }
+        return;
+    }
+
+    if (state == CAR_STATE_GIMBAL_MOTOR_TEST) {
+        if (event == KEY_EVENT_1) {
+            GimbalMotorTest_IncreaseSpeed();
+            Menu_RequestRefresh();
+        } else if (event == KEY_EVENT_2) {
+            GimbalMotorTest_DecreaseSpeed();
+            Menu_RequestRefresh();
         }
         return;
     }
@@ -82,6 +120,11 @@ static void App_HandleKeyEvent(KeyEvent event)
     }
 }
 
+/*
+ * 作用：初始化所有 app 层模块。
+ * 使用场景：Board_Init 完成且没有致命错误后调用一次。
+ * 说明：这里允许按顺序初始化模块，但不要放底层引脚配置；硬件初始化属于 system/hardware。
+ */
 void App_Init(void)
 {
 #if CAR_GIMBAL_PIN_TEST_BUILD
@@ -95,6 +138,8 @@ void App_Init(void)
 
     Tracking_Init();
     LOG_LINE("app: tracking init ok");
+    TrackStepTest_Init();
+    LOG_LINE("app: track step test init ok");
     Route_Init();
     LOG_LINE("app: route init ok");
     Gimbal_Init();
@@ -115,10 +160,17 @@ void App_Init(void)
     Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP OK", "");
     delay_ms(200U);
 
-    OLED_Clear();
+    if (Board_IsOledAvailable() != 0U) {
+        OLED_Clear();
+    }
     Menu_Task(StateMachine_GetState());
 }
 
+/*
+ * 作用：应用层周期调度。
+ * 使用场景：main while(1) 中反复调用。
+ * 说明：中断只做轻量收发，耗时解析和状态更新都放在这里，最后用固定 delay 控制循环节拍。
+ */
 void App_Task(void)
 {
 #if CAR_GIMBAL_PIN_TEST_BUILD

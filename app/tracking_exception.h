@@ -31,8 +31,8 @@ void TrackingException_Reset(void);
  * 使用场景：Tracking_Task 每个主循环调用一次。
  */
 TrackingExceptionAction TrackingException_Update(uint8_t sampleOk,
-    uint8_t digitalMask, int16_t lineError, uint16_t baseCommand,
-    uint16_t turnLimit, int16_t *leftCommand, int16_t *rightCommand);
+    uint8_t digitalMask, int16_t lineError, uint16_t baseSpeedSps,
+    uint16_t turnLimit, int16_t *leftSpeedSps, int16_t *rightSpeedSps);
 
 /* TrackingException_GetState：读取当前异常状态。 */
 TrackingExceptionState TrackingException_GetState(void);

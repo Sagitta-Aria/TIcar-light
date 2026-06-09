@@ -7,12 +7,17 @@
 #include "motion.h"
 #include "motor_enable_test.h"
 #include "route.h"
+#include "track_step_test.h"
 #include "tracking.h"
 #include "tracking_exception.h"
 
 static CarState g_carState = CAR_STATE_INIT;
 static uint8_t g_missionId;
 
+/*
+ * 作用：把事件枚举转成日志字符串。
+ * 使用场景：StateMachine_Dispatch 收到事件时打印。
+ */
 static const char *StateMachine_GetEventName(CarEvent event)
 {
     switch (event) {
@@ -85,6 +90,7 @@ static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
 static void StateMachine_StopMotionModules(void)
 {
     Tracking_SetEnabled(0U);
+    TrackStepTest_Stop();
     GimbalTest_Stop();
     GimbalMotorTest_Stop();
     MotorEnableTest_Stop();
@@ -138,13 +144,15 @@ static void StateMachine_EnterTracking(void)
 
 /*
  * 作用：进入单纯循迹测试状态。
- * 使用场景：菜单里的 Track Test，只跑灰度循迹，不跑路线外环。
+ * 使用场景：菜单里的 Track Test。
+ * 说明：不启动路线外环，只用灰度传感器做无限循迹和急转动作测试。
  */
 static void StateMachine_EnterTrackingTest(void)
 {
     Route_Stop();
     TrackingException_Reset();
-    Tracking_SetEnabled(1U);
+    Tracking_SetEnabled(0U);
+    TrackStepTest_Start();
     LOG_LINE("state: tracking test");
 }
 
@@ -289,14 +297,17 @@ static void StateMachine_Enter(CarState nextState)
     }
 }
 
+/* 作用：空闲状态周期任务，目前没有后台动作。 */
 static void StateMachine_IdleTask(void)
 {
 }
 
+/* 作用：菜单状态周期任务，菜单刷新由 Menu_Task 独立完成。 */
 static void StateMachine_MenuTask(void)
 {
 }
 
+/* 作用：灰度校准状态周期采样，持续更新最大/最小值。 */
 static void StateMachine_GrayCalibrationTask(void)
 {
     Gray_CalibrationSample();
@@ -324,43 +335,55 @@ static void StateMachine_TrackingTask(void)
     StateMachine_CheckTrackingException();
 }
 
+/* 作用：Track Test 无限循迹周期任务，不启动路线外环。 */
 static void StateMachine_TrackingTestTask(void)
 {
-    Tracking_Task();
-    StateMachine_CheckTrackingException();
+    TrackStepTest_Task();
 }
 
+/* 作用：视觉云台测试周期任务，解析 Link 数据并更新云台目标。 */
 static void StateMachine_GimbalTestTask(void)
 {
     GimbalTest_Task();
 }
 
+/* 作用：云台电机综合测试周期任务，负责阶段切换和测试命令更新。 */
 static void StateMachine_GimbalMotorTestTask(void)
 {
     GimbalMotorTest_Task();
 }
 
+/* 作用：四电机 EN 使能测试周期任务，目前只保留入口。 */
 static void StateMachine_MotorEnableTestTask(void)
 {
     MotorEnableTest_Task();
 }
 
+/* 作用：任务状态周期任务，具体赛题流程后续填入这里。 */
 static void StateMachine_MissionTask(void)
 {
 }
 
+/* 作用：完成状态周期任务，目前只保持停车状态。 */
 static void StateMachine_FinishedTask(void)
 {
 }
 
+/* 作用：停止状态周期任务，目前只保持停车状态。 */
 static void StateMachine_StopTask(void)
 {
 }
 
+/* 作用：错误状态周期任务，目前只等待按键清错/返回。 */
 static void StateMachine_ErrorTask(void)
 {
 }
 
+/*
+ * 作用：初始化顶层状态机。
+ * 使用场景：App_Init 最后调用。
+ * 说明：初始化后默认进入菜单，所有运动模块保持停止。
+ */
 void StateMachine_Init(void)
 {
     g_carState = CAR_STATE_INIT;
@@ -368,6 +391,11 @@ void StateMachine_Init(void)
     StateMachine_Enter(CAR_STATE_MENU);
 }
 
+/*
+ * 作用：处理外部事件并完成状态迁移。
+ * 使用场景：按键菜单、异常处理和任务完成事件都会进入这里。
+ * 说明：状态切换时统一走 StateMachine_Enter，确保离开运动状态会停车。
+ */
 void StateMachine_Dispatch(CarEvent event)
 {
     if (event == CAR_EVENT_NONE) {
@@ -466,6 +494,11 @@ void StateMachine_Dispatch(CarEvent event)
     }
 }
 
+/*
+ * 作用：执行当前状态下的周期业务。
+ * 使用场景：App_Task 每轮调用。
+ * 说明：只调度业务模块，不直接处理按键和 OLED。
+ */
 void StateMachine_Task(void)
 {
     switch (g_carState) {
@@ -511,11 +544,13 @@ void StateMachine_Task(void)
     }
 }
 
+/* 作用：读取当前整车顶层状态。 */
 CarState StateMachine_GetState(void)
 {
     return g_carState;
 }
 
+/* 作用：把整车状态转成字符串，供日志和调试显示使用。 */
 const char *StateMachine_GetStateName(CarState state)
 {
     switch (state) {
@@ -550,6 +585,7 @@ const char *StateMachine_GetStateName(CarState state)
     }
 }
 
+/* 作用：读取当前任务编号，0 表示还没有进入具体任务。 */
 uint8_t StateMachine_GetMissionId(void)
 {
     return g_missionId;

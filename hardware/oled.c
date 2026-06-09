@@ -2,7 +2,8 @@
 #include "stdlib.h"
 #include "oledfont.h"
 
-#define OLED_I2C_ADDRESS       (0x3CU)
+#define OLED_I2C_PRIMARY_ADDRESS  (0x3CU)
+#define OLED_I2C_FALLBACK_ADDRESS (0x3DU)
 #define OLED_WIDTH             (128U)
 #define OLED_HEIGHT            (64U)
 #define OLED_I2C_WAIT_TIMEOUT_COUNT  (100000U)
@@ -20,6 +21,9 @@ extern void delay_ms(uint32_t ms);
 static volatile uint8_t g_oledError;
 static uint8_t g_oledInitActive;
 static uint8_t g_oledRecoverActive;
+static uint8_t g_oledAddress = OLED_I2C_PRIMARY_ADDRESS;
+
+static uint8_t OLED_InitAtAddress(uint8_t address);
 
 /*
  * 作用：给 I2C bus clear 提供很短的 GPIO 时序间隔。
@@ -240,8 +244,10 @@ uint8_t OLED_TryRecover(void)
     if (recovered != 0U) {
         g_oledError = 0U;
         if (g_oledInitActive == 0U) {
-            OLED_Init();
-            recovered = (g_oledError == 0U) ? 1U : 0U;
+            recovered = OLED_InitAtAddress(OLED_I2C_PRIMARY_ADDRESS);
+            if (recovered == 0U) {
+                recovered = OLED_InitAtAddress(OLED_I2C_FALLBACK_ADDRESS);
+            }
         }
     }
 
@@ -309,7 +315,7 @@ static uint8_t OLED_WriteByteOnce(uint8_t dat, uint8_t mode)
     }
     
     // 3. 启动传输
-    DL_I2C_startControllerTransfer(OLED_INST, OLED_I2C_ADDRESS, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
+    DL_I2C_startControllerTransfer(OLED_INST, g_oledAddress, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
     
     // 4. 等待 I2C 回到空闲状态，代表本次传输结束
     return OLED_WaitTransferDone();
@@ -632,4 +638,15 @@ void OLED_Init(void)
 	OLED_WR_Byte(0xAF,OLED_CMD);
 	OLED_Clear();
     g_oledInitActive = 0U;
+}
+
+/*
+ * 作用：指定一个 I2C 地址重新跑 OLED 初始化。
+ * 使用场景：恢复流程先试常见 0x3C，失败再试部分模块使用的 0x3D。
+ */
+static uint8_t OLED_InitAtAddress(uint8_t address)
+{
+    g_oledAddress = address;
+    OLED_Init();
+    return (g_oledError == 0U) ? 1U : 0U;
 }

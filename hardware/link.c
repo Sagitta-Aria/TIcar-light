@@ -1,22 +1,37 @@
 #include "link.h"
 
+#include "board_config.h"
+#include "log_uart.h"
 #include "ti_msp_dl_config.h"
 
 #define LINK_UART_TX_TIMEOUT_COUNT    (100000U)
 #define LINK_IRQ_SERVICE_LIMIT        (16U)
 #define LINK_IRQ_RX_DRAIN_LIMIT       (64U)
 #define LINK_RX_LINE_SIZE             (64U)
-#define LINK_RX_LINE_QUEUE_COUNT      (4U)
 
-static char g_linkRxLines[LINK_RX_LINE_QUEUE_COUNT][LINK_RX_LINE_SIZE];
-static volatile uint8_t g_linkRxLengths[LINK_RX_LINE_QUEUE_COUNT];
-static volatile uint8_t g_linkRxReadIndex;
-static volatile uint8_t g_linkRxWriteIndex;
-static volatile uint8_t g_linkRxCount;
+static char g_linkRxLatest[LINK_RX_LINE_SIZE];
+static volatile uint8_t g_linkRxLatestLength;
+static volatile uint8_t g_linkRxHasLine;
 static char g_linkRxBuild[LINK_RX_LINE_SIZE];
 static volatile uint8_t g_linkRxBuildLength;
+static volatile uint8_t g_linkRxDiscardingLine;
 static volatile uint32_t g_linkRxLineCount;
-static volatile uint32_t g_linkRxDropCount;
+static volatile uint32_t g_linkRxOverwriteCount;
+static volatile uint32_t g_linkRxLongLineDropCount;
+static volatile uint32_t g_linkRxByteCount;
+static volatile uint8_t g_linkRxLastByte;
+static volatile uint32_t g_linkRxPinChangeCount;
+static volatile uint8_t g_linkRxPinLevel;
+static volatile uint32_t g_linkRxErrorCount;
+static volatile uint32_t g_linkRxFrameErrorCount;
+static volatile uint32_t g_linkRxNoiseErrorCount;
+
+/* 作用：读取 PB3/UART3 RX 引脚当前原始电平。 */
+static uint8_t Link_ReadRxPinLevel(void)
+{
+    return ((DL_GPIO_readPins(GPIO_Exchange_RX_PORT,
+        GPIO_Exchange_RX_PIN) & GPIO_Exchange_RX_PIN) != 0U) ? 1U : 0U;
+}
 
 static uint32_t Link_EnterCritical(void)
 {
@@ -50,44 +65,55 @@ static uint8_t Link_TrySendByte(uint8_t data)
 
 static void Link_ResetRxState(void)
 {
-    uint8_t i;
-
-    g_linkRxReadIndex = 0U;
-    g_linkRxWriteIndex = 0U;
-    g_linkRxCount = 0U;
+    g_linkRxLatestLength = 0U;
+    g_linkRxHasLine = 0U;
     g_linkRxBuildLength = 0U;
+    g_linkRxDiscardingLine = 0U;
     g_linkRxLineCount = 0U;
-    g_linkRxDropCount = 0U;
-    for (i = 0U; i < LINK_RX_LINE_QUEUE_COUNT; ++i) {
-        g_linkRxLengths[i] = 0U;
-    }
+    g_linkRxOverwriteCount = 0U;
+    g_linkRxLongLineDropCount = 0U;
+    g_linkRxByteCount = 0U;
+    g_linkRxLastByte = 0U;
+    g_linkRxPinChangeCount = 0U;
+    g_linkRxPinLevel = Link_ReadRxPinLevel();
+    g_linkRxErrorCount = 0U;
+    g_linkRxFrameErrorCount = 0U;
+    g_linkRxNoiseErrorCount = 0U;
+}
+
+/*
+ * 作用：把 PB3/UART3 RX 收到的一整行转发到 Type-C 日志。
+ * 说明：只在主循环取行时打印，不在 UART3 中断里阻塞打印。
+ */
+static void Link_DebugLogRxLine(const char *line)
+{
+#if CAR_LINK_DEBUG_LOG
+    LOG_RAW("[PB3 RX] ");
+    LOG_LINE(line);
+#else
+    (void)line;
+#endif
 }
 
 static void Link_FinishRxLine(void)
 {
     uint8_t i;
-    uint8_t writeIndex;
 
     if (g_linkRxBuildLength == 0U) {
         return;
     }
 
-    if (g_linkRxCount >= LINK_RX_LINE_QUEUE_COUNT) {
-        g_linkRxBuildLength = 0U;
-        ++g_linkRxDropCount;
-        return;
+    if (g_linkRxHasLine != 0U) {
+        ++g_linkRxOverwriteCount;
     }
 
-    writeIndex = g_linkRxWriteIndex;
     for (i = 0U; i < g_linkRxBuildLength; ++i) {
-        g_linkRxLines[writeIndex][i] = g_linkRxBuild[i];
+        g_linkRxLatest[i] = g_linkRxBuild[i];
     }
-    g_linkRxLines[writeIndex][g_linkRxBuildLength] = '\0';
-    g_linkRxLengths[writeIndex] = g_linkRxBuildLength;
+    g_linkRxLatest[g_linkRxBuildLength] = '\0';
+    g_linkRxLatestLength = g_linkRxBuildLength;
+    g_linkRxHasLine = 1U;
 
-    g_linkRxWriteIndex = (uint8_t)((g_linkRxWriteIndex + 1U) %
-        LINK_RX_LINE_QUEUE_COUNT);
-    ++g_linkRxCount;
     ++g_linkRxLineCount;
     g_linkRxBuildLength = 0U;
 }
@@ -98,14 +124,27 @@ static void Link_FinishRxLine(void)
  */
 static void Link_ParseRxByte(uint8_t data)
 {
+    ++g_linkRxByteCount;
+    g_linkRxLastByte = data;
+
     if ((data == '\n') || (data == '\r')) {
+        if (g_linkRxDiscardingLine != 0U) {
+            g_linkRxDiscardingLine = 0U;
+            g_linkRxBuildLength = 0U;
+            return;
+        }
         Link_FinishRxLine();
+        return;
+    }
+
+    if (g_linkRxDiscardingLine != 0U) {
         return;
     }
 
     if (g_linkRxBuildLength >= (uint8_t)(LINK_RX_LINE_SIZE - 1U)) {
         g_linkRxBuildLength = 0U;
-        ++g_linkRxDropCount;
+        g_linkRxDiscardingLine = 1U;
+        ++g_linkRxLongLineDropCount;
         return;
     }
 
@@ -118,13 +157,23 @@ void Link_Init(void)
     Link_ResetRxState();
     DL_UART_Main_setRXFIFOThreshold(
         Exchange_INST, DL_UART_MAIN_RX_FIFO_LEVEL_ONE_ENTRY);
-    DL_UART_Main_enableInterrupt(Exchange_INST, DL_UART_MAIN_INTERRUPT_RX);
+    DL_UART_Main_enableInterrupt(Exchange_INST,
+        DL_UART_MAIN_INTERRUPT_RX |
+        DL_UART_MAIN_INTERRUPT_OVERRUN_ERROR |
+        DL_UART_MAIN_INTERRUPT_FRAMING_ERROR |
+        DL_UART_MAIN_INTERRUPT_NOISE_ERROR);
     NVIC_ClearPendingIRQ(Exchange_INST_INT_IRQN);
     NVIC_EnableIRQ(Exchange_INST_INT_IRQN);
 }
 
 void Link_Task(void)
 {
+    uint8_t level = Link_ReadRxPinLevel();
+
+    if (level != g_linkRxPinLevel) {
+        g_linkRxPinLevel = level;
+        ++g_linkRxPinChangeCount;
+    }
 }
 
 void Link_HandleUARTInterrupt(void)
@@ -143,6 +192,14 @@ void Link_HandleUARTInterrupt(void)
                 Link_ParseRxByte(data);
                 ++rxCount;
             }
+        } else if (pending == DL_UART_MAIN_IIDX_FRAMING_ERROR) {
+            ++g_linkRxErrorCount;
+            ++g_linkRxFrameErrorCount;
+        } else if (pending == DL_UART_MAIN_IIDX_NOISE_ERROR) {
+            ++g_linkRxErrorCount;
+            ++g_linkRxNoiseErrorCount;
+        } else if (pending == DL_UART_MAIN_IIDX_OVERRUN_ERROR) {
+            ++g_linkRxErrorCount;
         }
         ++serviceCount;
     } while ((pending != DL_UART_MAIN_IIDX_NO_INTERRUPT) &&
@@ -180,7 +237,6 @@ void Link_SendString(const char *text)
 
 uint8_t Link_PopLine(char *buffer, uint16_t bufferSize)
 {
-    uint8_t readIndex;
     uint8_t length;
     uint8_t i;
     uint32_t primask;
@@ -190,27 +246,25 @@ uint8_t Link_PopLine(char *buffer, uint16_t bufferSize)
     }
 
     primask = Link_EnterCritical();
-    if (g_linkRxCount == 0U) {
+    if (g_linkRxHasLine == 0U) {
         Link_ExitCritical(primask);
         buffer[0] = '\0';
         return 0U;
     }
 
-    readIndex = g_linkRxReadIndex;
-    length = g_linkRxLengths[readIndex];
+    length = g_linkRxLatestLength;
     if (length >= bufferSize) {
         length = (uint8_t)(bufferSize - 1U);
     }
     for (i = 0U; i < length; ++i) {
-        buffer[i] = g_linkRxLines[readIndex][i];
+        buffer[i] = g_linkRxLatest[i];
     }
     buffer[length] = '\0';
 
-    g_linkRxLengths[readIndex] = 0U;
-    g_linkRxReadIndex = (uint8_t)((g_linkRxReadIndex + 1U) %
-        LINK_RX_LINE_QUEUE_COUNT);
-    --g_linkRxCount;
+    g_linkRxLatestLength = 0U;
+    g_linkRxHasLine = 0U;
     Link_ExitCritical(primask);
+    Link_DebugLogRxLine(buffer);
     return 1U;
 }
 
@@ -228,5 +282,55 @@ uint32_t Link_GetRxLineCount(void)
 
 uint32_t Link_GetRxDropCount(void)
 {
-    return g_linkRxDropCount;
+    return g_linkRxLongLineDropCount;
+}
+
+uint32_t Link_GetRxOverwriteCount(void)
+{
+    return g_linkRxOverwriteCount;
+}
+
+uint32_t Link_GetRxLongLineDropCount(void)
+{
+    return g_linkRxLongLineDropCount;
+}
+
+uint32_t Link_GetRxByteCount(void)
+{
+    return g_linkRxByteCount;
+}
+
+uint8_t Link_GetRxLastByte(void)
+{
+    return g_linkRxLastByte;
+}
+
+uint8_t Link_GetRxBuildLength(void)
+{
+    return g_linkRxBuildLength;
+}
+
+uint8_t Link_GetRxPinLevel(void)
+{
+    return g_linkRxPinLevel;
+}
+
+uint32_t Link_GetRxPinChangeCount(void)
+{
+    return g_linkRxPinChangeCount;
+}
+
+uint32_t Link_GetRxErrorCount(void)
+{
+    return g_linkRxErrorCount;
+}
+
+uint32_t Link_GetRxFrameErrorCount(void)
+{
+    return g_linkRxFrameErrorCount;
+}
+
+uint32_t Link_GetRxNoiseErrorCount(void)
+{
+    return g_linkRxNoiseErrorCount;
 }

@@ -9,7 +9,15 @@ typedef struct {
     uint8_t enabled;
 } MotorEnablePin;
 
-static MotorEnablePin g_motorEnablePins[] = {
+typedef enum {
+    MOTOR_ENABLE_CHASSIS_LEFT = 0,
+    MOTOR_ENABLE_CHASSIS_RIGHT,
+    MOTOR_ENABLE_GIMBAL_1,
+    MOTOR_ENABLE_GIMBAL_2,
+    MOTOR_ENABLE_COUNT
+} MotorEnableIndex;
+
+static MotorEnablePin g_motorEnablePins[MOTOR_ENABLE_COUNT] = {
     {
         PIN_STEPPER_CHASSIS_LEFT_EN_PORT,
         PIN_STEPPER_CHASSIS_LEFT_EN,
@@ -59,18 +67,22 @@ void MotorEnable_SetAll(uint8_t enabled)
 {
     uint32_t i;
 
-    for (i = 0U; i < (uint32_t)(sizeof(g_motorEnablePins) /
-        sizeof(g_motorEnablePins[0])); ++i) {
+    for (i = 0U; i < (uint32_t)MOTOR_ENABLE_COUNT; ++i) {
         MotorEnable_Write(&g_motorEnablePins[i], enabled);
     }
+}
+
+void MotorEnable_SetGimbal(uint8_t enabled)
+{
+    MotorEnable_Write(&g_motorEnablePins[MOTOR_ENABLE_GIMBAL_1], enabled);
+    MotorEnable_Write(&g_motorEnablePins[MOTOR_ENABLE_GIMBAL_2], enabled);
 }
 
 uint8_t MotorEnable_IsAllEnabled(void)
 {
     uint32_t i;
 
-    for (i = 0U; i < (uint32_t)(sizeof(g_motorEnablePins) /
-        sizeof(g_motorEnablePins[0])); ++i) {
+    for (i = 0U; i < (uint32_t)MOTOR_ENABLE_COUNT; ++i) {
         if (g_motorEnablePins[i].enabled == 0U) {
             return 0U;
         }

@@ -37,15 +37,15 @@ void Motor_Task(void);
 
 /*
  * Motor_Set：设置单个电机的方向和速度命令。
- * 速度命令使用 0~CAR_MOTOR_COMMAND_MAX 的量程，实际会换算成 STEP 发脉冲节奏。
+ * speedSps 单位为 step/s，写 5000 就表示每秒输出 5000 个 STEP。
  */
-void Motor_Set(MotorId motor, MotorDir dir, uint16_t command);
+void Motor_Set(MotorId motor, MotorDir dir, uint16_t speedSps);
 
 /*
- * Motor_SetChassisCommand：设置底盘左右两个步进电机的有符号速度命令。
+ * Motor_SetChassisCommand：设置底盘左右两个步进电机的有符号 SPS。
  * 使用场景：循迹和路线统一从这里驱动底盘。
  */
-void Motor_SetChassisCommand(int16_t leftCommand, int16_t rightCommand);
+void Motor_SetChassisCommand(int16_t leftSpeedSps, int16_t rightSpeedSps);
 
 /*
  * Motor_SetAllStop：停止四个步进电机并清掉积累的步进调度量。
@@ -57,7 +57,7 @@ void Motor_SetAllStop(void);
 void Motor_Stop(void);
 
 /*
- * Motor_GetCommand：读取某个电机当前命令。
+ * Motor_GetCommand：读取某个电机当前有符号 SPS。
  * 使用场景：测试页/调试页观察当前控制量。
  */
 int16_t Motor_GetCommand(MotorId motor);

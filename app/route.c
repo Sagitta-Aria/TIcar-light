@@ -5,10 +5,10 @@
 #include "log_uart.h"
 #include "motor.h"
 
-/* RouteProfile：路线外环当前速度配置。 */
+/* RouteProfile：路线外环当前速度配置，单位统一为 SPS。 */
 typedef struct {
-    uint16_t targetBaseCommand;
-    uint16_t currentBaseCommand;
+    uint16_t targetBaseSps;
+    uint16_t currentBaseSps;
     uint16_t targetTurnLimit;
     uint16_t currentTurnLimit;
 } RouteProfile;
@@ -23,6 +23,10 @@ static int32_t g_routeRightStepBase;
 static int16_t g_routeCornerStartYaw;
 static int16_t g_routeTargetYaw;
 
+/*
+ * 作用：把路线阶段枚举转成日志字符串。
+ * 使用场景：阶段切换日志和外部调试显示。
+ */
 static const char *Route_StageText(RouteStage stage)
 {
     switch (stage) {
@@ -109,28 +113,28 @@ static void Route_SetTargets(RouteStage stage)
 {
     switch (stage) {
     case ROUTE_STAGE_STRAIGHT:
-        g_routeProfile.targetBaseCommand = CAR_ROUTE_CRUISE_COMMAND;
+        g_routeProfile.targetBaseSps = CAR_ROUTE_CRUISE_SPEED_SPS;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_APPROACH_CORNER:
-        g_routeProfile.targetBaseCommand = CAR_ROUTE_APPROACH_COMMAND;
+        g_routeProfile.targetBaseSps = CAR_ROUTE_APPROACH_SPEED_SPS;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_APPROACH_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_TURNING:
-        g_routeProfile.targetBaseCommand = CAR_ROUTE_TURN_COMMAND;
+        g_routeProfile.targetBaseSps = CAR_ROUTE_TURN_SPEED_SPS;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_EXIT_CORNER:
-        g_routeProfile.targetBaseCommand = CAR_ROUTE_EXIT_COMMAND;
+        g_routeProfile.targetBaseSps = CAR_ROUTE_EXIT_SPEED_SPS;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_APPROACH_TURN_LIMIT;
         break;
 
     case ROUTE_STAGE_IDLE:
     default:
-        g_routeProfile.targetBaseCommand = CAR_TRACK_BASE_COMMAND;
+        g_routeProfile.targetBaseSps = CAR_TRACK_BASE_SPEED_SPS;
         g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
         break;
     }
@@ -179,6 +183,11 @@ static uint32_t Route_GetTravelSteps(void)
     return (leftSteps + rightSteps) / 2U;
 }
 
+/*
+ * 作用：初始化路线外环状态。
+ * 使用场景：App_Init 或 Route_Start 前调用。
+ * 说明：只复位路线内部计数和速度配置，不直接输出电机命令。
+ */
 void Route_Init(void)
 {
     g_routeRunning = 0U;
@@ -188,13 +197,18 @@ void Route_Init(void)
     g_routeRightStepBase = Motor_GetStepCount(MOTOR_CHASSIS_RIGHT);
     g_routeCornerStartYaw = 0;
     g_routeTargetYaw = 0;
-    g_routeProfile.currentBaseCommand = CAR_TRACK_BASE_COMMAND;
+    g_routeProfile.currentBaseSps = CAR_TRACK_BASE_SPEED_SPS;
     g_routeProfile.currentTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
-    g_routeProfile.targetBaseCommand = CAR_TRACK_BASE_COMMAND;
+    g_routeProfile.targetBaseSps = CAR_TRACK_BASE_SPEED_SPS;
     g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
     g_routeStage = ROUTE_STAGE_IDLE;
 }
 
+/*
+ * 作用：启动路线外环。
+ * 使用场景：状态机进入正式循迹任务时。
+ * 说明：会重新取当前底盘 STEP 作为直道起点，并进入直道阶段。
+ */
 void Route_Start(void)
 {
     Route_Init();
@@ -203,6 +217,10 @@ void Route_Start(void)
     Route_EnterStage(ROUTE_STAGE_STRAIGHT);
 }
 
+/*
+ * 作用：停止路线外环并恢复默认速度配置。
+ * 使用场景：返回菜单、停止、错误或切换到单独测试页时。
+ */
 void Route_Stop(void)
 {
     if (g_routeRunning != 0U) {
@@ -211,12 +229,17 @@ void Route_Stop(void)
     g_routeRunning = 0U;
     g_routeStage = ROUTE_STAGE_IDLE;
     g_routeStageTicks = 0U;
-    g_routeProfile.currentBaseCommand = CAR_TRACK_BASE_COMMAND;
+    g_routeProfile.currentBaseSps = CAR_TRACK_BASE_SPEED_SPS;
     g_routeProfile.currentTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
-    g_routeProfile.targetBaseCommand = CAR_TRACK_BASE_COMMAND;
+    g_routeProfile.targetBaseSps = CAR_TRACK_BASE_SPEED_SPS;
     g_routeProfile.targetTurnLimit = CAR_ROUTE_CRUISE_TURN_LIMIT;
 }
 
+/*
+ * 作用：周期更新路线阶段和速度目标。
+ * 使用场景：正式循迹状态下每轮主循环调用。
+ * 说明：本模块只给 Tracking 提供基础速度和转向限制，不直接控制电机。
+ */
 void Route_Task(void)
 {
     uint32_t travelSteps;
@@ -267,37 +290,43 @@ void Route_Task(void)
         break;
     }
 
-    g_routeProfile.currentBaseCommand = Route_StepToward(
-        g_routeProfile.currentBaseCommand, g_routeProfile.targetBaseCommand);
+    g_routeProfile.currentBaseSps = Route_StepToward(
+        g_routeProfile.currentBaseSps, g_routeProfile.targetBaseSps);
     g_routeProfile.currentTurnLimit = Route_StepToward(
         g_routeProfile.currentTurnLimit, g_routeProfile.targetTurnLimit);
 }
 
+/* 作用：返回路线外环是否正在运行。 */
 uint8_t Route_IsRunning(void)
 {
     return g_routeRunning;
 }
 
+/* 作用：返回当前路线阶段。 */
 RouteStage Route_GetStage(void)
 {
     return g_routeStage;
 }
 
+/* 作用：返回路线阶段字符串，用于日志/OLED 调试。 */
 const char *Route_GetStageName(RouteStage stage)
 {
     return Route_StageText(stage);
 }
 
-uint16_t Route_GetBaseCommand(void)
+/* 作用：返回当前平滑后的基础底盘速度，单位 SPS。 */
+uint16_t Route_GetBaseSpeedSps(void)
 {
-    return g_routeProfile.currentBaseCommand;
+    return g_routeProfile.currentBaseSps;
 }
 
+/* 作用：返回当前平滑后的最大转向修正限制。 */
 uint16_t Route_GetTurnLimit(void)
 {
     return g_routeProfile.currentTurnLimit;
 }
 
+/* 作用：返回已经通过的拐角编号，后续任务流程可据此分段。 */
 uint8_t Route_GetCornerIndex(void)
 {
     return g_routeCornerIndex;

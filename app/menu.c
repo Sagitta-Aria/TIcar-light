@@ -1,5 +1,6 @@
 #include "menu.h"
 
+#include "board.h"
 #include "board_config.h"
 #include "gimbal_motor_test.h"
 #include "gimbal_test.h"
@@ -7,6 +8,7 @@
 #include "log_uart.h"
 #include "motor_enable_test.h"
 #include "oled.h"
+#include "track_step_test.h"
 
 #define MENU_OLED_FONT_SIZE        (12U)
 #define MENU_OLED_MAX_CHARS        (21U)
@@ -17,35 +19,11 @@
 #define MENU_LINE_BUFFER_SIZE      (32U)
 
 typedef enum {
-    MENU_PAGE_MAIN = 0,
-    MENU_PAGE_GIMBAL,
-    MENU_PAGE_MISSION
-} MenuPage;
-
-typedef enum {
-    MENU_MAIN_GRAY_CALIB = 0,
-    MENU_MAIN_TRACK_TEST,
-    MENU_MAIN_GIMBAL_TEST,
+    MENU_MAIN_GIMBAL = 0,
+    MENU_MAIN_MOTOR,
     MENU_MAIN_MISSION,
     MENU_MAIN_COUNT
 } MenuMainItem;
-
-typedef enum {
-    MENU_MISSION_1 = 0,
-    MENU_MISSION_2,
-    MENU_MISSION_3,
-    MENU_MISSION_4,
-    MENU_MISSION_BACK,
-    MENU_MISSION_COUNT
-} MenuMissionItem;
-
-typedef enum {
-    MENU_GIMBAL_ENABLE_TEST = 0,
-    MENU_GIMBAL_MOTOR_TEST,
-    MENU_GIMBAL_VISION_TEST,
-    MENU_GIMBAL_BACK,
-    MENU_GIMBAL_COUNT
-} MenuGimbalItem;
 
 typedef enum {
     MENU_GRAY_SAVE_EXIT = 0,
@@ -54,31 +32,12 @@ typedef enum {
 } MenuGrayAction;
 
 static const char *const g_mainItems[MENU_MAIN_COUNT] = {
-    "Gray Calib",
-    "Track Test",
-    "Gimbal Test",
+    "Gimbal",
+    "Motor",
     "Mission"
 };
 
-static const char *const g_missionItems[MENU_MISSION_COUNT] = {
-    "Mission 1",
-    "Mission 2",
-    "Mission 3",
-    "Mission 4",
-    "Back"
-};
-
-static const char *const g_gimbalItems[MENU_GIMBAL_COUNT] = {
-    "Enable Test",
-    "Motor Test",
-    "Vision Test",
-    "Back"
-};
-
-static MenuPage g_menuPage;
 static uint8_t g_mainIndex;
-static uint8_t g_missionIndex;
-static uint8_t g_gimbalIndex;
 static uint8_t g_grayActionIndex;
 static uint8_t g_forceRefresh;
 static uint16_t g_refreshTicks;
@@ -90,7 +49,7 @@ static CarState g_lastState;
  */
 static char *Menu_AppendText(char *write, char *end, const char *text)
 {
-    while ((text != NULL) && (*text != '\0') && (write < end)) {
+    while ((text != 0) && (*text != '\0') && (write < end)) {
         *write = *text;
         ++write;
         ++text;
@@ -115,7 +74,7 @@ static char *Menu_AppendChar(char *write, char *end, char value)
 
 /*
  * 作用：向字符串缓冲区追加无符号十进制整数。
- * 使用场景：任务运行页显示当前任务编号。
+ * 使用场景：显示 SPS、STEP 计数和任务编号。
  */
 static char *Menu_AppendUnsigned(char *write, char *end, uint32_t value)
 {
@@ -152,7 +111,7 @@ static void Menu_ShowPaddedLine(uint8_t line, const char *text)
     padded[MENU_OLED_MAX_CHARS] = '\0';
 
     i = 0U;
-    while ((text != NULL) && (text[i] != '\0') &&
+    while ((text != 0) && (text[i] != '\0') &&
         (i < MENU_OLED_MAX_CHARS)) {
         padded[i] = text[i];
         ++i;
@@ -177,7 +136,7 @@ static void Menu_ShowMonoLine(uint8_t index, const char *text)
     padded[MENU_MONO_MAX_CHARS] = '\0';
 
     i = 0U;
-    while ((text != NULL) && (text[i] != '\0') &&
+    while ((text != 0) && (text[i] != '\0') &&
         (i < MENU_MONO_MAX_CHARS)) {
         padded[i] = text[i];
         ++i;
@@ -188,6 +147,10 @@ static void Menu_ShowMonoLine(uint8_t index, const char *text)
         MENU_OLED_FONT_SIZE);
 }
 
+/*
+ * 作用：清空当前菜单占用的 OLED 行。
+ * 使用场景：每次重新渲染页面前，避免旧页面残留字符。
+ */
 static void Menu_ClearOLEDLines(void)
 {
     Menu_ShowPaddedLine(0U, "");
@@ -204,6 +167,10 @@ static void Menu_ClearOLEDLines(void)
 static void Menu_RenderLines(const char *line0, const char *line1,
     const char *line2, const char *line3)
 {
+    if (Board_IsOledAvailable() == 0U) {
+        return;
+    }
+
     Menu_ClearOLEDLines();
     Menu_ShowMonoLine(0U, line0);
     Menu_ShowMonoLine(1U, line1);
@@ -214,7 +181,7 @@ static void Menu_RenderLines(const char *line0, const char *line1,
 
 /*
  * 作用：构造带选择箭头的菜单行。
- * 使用场景：主菜单、任务菜单和灰度校准退出选择。
+ * 使用场景：主菜单选择项。
  */
 static void Menu_BuildItemLine(char line[MENU_LINE_BUFFER_SIZE],
     uint8_t selected, const char *text)
@@ -228,7 +195,7 @@ static void Menu_BuildItemLine(char line[MENU_LINE_BUFFER_SIZE],
 
 /*
  * 作用：渲染三行滚动菜单，当前选中项固定在中间行。
- * 使用场景：按 K2 切换选项时。
+ * 使用场景：主菜单按 K2 切换选项。
  */
 static void Menu_RenderCenteredList(const char *const *items, uint8_t count,
     uint8_t selected)
@@ -253,23 +220,16 @@ static void Menu_RenderCenteredList(const char *const *items, uint8_t count,
     Menu_RenderLines(line0, line1, line2, "");
 }
 
+/* 作用：渲染主菜单，只保留云台、电机、任务三项。 */
 static void Menu_RenderMainMenu(void)
 {
     Menu_RenderCenteredList(g_mainItems, MENU_MAIN_COUNT, g_mainIndex);
 }
 
-static void Menu_RenderMissionMenu(void)
-{
-    Menu_RenderCenteredList(g_missionItems, MENU_MISSION_COUNT,
-        g_missionIndex);
-}
-
-static void Menu_RenderGimbalMenu(void)
-{
-    Menu_RenderCenteredList(g_gimbalItems, MENU_GIMBAL_COUNT,
-        g_gimbalIndex);
-}
-
+/*
+ * 作用：渲染灰度校准页面。
+ * 说明：主菜单已隐藏灰度校准，但保留页面兼容状态机旧入口。
+ */
 static void Menu_RenderGrayCalibration(void)
 {
     char statusLine[MENU_LINE_BUFFER_SIZE];
@@ -292,39 +252,64 @@ static void Menu_RenderGrayCalibration(void)
     Menu_RenderLines(statusLine, saveLine, noSaveLine, "");
 }
 
-static void Menu_RenderTrackingTest(void)
+/* 作用：渲染底盘无限循迹测试运行页。 */
+static void Menu_RenderMotorTest(void)
 {
-    Menu_RenderLines("Track Test", "Running", "K2 Back", "");
+    char speedLine[MENU_LINE_BUFFER_SIZE];
+    char stepLine[MENU_LINE_BUFFER_SIZE];
+    char *write = speedLine;
+    char *end = &speedLine[MENU_LINE_BUFFER_SIZE - 1U];
+
+    write = Menu_AppendText(write, end, "B ");
+    (void)Menu_AppendUnsigned(write, end, TrackStepTest_GetSpeedSps());
+    write = Menu_AppendText(write, end, " T ");
+    (void)Menu_AppendUnsigned(write, end, TrackStepTest_GetTurnSpeedSps());
+
+    write = stepLine;
+    end = &stepLine[MENU_LINE_BUFFER_SIZE - 1U];
+    write = Menu_AppendText(write, end, "STEP ");
+    (void)Menu_AppendUnsigned(write, end, TrackStepTest_GetTravelSteps());
+
+    Menu_RenderLines("Motor Track", speedLine, stepLine,
+        TrackStepTest_GetModeName());
 }
 
-static void Menu_RenderGimbalTest(void)
-{
-    Menu_RenderLines("Vision Test",
-        (GimbalTest_HasVision() != 0U) ? "Tracking" : "Waiting Link",
-        "K2 Back", "");
-}
-
+/* 作用：渲染云台电机 yaw/pitch SPS 测试运行页。 */
 static void Menu_RenderGimbalMotorTest(void)
 {
-    char line1[MENU_LINE_BUFFER_SIZE];
-    char *write = line1;
-    char *end = &line1[MENU_LINE_BUFFER_SIZE - 1U];
+    char yawLine[MENU_LINE_BUFFER_SIZE];
+    char pitchLine[MENU_LINE_BUFFER_SIZE];
+    char *write = yawLine;
+    char *end = &yawLine[MENU_LINE_BUFFER_SIZE - 1U];
 
-    write = Menu_AppendText(write, end, GimbalMotorTest_GetStageName());
-    write = Menu_AppendText(write, end, " ");
-    write = Menu_AppendUnsigned(write, end,
-        GimbalMotorTest_GetProgressPercent());
-    (void)Menu_AppendText(write, end, "%");
+    write = Menu_AppendText(write, end, "Yaw ");
+    (void)Menu_AppendUnsigned(write, end, GimbalMotorTest_GetYawSpeedSps());
 
-    Menu_RenderLines("Motor Test", line1, "Open Loop", "K2 Back");
+    write = pitchLine;
+    end = &pitchLine[MENU_LINE_BUFFER_SIZE - 1U];
+    write = Menu_AppendText(write, end, "Pitch ");
+    (void)Menu_AppendUnsigned(write, end,
+        GimbalMotorTest_GetPitchSpeedSps());
+
+    Menu_RenderLines("Gimbal", yawLine, pitchLine, "Long Exit");
 }
 
+/* 作用：渲染视觉云台测试页，保留给旧入口调试。 */
+static void Menu_RenderGimbalTest(void)
+{
+    Menu_RenderLines("Vision",
+        (GimbalTest_HasVision() != 0U) ? "Tracking" : "Waiting Link",
+        "Long Exit", "");
+}
+
+/* 作用：渲染四电机 EN 使能测试页，保留给旧入口调试。 */
 static void Menu_RenderMotorEnableTest(void)
 {
-    Menu_RenderLines("Enable Test", MotorEnableTest_GetEnableLine(),
-        "No Step Pulse", "K2 Back");
+    Menu_RenderLines("Enable", MotorEnableTest_GetEnableLine(),
+        "No STEP", "Long Exit");
 }
 
+/* 作用：渲染任务运行页，目前只显示任务编号。 */
 static void Menu_RenderMission(void)
 {
     char line1[MENU_LINE_BUFFER_SIZE];
@@ -333,31 +318,30 @@ static void Menu_RenderMission(void)
 
     write = Menu_AppendText(write, end, "Mission ");
     (void)Menu_AppendUnsigned(write, end, StateMachine_GetMissionId());
-    Menu_RenderLines("Mission", line1, "K2 Back", "");
+    Menu_RenderLines("Mission", line1, "Long Exit", "");
 }
 
+/* 作用：渲染只有标题和一行状态的简单页面。 */
 static void Menu_RenderSimpleState(const char *title, const char *line1)
 {
     Menu_RenderLines(title, line1, "K1 Menu", "K2 Back");
 }
 
+/*
+ * 作用：根据整车状态选择具体页面。
+ * 使用场景：Menu_Task 刷新 OLED 时调用。
+ */
 static void Menu_RenderByState(CarState state)
 {
     switch (state) {
     case CAR_STATE_MENU:
-        if (g_menuPage == MENU_PAGE_GIMBAL) {
-            Menu_RenderGimbalMenu();
-        } else if (g_menuPage == MENU_PAGE_MISSION) {
-            Menu_RenderMissionMenu();
-        } else {
-            Menu_RenderMainMenu();
-        }
+        Menu_RenderMainMenu();
         break;
     case CAR_STATE_GRAY_CALIBRATION:
         Menu_RenderGrayCalibration();
         break;
     case CAR_STATE_TRACKING_TEST:
-        Menu_RenderTrackingTest();
+        Menu_RenderMotorTest();
         break;
     case CAR_STATE_GIMBAL_TEST:
         Menu_RenderGimbalTest();
@@ -393,112 +377,74 @@ static void Menu_RenderByState(CarState state)
     }
 }
 
+/*
+ * 作用：初始化菜单内部选择状态。
+ * 使用场景：App_Init 调用一次；状态机返回菜单时也会重置到第一项。
+ */
 void Menu_Init(void)
 {
-    g_menuPage = MENU_PAGE_MAIN;
-    g_mainIndex = MENU_MAIN_GRAY_CALIB;
-    g_missionIndex = MENU_MISSION_1;
-    g_gimbalIndex = MENU_GIMBAL_ENABLE_TEST;
+    g_mainIndex = MENU_MAIN_GIMBAL;
     g_grayActionIndex = MENU_GRAY_SAVE_EXIT;
     g_forceRefresh = 1U;
     g_refreshTicks = CAR_MENU_REFRESH_TICKS;
     g_lastState = CAR_STATE_INIT;
 }
 
-void Menu_Next(void)
+/* 作用：请求下一轮 Menu_Task 立即刷新 OLED。 */
+void Menu_RequestRefresh(void)
 {
-    if (g_menuPage == MENU_PAGE_GIMBAL) {
-        g_gimbalIndex = (uint8_t)((g_gimbalIndex + 1U) %
-            MENU_GIMBAL_COUNT);
-        LOG_RAW("menu: select ");
-        LOG_LINE(g_gimbalItems[g_gimbalIndex]);
-    } else if (g_menuPage == MENU_PAGE_MISSION) {
-        g_missionIndex = (uint8_t)((g_missionIndex + 1U) %
-            MENU_MISSION_COUNT);
-        LOG_RAW("menu: select ");
-        LOG_LINE(g_missionItems[g_missionIndex]);
-    } else {
-        g_mainIndex = (uint8_t)((g_mainIndex + 1U) % MENU_MAIN_COUNT);
-        LOG_RAW("menu: select ");
-        LOG_LINE(g_mainItems[g_mainIndex]);
-    }
     g_forceRefresh = 1U;
 }
 
+/*
+ * 作用：切换主菜单选中项。
+ * 使用场景：菜单态下 K2 按键触发。
+ */
+void Menu_Next(void)
+{
+    g_mainIndex = (uint8_t)((g_mainIndex + 1U) % MENU_MAIN_COUNT);
+    LOG_RAW("menu: select ");
+    LOG_LINE(g_mainItems[g_mainIndex]);
+    Menu_RequestRefresh();
+}
+
+/*
+ * 作用：确认当前主菜单选项并返回状态机事件。
+ * 使用场景：菜单态下 K1 按键触发。
+ */
 CarEvent Menu_Confirm(void)
 {
-    if (g_menuPage == MENU_PAGE_MAIN) {
-        LOG_RAW("menu: confirm ");
-        LOG_LINE(g_mainItems[g_mainIndex]);
-        switch (g_mainIndex) {
-        case MENU_MAIN_GRAY_CALIB:
-            g_grayActionIndex = MENU_GRAY_SAVE_EXIT;
-            return CAR_EVENT_GRAY_CALIBRATION_START;
-        case MENU_MAIN_TRACK_TEST:
-            return CAR_EVENT_TRACKING_TEST_START;
-        case MENU_MAIN_GIMBAL_TEST:
-            g_menuPage = MENU_PAGE_GIMBAL;
-            g_gimbalIndex = MENU_GIMBAL_ENABLE_TEST;
-            g_forceRefresh = 1U;
-            return CAR_EVENT_NONE;
-        case MENU_MAIN_MISSION:
-            g_menuPage = MENU_PAGE_MISSION;
-            g_missionIndex = MENU_MISSION_1;
-            g_forceRefresh = 1U;
-            return CAR_EVENT_NONE;
-        default:
-            return CAR_EVENT_NONE;
-        }
-    }
-
-    if (g_menuPage == MENU_PAGE_GIMBAL) {
-        LOG_RAW("menu: confirm ");
-        LOG_LINE(g_gimbalItems[g_gimbalIndex]);
-        switch (g_gimbalIndex) {
-        case MENU_GIMBAL_ENABLE_TEST:
-            return CAR_EVENT_MOTOR_ENABLE_TEST_START;
-        case MENU_GIMBAL_VISION_TEST:
-            return CAR_EVENT_GIMBAL_TEST_START;
-        case MENU_GIMBAL_MOTOR_TEST:
-            return CAR_EVENT_GIMBAL_MOTOR_TEST_START;
-        case MENU_GIMBAL_BACK:
-            g_menuPage = MENU_PAGE_MAIN;
-            g_mainIndex = MENU_MAIN_GIMBAL_TEST;
-            g_forceRefresh = 1U;
-            return CAR_EVENT_NONE;
-        default:
-            return CAR_EVENT_NONE;
-        }
-    }
-
     LOG_RAW("menu: confirm ");
-    LOG_LINE(g_missionItems[g_missionIndex]);
-    switch (g_missionIndex) {
-    case MENU_MISSION_1:
+    LOG_LINE(g_mainItems[g_mainIndex]);
+
+    switch (g_mainIndex) {
+    case MENU_MAIN_GIMBAL:
+        return CAR_EVENT_GIMBAL_TEST_START;
+    case MENU_MAIN_MOTOR:
+        return CAR_EVENT_TRACKING_TEST_START;
+    case MENU_MAIN_MISSION:
         return CAR_EVENT_MISSION_1_START;
-    case MENU_MISSION_2:
-        return CAR_EVENT_MISSION_2_START;
-    case MENU_MISSION_3:
-        return CAR_EVENT_MISSION_3_START;
-    case MENU_MISSION_4:
-        return CAR_EVENT_MISSION_4_START;
-    case MENU_MISSION_BACK:
-        g_menuPage = MENU_PAGE_MAIN;
-        g_mainIndex = MENU_MAIN_MISSION;
-        g_forceRefresh = 1U;
-        return CAR_EVENT_NONE;
     default:
         return CAR_EVENT_NONE;
     }
 }
 
+/*
+ * 作用：灰度校准页切换退出动作。
+ * 使用场景：灰度校准状态下 K2 按键触发。
+ */
 void Menu_GrayCalibrationNext(void)
 {
     g_grayActionIndex = (uint8_t)((g_grayActionIndex + 1U) %
         MENU_GRAY_ACTION_COUNT);
-    g_forceRefresh = 1U;
+    Menu_RequestRefresh();
 }
 
+/*
+ * 作用：确认灰度校准页当前动作。
+ * 使用场景：灰度校准状态下 K1 按键触发。
+ * 说明：校准未完成时不允许 Save Exit，避免把无效阈值应用到运行参数。
+ */
 CarEvent Menu_GrayCalibrationConfirm(void)
 {
     if (g_grayActionIndex == MENU_GRAY_SAVE_EXIT) {
@@ -514,12 +460,16 @@ CarEvent Menu_GrayCalibrationConfirm(void)
     return CAR_EVENT_BACK;
 }
 
+/*
+ * 作用：按节流周期刷新 OLED 菜单/状态页。
+ * 使用场景：App_Task 每轮调用。
+ * 说明：本函数会访问 OLED，不允许放进中断里调用。
+ */
 void Menu_Task(CarState state)
 {
     if (state != g_lastState) {
         if (state == CAR_STATE_MENU) {
-            g_menuPage = MENU_PAGE_MAIN;
-            g_mainIndex = MENU_MAIN_GRAY_CALIB;
+            g_mainIndex = MENU_MAIN_GIMBAL;
         }
         g_lastState = state;
         g_forceRefresh = 1U;
@@ -528,7 +478,8 @@ void Menu_Task(CarState state)
         ++g_refreshTicks;
     }
 
-    if (!g_forceRefresh && (g_refreshTicks < CAR_MENU_REFRESH_TICKS)) {
+    if ((g_forceRefresh == 0U) &&
+        (g_refreshTicks < CAR_MENU_REFRESH_TICKS)) {
         return;
     }
 

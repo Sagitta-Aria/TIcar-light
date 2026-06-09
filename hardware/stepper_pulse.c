@@ -3,10 +3,6 @@
 #include "board_config.h"
 #include "pin_map.h"
 
-#if (CAR_STEPPER_COMMAND_TO_HZ_DIVISOR == 0U)
-#error "CAR_STEPPER_COMMAND_TO_HZ_DIVISOR must be greater than 0"
-#endif
-
 #if (CAR_STEPPER_PULSE_HIGH_TICKS == 0U)
 #error "CAR_STEPPER_PULSE_HIGH_TICKS must be greater than 0"
 #endif
@@ -50,24 +46,6 @@ static uint8_t StepperPulse_IsValid(MotorId motor)
 }
 
 /*
- * 作用：把工程速度命令换算成 STEP 频率。
- * 使用场景：主循环设置目标速度时调用，中断里只使用换算后的 Hz。
- * 说明：ccs1.2 保持上一版的低速手感，4000 命令约等于 400 step/s。
- */
-static uint32_t StepperPulse_CommandToHz(uint16_t command)
-{
-    uint32_t hz;
-
-    if (command == 0U) {
-        return 0U;
-    }
-
-    hz = ((uint32_t)command + (CAR_STEPPER_COMMAND_TO_HZ_DIVISOR / 2U)) /
-        CAR_STEPPER_COMMAND_TO_HZ_DIVISOR;
-    return (hz == 0U) ? 1U : hz;
-}
-
-/*
  * 作用：极短临界区保护主循环和 TIMG0 ISR 共享的调度状态。
  * 使用场景：设置速度、停车、初始化。
  */
@@ -103,7 +81,6 @@ static void StepperPulse_TickOne(StepperPulseChannel *channel)
         if (channel->highTicksLeft == 0U) {
             DL_GPIO_clearPins(channel->stepPort, channel->stepPin);
         }
-        return;
     }
 
     if (channel->stepRateHz == 0U) {
@@ -130,7 +107,7 @@ void StepperPulse_Init(void)
 }
 
 void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
-    uint16_t command)
+    uint16_t speedSps)
 {
     StepperPulseChannel *channel;
     uint32_t primask;
@@ -141,9 +118,9 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
 
     channel = &g_stepperPulse[(uint32_t)motor];
     primask = StepperPulse_EnterCritical();
-    channel->stepRateHz = StepperPulse_CommandToHz(command);
+    channel->stepRateHz = speedSps;
     channel->directionSign = (directionSign < 0) ? -1 : 1;
-    if (command == 0U) {
+    if (speedSps == 0U) {
         channel->accumulator = 0U;
         channel->highTicksLeft = 0U;
         DL_GPIO_clearPins(channel->stepPort, channel->stepPin);

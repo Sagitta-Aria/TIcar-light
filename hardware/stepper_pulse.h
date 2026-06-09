@@ -15,10 +15,10 @@ void StepperPulse_Init(void);
 /*
  * StepperPulse_SetTarget：设置单个电机的 STEP 目标节奏。
  * 使用场景：Motor_Set 在方向脚稳定后调用。
- * 说明：command 仍使用 0~CAR_MOTOR_COMMAND_MAX 的工程速度命令。
+ * 说明：speedSps 单位为 step/s，直接决定每秒输出多少个 STEP。
  */
 void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
-    uint16_t command);
+    uint16_t speedSps);
 
 /*
  * StepperPulse_StopAll：停止四路 STEP 输出并清空调度累加器。

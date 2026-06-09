@@ -46,10 +46,16 @@ typedef enum {
 /* StateMachine_Init：初始化顶层状态机，默认进入菜单状态。 */
 void StateMachine_Init(void);
 
-/* StateMachine_Dispatch：向状态机发送一个事件。 */
+/*
+ * StateMachine_Dispatch：向状态机发送一个事件。
+ * 说明：这里会执行状态入口动作，例如停车、启动循迹、启动云台测试。
+ */
 void StateMachine_Dispatch(CarEvent event);
 
-/* StateMachine_Task：执行当前状态对应的周期任务。 */
+/*
+ * StateMachine_Task：执行当前状态对应的周期任务。
+ * 说明：只调度 app 层任务，不直接刷新 OLED；OLED 由 Menu_Task 负责。
+ */
 void StateMachine_Task(void);
 
 /* StateMachine_GetState：读取当前顶层状态。 */
