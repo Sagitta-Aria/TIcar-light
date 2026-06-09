@@ -318,17 +318,27 @@ void Gimbal_UpdateFromLaserError(int16_t laserMinusTargetX,
 void Gimbal_UpdateFromCameraError(int16_t targetMinusCurrentX,
     int16_t targetMinusCurrentY)
 {
+    int16_t adjustedErrorX;
+    int16_t adjustedErrorY;
+
     /*
      * 新视觉脚本发的是 160-x,120-y，已经是 target - current。
-     * 这里不能再取反，只把相对误差写进闭环控制器。
+     * 安装偏差补偿只改控制目标，不改视觉端识别坐标。
      */
+    adjustedErrorX = Gimbal_ClampInt16(
+        (int32_t)targetMinusCurrentX +
+        (int32_t)CAR_GIMBAL_X_ERROR_OFFSET);
+    adjustedErrorY = Gimbal_ClampInt16(
+        (int32_t)targetMinusCurrentY +
+        (int32_t)CAR_GIMBAL_Y_ERROR_OFFSET);
+
     g_gimbal.target.x = 0;
     g_gimbal.target.y = 0;
     g_gimbal.current.x = Gimbal_ClampInt16(
-        -(int32_t)targetMinusCurrentX);
+        -(int32_t)adjustedErrorX);
     g_gimbal.current.y = Gimbal_ClampInt16(
-        -(int32_t)targetMinusCurrentY);
-    Gimbal_SetError(targetMinusCurrentX, targetMinusCurrentY);
+        -(int32_t)adjustedErrorY);
+    Gimbal_SetError(adjustedErrorX, adjustedErrorY);
     g_gimbal.hasVision = 1U;
     g_gimbal.staleTicks = 0U;
 }

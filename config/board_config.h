@@ -121,31 +121,38 @@
 #define CAR_KEY_DEBUG_POLL_LOG          (0U)
 
 /* CAR_GIMBAL_X/Y_CONTROL_SPEED_MAX_SPS：视觉闭环时云台单轴最大速度。 */
-#define CAR_GIMBAL_X_CONTROL_SPEED_MAX_SPS (420U)
-#define CAR_GIMBAL_Y_CONTROL_SPEED_MAX_SPS (110U)
+#define CAR_GIMBAL_X_CONTROL_SPEED_MAX_SPS (10000U)
+#define CAR_GIMBAL_Y_CONTROL_SPEED_MAX_SPS (10000U)
 
 /* CAR_GIMBAL_X/Y_MIN_ACTIVE_SPEED_SPS：云台超过死区后的最小微调速度。 */
-#define CAR_GIMBAL_X_MIN_ACTIVE_SPEED_SPS (5U)
-#define CAR_GIMBAL_Y_MIN_ACTIVE_SPEED_SPS (3U)
+#define CAR_GIMBAL_X_MIN_ACTIVE_SPEED_SPS (100U)
+#define CAR_GIMBAL_Y_MIN_ACTIVE_SPEED_SPS (30U)
 
 /* CAR_GIMBAL_DEADBAND_X/Y：视觉误差死区，单位为 0.1 像素。 */
-#define CAR_GIMBAL_DEADBAND_X           (1U)
-#define CAR_GIMBAL_DEADBAND_Y           (1U)
+#define CAR_GIMBAL_DEADBAND_X           (10U)
+#define CAR_GIMBAL_DEADBAND_Y           (10U)
+
+/*
+ * CAR_GIMBAL_X/Y_ERROR_OFFSET：安装偏差补偿，单位为 0.1 像素。
+ * X 正值让最终点向画面右侧偏，Y 负值让最终点向画面上方偏。
+ */
+#define CAR_GIMBAL_X_ERROR_OFFSET       (0)
+#define CAR_GIMBAL_Y_ERROR_OFFSET       (75)
 
 /* CAR_GIMBAL_GAIN_SCALE：云台比例增益缩放基准。 */
 #define CAR_GIMBAL_GAIN_SCALE           (100U)
 
 /* CAR_GIMBAL_X/Y_KP：视觉误差到云台 SPS 的比例增益，误差单位为 0.1 像素。 */
-#define CAR_GIMBAL_X_KP                 (14U)
-#define CAR_GIMBAL_Y_KP                 (4U)
+#define CAR_GIMBAL_X_KP                 (200U)
+#define CAR_GIMBAL_Y_KP                 (100U)
 
-/* CAR_GIMBAL_X/Y_KD：当前回到原始数据 P 控制，D 先关掉避免跨中心时反复横跳。 */
+/* CAR_GIMBAL_X/Y_KD：相邻视觉帧误差变化的阻尼增益。 */
 #define CAR_GIMBAL_X_KD                 (0U)
 #define CAR_GIMBAL_Y_KD                 (0U)
 
 /* CAR_GIMBAL_X_REVERSE/Y_REVERSE：实车方向相反时改成 1。 */
-#define CAR_GIMBAL_X_REVERSE            (0U)
-#define CAR_GIMBAL_Y_REVERSE            (1U)
+#define CAR_GIMBAL_X_REVERSE            (1U)
+#define CAR_GIMBAL_Y_REVERSE            (0U)
 
 /* CAR_GIMBAL_VISION_TIMEOUT_TICKS：连续多少轮没有视觉更新就停云台。 */
 #define CAR_GIMBAL_VISION_TIMEOUT_TICKS (20U)
@@ -159,7 +166,7 @@
  * 1：使用圆点误差，适合墙面画圆跟踪。
  * 0：使用矩形中心误差，适合先把激光打到框中心。
  */
-#define CAR_GIMBAL_TEST_USE_CIRCLE_ERROR (1U)
+#define CAR_GIMBAL_TEST_USE_CIRCLE_ERROR (0U)
 
 /* CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90：云台左右轴转 90 度需要的 STEP 数。 */
 #define CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90 (1200U)
