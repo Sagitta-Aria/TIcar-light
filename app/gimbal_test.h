@@ -18,7 +18,7 @@ void GimbalTest_Stop(void);
 /*
  * GimbalTest_Task：读取 Link 收到的视觉数据并更新云台。
  * 视觉格式："centerDx,centerDy;circleDx,circleDy"，单位由解析器转成 0.1 像素。
- * 选择中心误差还是圆点误差由 CAR_GIMBAL_TEST_USE_CIRCLE_ERROR 配置。
+ * 选择中心误差还是圆点误差由当前 staticconfig 任务的 useCircleError 决定。
  */
 void GimbalTest_Task(void);
 

@@ -16,6 +16,12 @@ void MotorEnable_Init(void);
 void MotorEnable_SetAll(uint8_t enabled);
 
 /*
+ * MotorEnable_SetChassis：只设置底盘左右两路 EN。
+ * 使用场景：菜单 Motor 固定脉冲测试，避免误使能云台驱动器。
+ */
+void MotorEnable_SetChassis(uint8_t enabled);
+
+/*
  * MotorEnable_SetGimbal：只设置云台两路 EN。
  * 使用场景：视觉闭环或云台单独测试，避免误使能底盘驱动器。
  */

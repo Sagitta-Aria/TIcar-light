@@ -36,12 +36,14 @@ extern "C" {
 #define CPUCLK_FREQ                                                     32000000
 #define SYSCFG_DL_ENABLE_HFXT_PLL                                           (0U)
 
-/* STEP 调度定时器：TIMG0 每 50us 进一次中断，不占用任何 STEP 引脚复用。 */
+/* STEP 调度定时器：TIMG0 每 20us 进一次中断，不占用任何 STEP 引脚复用。 */
 #define STEPPER_TIMER_INST                                                (TIMG0)
 #define STEPPER_TIMER_INST_IRQHandler                            TIMG0_IRQHandler
 #define STEPPER_TIMER_INST_INT_IRQN                              (TIMG0_INT_IRQn)
-#define STEPPER_TIMER_TICK_HZ                                           (20000U)
-#define STEPPER_TIMER_LOAD_VALUE                                        (1599U)
+#define STEPPER_TIMER_CLOCK_HZ                                       (32000000U)
+#define STEPPER_TIMER_TICK_HZ                                           (50000U)
+#define STEPPER_TIMER_LOAD_VALUE \
+    ((STEPPER_TIMER_CLOCK_HZ / STEPPER_TIMER_TICK_HZ) - 1U)
 
 #define GPIO_HFXT_PORT                                                     GPIOA
 #define GPIO_HFXIN_PIN                                             DL_GPIO_PIN_5
@@ -129,8 +131,6 @@ extern "C" {
 #define GPIO_LogUart_IOMUX_RX_FUNC                    IOMUX_PINCM22_PF_UART0_RX
 #define GPIO_LogUart_IOMUX_TX_FUNC                    IOMUX_PINCM21_PF_UART0_TX
 #define LogUart_BAUD_RATE                                            (115200)
-#define LogUart_IBRD_32_MHZ_115200_BAUD                                  (17)
-#define LogUart_FBRD_32_MHZ_115200_BAUD                                  (23)
 
 /* JY61P UART1: PB6 TX, PB7 RX。JQ8400 暂停接入后释放给姿态模块。 */
 #define JY61P_INST                                                         UART1
@@ -146,8 +146,6 @@ extern "C" {
 #define GPIO_JY61P_IOMUX_RX_FUNC                       IOMUX_PINCM24_PF_UART1_RX
 #define GPIO_JY61P_IOMUX_TX_FUNC                       IOMUX_PINCM23_PF_UART1_TX
 #define JY61P_BAUD_RATE                                                 (115200)
-#define JY61P_IBRD_32_MHZ_115200_BAUD                                       (17)
-#define JY61P_FBRD_32_MHZ_115200_BAUD                                       (23)
 
 /* Exchange UART3: PB2 TX, PB3 RX. */
 #define Exchange_INST                                                      UART3
@@ -163,8 +161,6 @@ extern "C" {
 #define GPIO_Exchange_IOMUX_RX_FUNC                    IOMUX_PINCM16_PF_UART3_RX
 #define GPIO_Exchange_IOMUX_TX_FUNC                    IOMUX_PINCM15_PF_UART3_TX
 #define Exchange_BAUD_RATE                                              (115200)
-#define Exchange_IBRD_32_MHZ_115200_BAUD                                    (17)
-#define Exchange_FBRD_32_MHZ_115200_BAUD                                    (23)
 
 /* Gray sensors: ADC0/ADC1 sequence sampling. */
 #define GRAY_ADC0_INST                                                       ADC0

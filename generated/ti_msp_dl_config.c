@@ -186,8 +186,8 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 }
 
 /*
- * 当前优先保证 J-Link 可重新接管，默认不启用 HFXT/SYSPLL。
- * 如果后续确认板上 32-48MHz 外部晶振稳定，再恢复 PLL 高速时钟。
+ * 当前优先保证实车稳定启动，默认不启用 HFXT/SYSPLL。
+ * STEP 调度继续用 50kHz tick，但由 32MHz BUSCLK 按比例重算 LOAD。
  */
 #if SYSCFG_DL_ENABLE_HFXT_PLL
 static const DL_SYSCTL_SYSPLLConfig gSYSPLLConfig = {
@@ -433,7 +433,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_OLED_init(void)
     DL_I2C_enableController(OLED_INST);
 }
 
-static const DL_UART_Main_ClockConfig gUART32MClockConfig = {
+static const DL_UART_Main_ClockConfig gUARTBusClockConfig = {
     .clockSel = DL_UART_MAIN_CLOCK_BUSCLK,
     .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
 };
@@ -450,36 +450,30 @@ static const DL_UART_Main_Config gUARTConfig = {
 SYSCONFIG_WEAK void SYSCFG_DL_LogUart_init(void)
 {
     DL_UART_Main_setClockConfig(
-        LogUart_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
+        LogUart_INST, (DL_UART_Main_ClockConfig *) &gUARTBusClockConfig);
     DL_UART_Main_init(LogUart_INST, (DL_UART_Main_Config *) &gUARTConfig);
-    DL_UART_Main_setOversampling(LogUart_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(
-        LogUart_INST, LogUart_IBRD_32_MHZ_115200_BAUD,
-        LogUart_FBRD_32_MHZ_115200_BAUD);
+    DL_UART_Main_configBaudRate(
+        LogUart_INST, LogUart_INST_FREQUENCY, LogUart_BAUD_RATE);
     DL_UART_Main_enable(LogUart_INST);
 }
 
 SYSCONFIG_WEAK void SYSCFG_DL_JY61P_init(void)
 {
     DL_UART_Main_setClockConfig(
-        JY61P_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
+        JY61P_INST, (DL_UART_Main_ClockConfig *) &gUARTBusClockConfig);
     DL_UART_Main_init(JY61P_INST, (DL_UART_Main_Config *) &gUARTConfig);
-    DL_UART_Main_setOversampling(JY61P_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(
-        JY61P_INST, JY61P_IBRD_32_MHZ_115200_BAUD,
-        JY61P_FBRD_32_MHZ_115200_BAUD);
+    DL_UART_Main_configBaudRate(
+        JY61P_INST, JY61P_INST_FREQUENCY, JY61P_BAUD_RATE);
     DL_UART_Main_enable(JY61P_INST);
 }
 
 SYSCONFIG_WEAK void SYSCFG_DL_Exchange_init(void)
 {
     DL_UART_Main_setClockConfig(
-        Exchange_INST, (DL_UART_Main_ClockConfig *) &gUART32MClockConfig);
+        Exchange_INST, (DL_UART_Main_ClockConfig *) &gUARTBusClockConfig);
     DL_UART_Main_init(Exchange_INST, (DL_UART_Main_Config *) &gUARTConfig);
-    DL_UART_Main_setOversampling(Exchange_INST, DL_UART_OVERSAMPLING_RATE_16X);
-    DL_UART_Main_setBaudRateDivisor(
-        Exchange_INST, Exchange_IBRD_32_MHZ_115200_BAUD,
-        Exchange_FBRD_32_MHZ_115200_BAUD);
+    DL_UART_Main_configBaudRate(
+        Exchange_INST, Exchange_INST_FREQUENCY, Exchange_BAUD_RATE);
     DL_UART_Main_enable(Exchange_INST);
 }
 

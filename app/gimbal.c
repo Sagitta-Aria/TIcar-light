@@ -2,6 +2,7 @@
 
 #include "board_config.h"
 #include "motor.h"
+#include "staticconfig.h"
 
 #if (CAR_GIMBAL_PITCH_STEPS_PER_90 == 0U)
 #error "CAR_GIMBAL_PITCH_STEPS_PER_90 must be greater than 0"
@@ -58,8 +59,8 @@ static uint16_t Gimbal_Abs16(int16_t value)
  * 说明：P 负责响应，D 根据相邻视觉帧的误差变化做阻尼，不累加误差。
  */
 static int16_t Gimbal_ComputeAxisCommand(int16_t error, int16_t errorDelta,
-    uint16_t deadband, uint16_t kp, uint16_t kd, uint16_t minSpeedSps,
-    uint16_t maxSpeedSps)
+    uint16_t deadband, uint16_t kp, uint16_t kd, uint16_t gainScale,
+    uint16_t minSpeedSps, uint16_t maxSpeedSps)
 {
     uint16_t absError = Gimbal_Abs16(error);
     int32_t command;
@@ -68,10 +69,13 @@ static int16_t Gimbal_ComputeAxisCommand(int16_t error, int16_t errorDelta,
     if (absError <= deadband) {
         return 0;
     }
+    if (gainScale == 0U) {
+        gainScale = 1U;
+    }
 
     command = (((int32_t)error * (int32_t)kp) +
         ((int32_t)errorDelta * (int32_t)kd)) /
-        (int32_t)CAR_GIMBAL_GAIN_SCALE;
+        (int32_t)gainScale;
 
     if (command == 0) {
         commandAbs = minSpeedSps;
@@ -185,19 +189,16 @@ static void Gimbal_UpdateError(void)
  */
 static void Gimbal_ApplyControl(void)
 {
+    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
     int16_t commandX;
     int16_t commandY;
 
     commandX = Gimbal_ComputeAxisCommand(g_gimbal.errorX,
-        g_gimbal.errorDeltaX, CAR_GIMBAL_DEADBAND_X, CAR_GIMBAL_X_KP,
-        CAR_GIMBAL_X_KD,
-        CAR_GIMBAL_X_MIN_ACTIVE_SPEED_SPS,
-        CAR_GIMBAL_X_CONTROL_SPEED_MAX_SPS);
+        g_gimbal.errorDeltaX, config->deadbandX, config->kpX, config->kdX,
+        config->gainScale, config->minSpeedX, config->maxSpeedX);
     commandY = Gimbal_ComputeAxisCommand(g_gimbal.errorY,
-        g_gimbal.errorDeltaY, CAR_GIMBAL_DEADBAND_Y, CAR_GIMBAL_Y_KP,
-        CAR_GIMBAL_Y_KD,
-        CAR_GIMBAL_Y_MIN_ACTIVE_SPEED_SPS,
-        CAR_GIMBAL_Y_CONTROL_SPEED_MAX_SPS);
+        g_gimbal.errorDeltaY, config->deadbandY, config->kpY, config->kdY,
+        config->gainScale, config->minSpeedY, config->maxSpeedY);
 
     commandX = Gimbal_ApplyReverse(commandX, CAR_GIMBAL_X_REVERSE);
     commandY = Gimbal_ApplyReverse(commandY, CAR_GIMBAL_Y_REVERSE);
@@ -318,6 +319,7 @@ void Gimbal_UpdateFromLaserError(int16_t laserMinusTargetX,
 void Gimbal_UpdateFromCameraError(int16_t targetMinusCurrentX,
     int16_t targetMinusCurrentY)
 {
+    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
     int16_t adjustedErrorX;
     int16_t adjustedErrorY;
 
@@ -327,10 +329,10 @@ void Gimbal_UpdateFromCameraError(int16_t targetMinusCurrentX,
      */
     adjustedErrorX = Gimbal_ClampInt16(
         (int32_t)targetMinusCurrentX +
-        (int32_t)CAR_GIMBAL_X_ERROR_OFFSET);
+        (int32_t)config->offsetX);
     adjustedErrorY = Gimbal_ClampInt16(
         (int32_t)targetMinusCurrentY +
-        (int32_t)CAR_GIMBAL_Y_ERROR_OFFSET);
+        (int32_t)config->offsetY);
 
     g_gimbal.target.x = 0;
     g_gimbal.target.y = 0;

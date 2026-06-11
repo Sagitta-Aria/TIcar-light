@@ -11,11 +11,14 @@
 #include "log_uart.h"
 #include "menu.h"
 #include "motor.h"
+#include "motor_no_yaw.h"
+#include "motor_track.h"
 #include "motor_enable_test.h"
 #include "oled.h"
 #include "pose_solver.h"
 #include "route.h"
 #include "state_machine.h"
+#include "staticconfig.h"
 #include "stepper_pin_test.h"
 #include "track_step_test.h"
 #include "tracking.h"
@@ -23,7 +26,7 @@
 /*
  * 作用：把两个实体按键翻译成菜单/状态机事件。
  * 使用场景：App_Task 每轮取到按键事件后调用。
- * 说明：菜单内 K1 为确认、K2 为下一个；测试页短按调 SPS，长按退出。
+ * 说明：菜单内 K1 切换、K2 确认；测试页 K2 长按退出。
  */
 static void App_HandleKeyEvent(KeyEvent event)
 {
@@ -45,8 +48,19 @@ static void App_HandleKeyEvent(KeyEvent event)
     }
 
     state = StateMachine_GetState();
-    if ((event == KEY_EVENT_1_LONG) || (event == KEY_EVENT_2_LONG)) {
+    if (event == KEY_EVENT_1_LONG) {
+        return;
+    }
+
+    if (event == KEY_EVENT_2_LONG) {
+        if (state == CAR_STATE_MENU) {
+            (void)Menu_Back();
+            return;
+        }
         if ((state == CAR_STATE_TRACKING_TEST) ||
+            (state == CAR_STATE_MOTOR_TRACK) ||
+            (state == CAR_STATE_MOTOR_NO_YAW) ||
+            (state == CAR_STATE_MOTOR_GRAY_TEST) ||
             (state == CAR_STATE_GIMBAL_MOTOR_TEST) ||
             (state == CAR_STATE_GIMBAL_TEST) ||
             (state == CAR_STATE_MOTOR_ENABLE_TEST) ||
@@ -58,18 +72,18 @@ static void App_HandleKeyEvent(KeyEvent event)
 
     if (state == CAR_STATE_MENU) {
         if (event == KEY_EVENT_1) {
-            StateMachine_Dispatch(Menu_Confirm());
-        } else if (event == KEY_EVENT_2) {
             Menu_Next();
+        } else if (event == KEY_EVENT_2) {
+            StateMachine_Dispatch(Menu_Confirm());
         }
         return;
     }
 
     if (state == CAR_STATE_GRAY_CALIBRATION) {
         if (event == KEY_EVENT_1) {
-            StateMachine_Dispatch(Menu_GrayCalibrationConfirm());
-        } else if (event == KEY_EVENT_2) {
             Menu_GrayCalibrationNext();
+        } else if (event == KEY_EVENT_2) {
+            StateMachine_Dispatch(Menu_GrayCalibrationConfirm());
         }
         return;
     }
@@ -140,8 +154,14 @@ void App_Init(void)
     LOG_LINE("app: tracking init ok");
     TrackStepTest_Init();
     LOG_LINE("app: track step test init ok");
+    MotorTrack_Init();
+    LOG_LINE("app: motor track init ok");
+    MotorNoYaw_Init();
+    LOG_LINE("app: motor no yaw init ok");
     Route_Init();
     LOG_LINE("app: route init ok");
+    StaticConfig_Init();
+    LOG_LINE("app: static config init ok");
     Gimbal_Init();
     LOG_LINE("app: gimbal init ok");
     GimbalTest_Init();

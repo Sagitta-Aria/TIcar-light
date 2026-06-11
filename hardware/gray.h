@@ -31,7 +31,7 @@ uint16_t Gray_GetRaw(GrayChannel channel);
 /* Gray_GetDigital：获取某一路最新的防抖黑白状态。 */
 uint8_t Gray_GetDigital(GrayChannel channel);
 
-/* Gray_GetDigitalMask：返回参与循迹的黑白状态 bit0~bit6，未启用通道固定为 0。 */
+/* Gray_GetDigitalMask：返回参与循迹的黑白状态，当前 bit6~bit0 对应 S1~S7。 */
 uint8_t Gray_GetDigitalMask(void);
 
 /* Gray_GetLineError：基于黑白状态返回粗略偏差，范围约为 -3~+3。 */

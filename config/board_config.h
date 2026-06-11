@@ -69,23 +69,29 @@
 /* 菜单里的底盘无限循迹测试基础速度。 */
 #define CAR_MOTOR_TEST_DEFAULT_SPEED_SPS (3000U)
 
-/* 菜单里的底盘无限循迹测试急转速度，内轮反转、外轮正转。 */
-#define CAR_MOTOR_TEST_TURN_SPEED_SPS    (1500U)
-
 /* 菜单里的云台 yaw/pitch 测试默认速度。 */
-#define CAR_GIMBAL_TEST_YAW_SPEED_SPS    (2500U)
-#define CAR_GIMBAL_TEST_PITCH_SPEED_SPS  (1500U)
+#define CAR_GIMBAL_TEST_YAW_SPEED_SPS    (250U)
+#define CAR_GIMBAL_TEST_PITCH_SPEED_SPS  (150U)
 
 /* CAR_STEPPER_PULSE_HIGH_TICKS：STEP 高电平保持几个定时器 tick。 */
 #define CAR_STEPPER_PULSE_HIGH_TICKS    (1U)
+
+/* CAR_STEPPER_RAMP_PERIOD_MS：步进输出速度斜坡更新周期。 */
+#define CAR_STEPPER_RAMP_PERIOD_MS      (1U)
+
+/* CAR_STEPPER_ACCEL_STEP_SPS：每个斜坡周期最多增加多少 SPS。 */
+#define CAR_STEPPER_ACCEL_STEP_SPS      (300U)
+
+/* CAR_STEPPER_DECEL_STEP_SPS：每个斜坡周期最多降低多少 SPS。 */
+#define CAR_STEPPER_DECEL_STEP_SPS      (300U)
 
 /*
  * CAR_CHASSIS_LEFT/RIGHT_REVERSE：底盘左右电机方向反相。
  * 说明：差速底盘两侧电机通常镜像安装，同样的“前进命令”可能需要相反 DIR 电平。
  * 如果 Track Test 两轮还是方向不对，优先改这里，不要临时改 motion/tracking 逻辑。
  */
-#define CAR_CHASSIS_LEFT_REVERSE        (1U)
-#define CAR_CHASSIS_RIGHT_REVERSE       (0U)
+#define CAR_CHASSIS_LEFT_REVERSE        (0U)
+#define CAR_CHASSIS_RIGHT_REVERSE       (1U)
 
 /*
  * CAR_STEPPER_ENABLE_ACTIVE_LOW：步进驱动器 EN 使能电平。
@@ -120,36 +126,6 @@
  */
 #define CAR_KEY_DEBUG_POLL_LOG          (0U)
 
-/* CAR_GIMBAL_X/Y_CONTROL_SPEED_MAX_SPS：视觉闭环时云台单轴最大速度。 */
-#define CAR_GIMBAL_X_CONTROL_SPEED_MAX_SPS (10000U)
-#define CAR_GIMBAL_Y_CONTROL_SPEED_MAX_SPS (10000U)
-
-/* CAR_GIMBAL_X/Y_MIN_ACTIVE_SPEED_SPS：云台超过死区后的最小微调速度。 */
-#define CAR_GIMBAL_X_MIN_ACTIVE_SPEED_SPS (100U)
-#define CAR_GIMBAL_Y_MIN_ACTIVE_SPEED_SPS (30U)
-
-/* CAR_GIMBAL_DEADBAND_X/Y：视觉误差死区，单位为 0.1 像素。 */
-#define CAR_GIMBAL_DEADBAND_X           (10U)
-#define CAR_GIMBAL_DEADBAND_Y           (10U)
-
-/*
- * CAR_GIMBAL_X/Y_ERROR_OFFSET：安装偏差补偿，单位为 0.1 像素。
- * X 正值让最终点向画面右侧偏，Y 负值让最终点向画面上方偏。
- */
-#define CAR_GIMBAL_X_ERROR_OFFSET       (0)
-#define CAR_GIMBAL_Y_ERROR_OFFSET       (75)
-
-/* CAR_GIMBAL_GAIN_SCALE：云台比例增益缩放基准。 */
-#define CAR_GIMBAL_GAIN_SCALE           (100U)
-
-/* CAR_GIMBAL_X/Y_KP：视觉误差到云台 SPS 的比例增益，误差单位为 0.1 像素。 */
-#define CAR_GIMBAL_X_KP                 (200U)
-#define CAR_GIMBAL_Y_KP                 (100U)
-
-/* CAR_GIMBAL_X/Y_KD：相邻视觉帧误差变化的阻尼增益。 */
-#define CAR_GIMBAL_X_KD                 (0U)
-#define CAR_GIMBAL_Y_KD                 (0U)
-
 /* CAR_GIMBAL_X_REVERSE/Y_REVERSE：实车方向相反时改成 1。 */
 #define CAR_GIMBAL_X_REVERSE            (1U)
 #define CAR_GIMBAL_Y_REVERSE            (0U)
@@ -157,55 +133,14 @@
 /* CAR_GIMBAL_VISION_TIMEOUT_TICKS：连续多少轮没有视觉更新就停云台。 */
 #define CAR_GIMBAL_VISION_TIMEOUT_TICKS (20U)
 
-/* CAR_GIMBAL_TEST_TARGET_X/Y：旧坐标模式默认目标点；当前差值模式不使用。 */
-#define CAR_GIMBAL_TEST_TARGET_X        (160)
-#define CAR_GIMBAL_TEST_TARGET_Y        (120)
-
-/*
- * CAR_GIMBAL_TEST_USE_CIRCLE_ERROR：视觉脚本发 "中心误差;圆点误差" 时选哪一组。
- * 1：使用圆点误差，适合墙面画圆跟踪。
- * 0：使用矩形中心误差，适合先把激光打到框中心。
- */
-#define CAR_GIMBAL_TEST_USE_CIRCLE_ERROR (0U)
-
-/* CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90：云台左右轴转 90 度需要的 STEP 数。 */
-#define CAR_GIMBAL_MOTOR_TEST_LR_STEPS_PER_90 (1200U)
-
-/* CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90：云台上下轴转 90 度需要的 STEP 数。 */
-#define CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90 (800U)
-
 /* CAR_GIMBAL_PITCH_LIMIT_DEG：视觉闭环时 pitch 相对进入位置的角度限幅。 */
 #define CAR_GIMBAL_PITCH_LIMIT_DEG      (50U)
 
 /* CAR_GIMBAL_PITCH_STEPS_PER_90：pitch 轴 90 度对应的 STEP 数，用于限幅估算。 */
-#define CAR_GIMBAL_PITCH_STEPS_PER_90   (CAR_GIMBAL_MOTOR_TEST_UD_STEPS_PER_90)
-
-/* CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS：上电记零状态保持多少轮主循环。 */
-#define CAR_GIMBAL_MOTOR_TEST_ZERO_TICKS (20U)
+#define CAR_GIMBAL_PITCH_STEPS_PER_90   (800U)
 
 /* CAR_GIMBAL_MOTOR_TEST_REVERSE：云台电机测试方向反了就改成 1。 */
 #define CAR_GIMBAL_MOTOR_TEST_REVERSE   (0U)
-
-/* CAR_GIMBAL_MOTOR_TEST_RUN_UP_DOWN：1 表示左右轴完成后继续测试上下轴。 */
-#define CAR_GIMBAL_MOTOR_TEST_RUN_UP_DOWN (1U)
-
-/* CAR_GIMBAL_MOTOR_TEST_RUN_SIM_TRACK：1 表示 90 度测试后继续跑仿真视觉跟踪。 */
-#define CAR_GIMBAL_MOTOR_TEST_RUN_SIM_TRACK (1U)
-
-/* CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE：1 表示仿真视觉跟踪后继续跑开环画圆。 */
-#define CAR_GIMBAL_MOTOR_TEST_RUN_CIRCLE (1U)
-
-/* CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS：每个仿真视觉点保持多少轮主循环。 */
-#define CAR_GIMBAL_MOTOR_TEST_SIM_HOLD_TICKS (40U)
-
-/* CAR_GIMBAL_MOTOR_TEST_CIRCLE_SPEED_SPS：开环画圆时两轴的最大速度。 */
-#define CAR_GIMBAL_MOTOR_TEST_CIRCLE_SPEED_SPS (2500U)
-
-/* CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS：画圆相位表每一格保持多少轮主循环。 */
-#define CAR_GIMBAL_MOTOR_TEST_CIRCLE_PHASE_TICKS (12U)
-
-/* CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES：画圆测试跑几圈。 */
-#define CAR_GIMBAL_MOTOR_TEST_CIRCLE_CYCLES (2U)
 
 /* 云台最小引脚测试：每段动作的 STEP 数、脉冲间隔和换向停顿。 */
 #define CAR_GIMBAL_PIN_TEST_STEPS_PER_MOVE (400U)
@@ -222,8 +157,44 @@
 /* CAR_TRACK_BASE_SPEED_SPS：基础循迹时的默认底盘速度。 */
 #define CAR_TRACK_BASE_SPEED_SPS        (900U)
 
-/* CAR_TRACK_STEP_TEST_TARGET_STEPS：Track Test 固定输出的底盘平均 STEP 数。 */
-#define CAR_TRACK_STEP_TEST_TARGET_STEPS (5000U)
+/* CAR_TRACK_STEP_TEST_TARGET_STEPS：Motor 菜单固定输出的底盘平均 STEP 数。 */
+#define CAR_TRACK_STEP_TEST_TARGET_STEPS (15670U)
+
+/* Motor Track 真循迹：直道基础速度。 */
+#define CAR_MOTOR_TRACK_FAST_SPEED_SPS   (3000U)
+
+/* Motor Track 真循迹：减速、转向、出弯慢行速度。 */
+#define CAR_MOTOR_TRACK_SLOW_SPEED_SPS   (2000U)
+
+/* Motor Track 真循迹：每段达到多少平均 STEP 后开始减速准备右转。 */
+#define CAR_MOTOR_TRACK_DECEL_STEPS      (14000U)
+
+/* Motor Track 真循迹：确认右转完成所需 yaw 变化幅度。 */
+#define CAR_MOTOR_TRACK_TURN_YAW_DEG     (70)
+
+/* Motor Track 真循迹：右转 yaw 判定超时时间，超时停车。 */
+#define CAR_MOTOR_TRACK_TURN_TIMEOUT_MS  (2000U)
+
+/* Motor Track 真循迹：yaw 达标后继续低速前进多久，再恢复高速并重新计 STEP。 */
+#define CAR_MOTOR_TRACK_EXIT_SLOW_MS     (200U)
+
+/* Motor Track 真循迹：右转灰度触发 mask，当前用右侧 S1/S2/S3。 */
+#define CAR_MOTOR_TRACK_RIGHT_TURN_MASK  (0x70U)
+
+/* Motor NO YAW：直线循迹基础速度。 */
+#define CAR_MOTOR_NO_YAW_BASE_SPEED_SPS  (3000U)
+
+/* Motor NO YAW：原地强转速度，一侧正转一侧反转。 */
+#define CAR_MOTOR_NO_YAW_TURN_SPEED_SPS  (2000U)
+
+/* Motor NO YAW：每段灰度循迹达到多少平均 STEP 后自动右转。 */
+#define CAR_MOTOR_NO_YAW_OPEN_LOOP_STEPS (14500U)
+
+/* Motor NO YAW：原地右转保持多久后直接恢复灰度循迹。 */
+#define CAR_MOTOR_NO_YAW_TURN_HOLD_MS    (50U)
+
+/* Motor NO YAW：连续丢线多久才停车。 */
+#define CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS (1000U)
 
 /* CAR_TRACK_TURN_GAIN：根据循迹误差计算转向修正的增益。 */
 #define CAR_TRACK_TURN_GAIN             (220)
@@ -263,16 +234,8 @@
     ((CAR_MENU_REFRESH_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
         CAR_APP_LOOP_DELAY_MS)
 
-/* CAR_MENU_LINK_PRINT_MS：监视页面通过串口打印数据的周期。 */
-#define CAR_MENU_LINK_PRINT_MS          (200U)
-
-/* CAR_MENU_LINK_PRINT_TICKS：把串口打印周期换算成 App_Task 调度次数。 */
-#define CAR_MENU_LINK_PRINT_TICKS \
-    ((CAR_MENU_LINK_PRINT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
-        CAR_APP_LOOP_DELAY_MS)
-
 /* CAR_ROUTE_EDGE_STEPS：单边直线路程的 STEP 相对计数，后续按实车标定。 */
-#define CAR_ROUTE_EDGE_STEPS            (2400U)
+#define CAR_ROUTE_EDGE_STEPS            (14500U)
 
 /* CAR_ROUTE_APPROACH_STEPS：开始提前降速的 STEP 路程阈值。 */
 #define CAR_ROUTE_APPROACH_STEPS        (1800U)
@@ -287,16 +250,16 @@
 #define CAR_ROUTE_CRUISE_SPEED_SPS      (1000U)
 
 /* CAR_ROUTE_APPROACH_SPEED_SPS：接近直角前的降速速度。 */
-#define CAR_ROUTE_APPROACH_SPEED_SPS    (820U)
+#define CAR_ROUTE_APPROACH_SPEED_SPS    (600U)
 
 /* CAR_ROUTE_TURN_SPEED_SPS：直角转弯时的低速速度。 */
-#define CAR_ROUTE_TURN_SPEED_SPS        (650U)
+#define CAR_ROUTE_TURN_SPEED_SPS        (400U)
 
 /* CAR_ROUTE_EXIT_SPEED_SPS：出弯恢复阶段的速度。 */
-#define CAR_ROUTE_EXIT_SPEED_SPS        (900U)
+#define CAR_ROUTE_EXIT_SPEED_SPS        (600U)
 
 /* CAR_ROUTE_CRUISE_TURN_LIMIT：直道时允许的最大转向修正。 */
-#define CAR_ROUTE_CRUISE_TURN_LIMIT     (1200U)
+#define CAR_ROUTE_CRUISE_TURN_LIMIT     (800U)
 
 /* CAR_ROUTE_APPROACH_TURN_LIMIT：接近拐角时允许的最大转向修正。 */
 #define CAR_ROUTE_APPROACH_TURN_LIMIT   (900U)
@@ -325,10 +288,10 @@
 
 /*
  * GRAY_DIGITAL_ACTIVE_HIGH：数字灰度输入的有效电平。
- * 1：GPIO 高电平表示压到黑线。
- * 0：GPIO 低电平表示压到黑线。当前按“灯灭为黑、灯亮为白”的常见接法先用 0。
+ * 1：GPIO 高电平表示压到黑线/灯灭。
+ * 0：GPIO 低电平表示压到黑线/灯灭。
  */
-#define GRAY_DIGITAL_ACTIVE_HIGH       (0U)
+#define GRAY_DIGITAL_ACTIVE_HIGH       (1U)
 
 /*
  * GRAY_DIGITAL_INPUT_PULL_UP：数字灰度输入是否打开内部弱上拉。
@@ -341,9 +304,9 @@
 
 /*
  * CAR_GRAY_TRACK_SENSOR_MASK：参与循迹的灰度通道 bitmask。
- * bit0~bit6 对应 S1~S7；当前只看中间 S2~S6，忽略 S1/S7。
+ * bit6~bit0 对应 S1~S7；当前 7 路都参与，便于用 S1~S3/S5~S7 判断侧边全灭。
  */
-#define CAR_GRAY_TRACK_SENSOR_MASK      (0x3EU)
+#define CAR_GRAY_TRACK_SENSOR_MASK      (0x7FU)
 
 /* GRAY_ACTIVE_HIGH：模拟 ADC 模式下，1 表示 ADC 越大越像压线，0 表示相反。 */
 #define GRAY_ACTIVE_HIGH                (1U)
@@ -361,7 +324,7 @@
 #define GRAY_FILTER_SAMPLE_COUNT        (5U)
 
 /* GRAY_DIGITAL_CONFIRM_COUNT：黑白状态变化前需要连续确认几次。 */
-#define GRAY_DIGITAL_CONFIRM_COUNT      (2U)
+#define GRAY_DIGITAL_CONFIRM_COUNT      (1U)
 
 /* GRAY_LINE_ERROR_SCALE：加权误差缩放因子，便于后续调参。 */
 #define GRAY_LINE_ERROR_SCALE           (100)

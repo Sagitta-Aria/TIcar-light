@@ -12,18 +12,18 @@
 | --- | --- |
 | `hardware/motor.c/h` | 电机逻辑接口：设置方向、速度命令、停车、读取当前命令 |
 | `hardware/stepper_pulse.c/h` | STEP 脉冲调度：把速度命令换算成 Hz，在 TIMG0 ISR 中翻转 STEP |
-| `generated/ti_msp_dl_config.c/h` | 配置 TIMG0 为 50us 周期定时器 |
+| `generated/ti_msp_dl_config.c/h` | 配置 TIMG0 为 20us 周期定时器 |
 | `system/interrupt.c` | `TIMG0_IRQHandler()` 分发到 `StepperPulse_HandleTimerInterrupt()` |
 
 ## 定时器参数
 
 - 定时器：`TIMG0`
-- 周期：50us
-- 中断频率：20kHz
-- STEP 高电平：1 个 tick，约 50us
-- 当前换算：`4000` 命令约等于 `400 step/s`
+- 周期：20us
+- 中断频率：50kHz
+- STEP 高电平：1 个 tick，约 20us
+- 当前换算：速度命令直接使用 SPS，`4000` 表示 `4000 step/s`
 
-这组参数偏保守，目的是先保证实车接线、方向和闭环步进驱动器响应稳定。后续确认驱动器脉冲输入能力后，可以逐步提高命令到 Hz 的换算比例。
+当前默认仍使用内部 `SYSOSC 32MHz`，TIMG0 的 `LOAD` 按 32MHz/50kHz 计算为 639。后续如需更高主频，必须先确认 HFXT/SYSPLL 能稳定锁定。
 
 ## 硬件现象
 

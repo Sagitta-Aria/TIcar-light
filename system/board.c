@@ -464,6 +464,14 @@ void Board_Init(void)
     SYSCFG_DL_LogUart_init();
     LogUart_Init();
     LOG_LINE("board uart: log/jy61p/exchange ok");
+    LOG_U32("clock mclk hz=", CPUCLK_FREQ);
+    LOG_U32("clock bus hz=", LogUart_INST_FREQUENCY);
+    LOG_U32("step timer clk hz=", STEPPER_TIMER_CLOCK_HZ);
+    LOG_U32("step tick hz=", STEPPER_TIMER_TICK_HZ);
+    LOG_U32("step load=", STEPPER_TIMER_LOAD_VALUE);
+    LOG_U32("step ramp ms=", CAR_STEPPER_RAMP_PERIOD_MS);
+    LOG_U32("step accel sps/ramp=", CAR_STEPPER_ACCEL_STEP_SPS);
+    LOG_U32("step decel sps/ramp=", CAR_STEPPER_DECEL_STEP_SPS);
 #endif
 #if CAR_ENABLE_LOG_UART
 #if CAR_GRAY_INPUT_DIGITAL

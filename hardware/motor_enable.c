@@ -72,6 +72,12 @@ void MotorEnable_SetAll(uint8_t enabled)
     }
 }
 
+void MotorEnable_SetChassis(uint8_t enabled)
+{
+    MotorEnable_Write(&g_motorEnablePins[MOTOR_ENABLE_CHASSIS_LEFT], enabled);
+    MotorEnable_Write(&g_motorEnablePins[MOTOR_ENABLE_CHASSIS_RIGHT], enabled);
+}
+
 void MotorEnable_SetGimbal(uint8_t enabled)
 {
     MotorEnable_Write(&g_motorEnablePins[MOTOR_ENABLE_GIMBAL_1], enabled);

@@ -16,9 +16,9 @@
 #define KEY_EVENT_MASK_2_LONG    (0x08U)
 
 static volatile uint8_t g_keyEventMask;
-static uint16_t g_keyPressedTicks[KEY_ID_COUNT];
-static uint8_t g_keyLongReported[KEY_ID_COUNT];
-static uint8_t g_keyWasPressed[KEY_ID_COUNT];
+static volatile uint16_t g_keyPressedTicks[KEY_ID_COUNT];
+static volatile uint8_t g_keyLongReported[KEY_ID_COUNT];
+static volatile uint8_t g_keyWasPressed[KEY_ID_COUNT];
 static uint8_t g_keyLastLevelHigh[KEY_ID_COUNT];
 static uint16_t g_keyDebugTicks;
 
@@ -69,6 +69,20 @@ static uint8_t Key_LevelToPressed(uint8_t levelHigh)
 #else
     return levelHigh;
 #endif
+}
+
+/*
+ * 作用：在按键释放中断里锁存短按。
+ * 说明：KEY 输入当前配置为低有效、上升沿中断；这样很快的短按也不完全依赖主循环采样。
+ */
+static void Key_HandleReleaseEdge(KeyId key)
+{
+    if (g_keyLongReported[key] == 0U) {
+        g_keyEventMask |= Key_EventMaskFromId(key);
+    }
+    g_keyPressedTicks[key] = 0U;
+    g_keyLongReported[key] = 0U;
+    g_keyWasPressed[key] = 0U;
 }
 
 /* 作用：打印 PB9/PB8 原始电平和按下判断，用来定位按键误触发。 */
@@ -169,7 +183,7 @@ void Key_Task(void)
      * 按键事件统一在主循环里轮询生成：
      * - 短按：松手时上报，避免长按退出前先触发一次加减。
      * - 长按：达到阈值立刻上报一次，随后等松手复位。
-     * GPIO 中断只负责唤醒/清标志，不参与业务判定。
+     * GPIO 上升沿中断也会锁存短按，避免极快点按被主循环采样漏掉。
      */
     for (i = 0U; i < (uint8_t)KEY_ID_COUNT; ++i) {
         if (Key_IsPressed((KeyId)i) != 0U) {
@@ -239,10 +253,10 @@ void Key_HandleGPIOInterrupt(void)
         pending = DL_GPIO_getPendingInterrupt(PIN_KEY_PORT);
         switch (pending) {
         case KEY_1_IIDX:
-            /* 事件由 Key_Task 轮询生成，这里只消费中断标志。 */
+            Key_HandleReleaseEdge(KEY_ID_1);
             break;
         case KEY_2_IIDX:
-            /* 事件由 Key_Task 轮询生成，这里只消费中断标志。 */
+            Key_HandleReleaseEdge(KEY_ID_2);
             break;
         default:
             break;

@@ -50,9 +50,9 @@ static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
 };
 #endif
 
-/* g_grayWeight：线路位置权重，负数表示偏左，正数表示偏右。 */
+/* g_grayWeight：线路位置权重，S1~S3 在车体右侧，正数表示偏右。 */
 static const int16_t g_grayWeight[GRAY_SENSOR_COUNT] = {
-    -3, -2, -1, 0, 1, 2, 3
+    3, 2, 1, 0, -1, -2, -3
 };
 
 /* g_grayRaw：最新原始采样值；数字模式下只会是 0 或 4095。 */
@@ -77,7 +77,7 @@ static uint8_t g_grayCandidate[GRAY_SENSOR_COUNT];
 /* g_grayConfirmCount：候选状态连续出现的次数。 */
 static uint8_t g_grayConfirmCount[GRAY_SENSOR_COUNT];
 
-/* g_grayMask：把黑白结果压缩成 bit0~bit6。 */
+/* g_grayMask：把黑白结果压缩成 bit6~bit0，对应 S1~S7。 */
 static uint8_t g_grayMask;
 
 /* g_grayValid：上一轮灰度更新是否成功。 */
@@ -91,10 +91,16 @@ static uint8_t Gray_IsValidChannel(GrayChannel channel)
     return ((uint32_t)channel < GRAY_SENSOR_COUNT) ? 1U : 0U;
 }
 
+/* 作用：把 S1~S7 的数组序号映射成 bit6~bit0，保证右侧 S1~S3 是高位。 */
+static uint8_t Gray_BitForIndex(uint32_t index)
+{
+    return (uint8_t)(1U << ((GRAY_SENSOR_COUNT - 1U) - index));
+}
+
 /* 作用：判断某一路灰度是否参与循迹计算。 */
 static uint8_t Gray_IsTrackSensorEnabled(uint32_t index)
 {
-    return ((CAR_GRAY_TRACK_SENSOR_MASK & (uint8_t)(1U << index)) != 0U) ?
+    return ((CAR_GRAY_TRACK_SENSOR_MASK & Gray_BitForIndex(index)) != 0U) ?
         1U : 0U;
 }
 
@@ -265,7 +271,7 @@ static void Gray_RebuildMask(void)
     g_grayMask = 0U;
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
         if ((Gray_IsTrackSensorEnabled(i) != 0U) && g_grayDigital[i]) {
-            g_grayMask |= (uint8_t)(1U << i);
+            g_grayMask |= Gray_BitForIndex(i);
         }
     }
 }
@@ -310,6 +316,9 @@ static void Gray_UpdateDigitalFromRaw(void)
         } else {
             g_grayCandidate[i] = sampleDigital;
             g_grayConfirmCount[i] = 1U;
+            if (g_grayConfirmCount[i] >= GRAY_DIGITAL_CONFIRM_COUNT) {
+                g_grayDigital[i] = sampleDigital;
+            }
         }
     }
 

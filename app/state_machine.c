@@ -5,6 +5,8 @@
 #include "gray.h"
 #include "log_uart.h"
 #include "motion.h"
+#include "motor_no_yaw.h"
+#include "motor_track.h"
 #include "motor_enable_test.h"
 #include "route.h"
 #include "track_step_test.h"
@@ -37,6 +39,12 @@ static const char *StateMachine_GetEventName(CarEvent event)
         return "gray_calibration_apply";
     case CAR_EVENT_TRACKING_TEST_START:
         return "tracking_test_start";
+    case CAR_EVENT_MOTOR_TRACK_START:
+        return "motor_track_start";
+    case CAR_EVENT_MOTOR_NO_YAW_START:
+        return "motor_no_yaw_start";
+    case CAR_EVENT_MOTOR_GRAY_TEST_START:
+        return "motor_gray_test_start";
     case CAR_EVENT_GIMBAL_TEST_START:
         return "gimbal_test_start";
     case CAR_EVENT_GIMBAL_MOTOR_TEST_START:
@@ -91,6 +99,8 @@ static void StateMachine_StopMotionModules(void)
 {
     Tracking_SetEnabled(0U);
     TrackStepTest_Stop();
+    MotorTrack_Stop();
+    MotorNoYaw_Stop();
     GimbalTest_Stop();
     GimbalMotorTest_Stop();
     MotorEnableTest_Stop();
@@ -143,9 +153,9 @@ static void StateMachine_EnterTracking(void)
 }
 
 /*
- * 作用：进入单纯循迹测试状态。
- * 使用场景：菜单里的 Track Test。
- * 说明：不启动路线外环，只用灰度传感器做无限循迹和急转动作测试。
+ * 作用：进入底盘固定脉冲测试状态。
+ * 使用场景：菜单里的 Motor。
+ * 说明：当前没有灰度传感器，只让底盘前进到目标 STEP 后停车。
  */
 static void StateMachine_EnterTrackingTest(void)
 {
@@ -153,7 +163,48 @@ static void StateMachine_EnterTrackingTest(void)
     TrackingException_Reset();
     Tracking_SetEnabled(0U);
     TrackStepTest_Start();
-    LOG_LINE("state: tracking test");
+    LOG_LINE("state: motor step test");
+}
+
+/*
+ * 作用：进入 Motor 菜单真循迹状态。
+ * 使用场景：Motor / Track Run 子页。
+ */
+static void StateMachine_EnterMotorTrack(void)
+{
+    Route_Stop();
+    TrackingException_Reset();
+    Tracking_SetEnabled(0U);
+    TrackStepTest_Stop();
+    MotorNoYaw_Stop();
+    MotorTrack_Start();
+    LOG_LINE("state: motor track");
+}
+
+/*
+ * 作用：进入 Motor 菜单 NO YAW 状态。
+ * 使用场景：没有姿态传感器时，只靠灰度侧边触发原地转向。
+ */
+static void StateMachine_EnterMotorNoYaw(void)
+{
+    Route_Stop();
+    TrackingException_Reset();
+    Tracking_SetEnabled(0U);
+    TrackStepTest_Stop();
+    MotorTrack_Stop();
+    MotorNoYaw_Start();
+    LOG_LINE("state: motor no yaw");
+}
+
+/*
+ * 作用：进入 Motor 菜单灰度 mask 测试状态。
+ * 使用场景：单独遮挡 S1~S7，观察灭灯后对应的 bit/mask 值。
+ */
+static void StateMachine_EnterMotorGrayTest(void)
+{
+    StateMachine_StopMotionModules();
+    (void)Gray_Update();
+    LOG_LINE("state: motor gray test");
 }
 
 /*
@@ -269,6 +320,15 @@ static void StateMachine_Enter(CarState nextState)
     case CAR_STATE_TRACKING_TEST:
         StateMachine_EnterTrackingTest();
         break;
+    case CAR_STATE_MOTOR_TRACK:
+        StateMachine_EnterMotorTrack();
+        break;
+    case CAR_STATE_MOTOR_NO_YAW:
+        StateMachine_EnterMotorNoYaw();
+        break;
+    case CAR_STATE_MOTOR_GRAY_TEST:
+        StateMachine_EnterMotorGrayTest();
+        break;
     case CAR_STATE_GIMBAL_TEST:
         StateMachine_EnterGimbalTest();
         break;
@@ -335,10 +395,32 @@ static void StateMachine_TrackingTask(void)
     StateMachine_CheckTrackingException();
 }
 
-/* 作用：Track Test 无限循迹周期任务，不启动路线外环。 */
+/* 作用：Motor 固定脉冲测试周期任务，不启动路线外环。 */
 static void StateMachine_TrackingTestTask(void)
 {
     TrackStepTest_Task();
+    if (TrackStepTest_IsDone() != 0U) {
+        LOG_LINE("state: motor step done back menu");
+        StateMachine_Enter(CAR_STATE_MENU);
+    }
+}
+
+/* 作用：Motor 真循迹周期任务，红外循迹 + yaw 右转确认。 */
+static void StateMachine_MotorTrackTask(void)
+{
+    MotorTrack_Task();
+}
+
+/* 作用：Motor NO YAW 周期任务，只用灰度循迹和侧边触发转向。 */
+static void StateMachine_MotorNoYawTask(void)
+{
+    MotorNoYaw_Task();
+}
+
+/* 作用：Motor 灰度测试周期采样，只刷新 mask，不输出任何运动命令。 */
+static void StateMachine_MotorGrayTestTask(void)
+{
+    (void)Gray_Update();
 }
 
 /* 作用：视觉云台测试周期任务，解析 Link 数据并更新云台目标。 */
@@ -434,6 +516,12 @@ void StateMachine_Dispatch(CarEvent event)
             StateMachine_Enter(CAR_STATE_GRAY_CALIBRATION);
         } else if (event == CAR_EVENT_TRACKING_TEST_START) {
             StateMachine_Enter(CAR_STATE_TRACKING_TEST);
+        } else if (event == CAR_EVENT_MOTOR_TRACK_START) {
+            StateMachine_Enter(CAR_STATE_MOTOR_TRACK);
+        } else if (event == CAR_EVENT_MOTOR_NO_YAW_START) {
+            StateMachine_Enter(CAR_STATE_MOTOR_NO_YAW);
+        } else if (event == CAR_EVENT_MOTOR_GRAY_TEST_START) {
+            StateMachine_Enter(CAR_STATE_MOTOR_GRAY_TEST);
         } else if (event == CAR_EVENT_GIMBAL_TEST_START) {
             StateMachine_Enter(CAR_STATE_GIMBAL_TEST);
         } else if (event == CAR_EVENT_GIMBAL_MOTOR_TEST_START) {
@@ -458,6 +546,9 @@ void StateMachine_Dispatch(CarEvent event)
 
     case CAR_STATE_TRACKING:
     case CAR_STATE_TRACKING_TEST:
+    case CAR_STATE_MOTOR_TRACK:
+    case CAR_STATE_MOTOR_NO_YAW:
+    case CAR_STATE_MOTOR_GRAY_TEST:
     case CAR_STATE_GIMBAL_TEST:
     case CAR_STATE_GIMBAL_MOTOR_TEST:
     case CAR_STATE_MOTOR_ENABLE_TEST:
@@ -517,6 +608,15 @@ void StateMachine_Task(void)
     case CAR_STATE_TRACKING_TEST:
         StateMachine_TrackingTestTask();
         break;
+    case CAR_STATE_MOTOR_TRACK:
+        StateMachine_MotorTrackTask();
+        break;
+    case CAR_STATE_MOTOR_NO_YAW:
+        StateMachine_MotorNoYawTask();
+        break;
+    case CAR_STATE_MOTOR_GRAY_TEST:
+        StateMachine_MotorGrayTestTask();
+        break;
     case CAR_STATE_GIMBAL_TEST:
         StateMachine_GimbalTestTask();
         break;
@@ -566,6 +666,12 @@ const char *StateMachine_GetStateName(CarState state)
         return "tracking";
     case CAR_STATE_TRACKING_TEST:
         return "tracking_test";
+    case CAR_STATE_MOTOR_TRACK:
+        return "motor_track";
+    case CAR_STATE_MOTOR_NO_YAW:
+        return "motor_no_yaw";
+    case CAR_STATE_MOTOR_GRAY_TEST:
+        return "motor_gray_test";
     case CAR_STATE_GIMBAL_TEST:
         return "gimbal_test";
     case CAR_STATE_GIMBAL_MOTOR_TEST:

@@ -5,6 +5,7 @@
 #include "link.h"
 #include "log_uart.h"
 #include "motor_enable.h"
+#include "staticconfig.h"
 
 #define GIMBAL_TEST_LINE_SIZE        (64U)
 #define GIMBAL_TEST_MAX_VALUES       (4U)
@@ -183,10 +184,11 @@ static uint8_t GimbalTest_ParseValues(const char *line,
 static void GimbalTest_ApplyValues(const char *line, const int16_t *values,
     uint8_t count)
 {
+    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
     uint8_t valueIndex = 0U;
 
     if (count >= 2U) {
-        if (CAR_GIMBAL_TEST_USE_CIRCLE_ERROR != 0U) {
+        if (config->useCircleError != 0U) {
             if (count < 4U) {
                 ++g_gimbalTest.badFrameCount;
                 if ((g_gimbalTest.badFrameCount <= 5U) ||
@@ -256,6 +258,38 @@ static void GimbalTest_LogStatus(const char *tag)
     LOG_LINE("");
 }
 
+/* 作用：启动视觉测试时打印当前 active 云台参数，避免调试时选错模式。 */
+static void GimbalTest_LogActiveConfig(void)
+{
+    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
+
+    LOG_RAW("[GIMBAL CFG] ");
+    LOG_RAW(config->name);
+    LOG_RAW(" circle=");
+    LogUart_SendUnsigned(config->useCircleError);
+    LOG_RAW(" kp=");
+    LogUart_SendUnsigned(config->kpX);
+    LOG_RAW("/");
+    LogUart_SendUnsigned(config->kpY);
+    LOG_RAW(" kd=");
+    LogUart_SendUnsigned(config->kdX);
+    LOG_RAW("/");
+    LogUart_SendUnsigned(config->kdY);
+    LOG_RAW(" db=");
+    LogUart_SendUnsigned(config->deadbandX);
+    LOG_RAW("/");
+    LogUart_SendUnsigned(config->deadbandY);
+    LOG_RAW(" min=");
+    LogUart_SendUnsigned(config->minSpeedX);
+    LOG_RAW("/");
+    LogUart_SendUnsigned(config->minSpeedY);
+    LOG_RAW(" offset=");
+    LogUart_SendSigned(config->offsetX);
+    LOG_RAW("/");
+    LogUart_SendSigned(config->offsetY);
+    LOG_LINE("");
+}
+
 void GimbalTest_Init(void)
 {
     g_gimbalTest.running = 0U;
@@ -275,6 +309,7 @@ void GimbalTest_Init(void)
 void GimbalTest_Start(void)
 {
     LOG_LINE("[GIMBAL LINK] start clear rx");
+    GimbalTest_LogActiveConfig();
     Link_ClearRx();
     g_gimbalTest.running = 1U;
     g_gimbalTest.hasVision = 0U;
