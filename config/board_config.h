@@ -178,23 +178,50 @@
 /* Motor Track 真循迹：yaw 达标后继续低速前进多久，再恢复高速并重新计 STEP。 */
 #define CAR_MOTOR_TRACK_EXIT_SLOW_MS     (200U)
 
-/* Motor Track 真循迹：右转灰度触发 mask，当前用右侧 S1/S2/S3。 */
-#define CAR_MOTOR_TRACK_RIGHT_TURN_MASK  (0x70U)
+/* Motor Track 真循迹：右转灰度触发 mask；当前实车左右反接，右侧对应低三位。 */
+#define CAR_MOTOR_TRACK_RIGHT_TURN_MASK  (0x07U)
 
 /* Motor NO YAW：直线循迹基础速度。 */
-#define CAR_MOTOR_NO_YAW_BASE_SPEED_SPS  (3000U)
+#define CAR_MOTOR_NO_YAW_BASE_SPEED_SPS  (2500U)
 
-/* Motor NO YAW：原地强转速度，一侧正转一侧反转。 */
-#define CAR_MOTOR_NO_YAW_TURN_SPEED_SPS  (2000U)
+/* Motor NO YAW：普通循迹最低轮速，正常巡线时不让任何一边停死。 */
+#define CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_SPS (200U)
 
-/* Motor NO YAW：每段灰度循迹达到多少平均 STEP 后自动右转。 */
-#define CAR_MOTOR_NO_YAW_OPEN_LOOP_STEPS (14500U)
+/* Motor NO YAW：普通循迹的小误差死区，降低轻微偏线时的来回摆动。 */
+#define CAR_MOTOR_NO_YAW_LINE_DEADBAND    (30)
 
-/* Motor NO YAW：原地右转保持多久后直接恢复灰度循迹。 */
-#define CAR_MOTOR_NO_YAW_TURN_HOLD_MS    (50U)
+/* Motor NO YAW：普通循迹差速增益，独立于带 yaw 的 Track 模式。 */
+#define CAR_MOTOR_NO_YAW_TURN_GAIN        (200)
+
+/* Motor NO YAW：普通循迹最大差速修正，避免正常循迹变成停车强转。 */
+#define CAR_MOTOR_NO_YAW_TURN_LIMIT_SPS   (1800U)
+
+/* Motor NO YAW：右直角强转速度，左轮用该速度，右轮 0。 */
+#define CAR_MOTOR_NO_YAW_TURN_SPEED_SPS  (2500U)
+
+/* Motor NO YAW：丢线后默认向灰度高位侧搜线的外轮速度。 */
+#define CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_SPS (800U)
+
+/* Motor NO YAW：S1/S2 在时间窗口内都灭灯/有效，就判定右直角。 */
+#define CAR_MOTOR_NO_YAW_RIGHT_TURN_TRIGGER_MASK (0x60U)
+
+/* Motor NO YAW：S1/S2 右直角触发时间窗口。 */
+#define CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS (100U)
+
+/* Motor NO YAW：低三位 S5/S6/S7 同时灭灯/有效就强制左转，bit2~bit0。 */
+#define CAR_MOTOR_NO_YAW_LEFT_TURN_TRIGGER_MASK  (0x07U)
+
+/* Motor NO YAW：直角触发后继续前进多久再强转。 */
+#define CAR_MOTOR_NO_YAW_TURN_APPROACH_MS (10U)
+
+/* Motor NO YAW：强转最长等待 S2 的时间；只作兜底保护。 */
+#define CAR_MOTOR_NO_YAW_TURN_HOLD_MS    (1000U)
 
 /* Motor NO YAW：连续丢线多久才停车。 */
 #define CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS (1000U)
+
+/* JY61P 姿态串口日志：每多少轮 App_Task 打印一次到 Type-C 日志串口。 */
+#define CAR_JY61P_LOG_TICKS           (50U)
 
 /* CAR_TRACK_TURN_GAIN：根据循迹误差计算转向修正的增益。 */
 #define CAR_TRACK_TURN_GAIN             (220)
@@ -224,7 +251,7 @@
 #define CAR_TRACK_LOST_STOP             (1U)
 
 /* CAR_APP_LOOP_DELAY_MS：主循环延时，避免空转过快。 */
-#define CAR_APP_LOOP_DELAY_MS           (10U)
+#define CAR_APP_LOOP_DELAY_MS           (1U)
 
 /* CAR_MENU_REFRESH_MS：菜单和监视页面的 OLED 刷新周期。 */
 #define CAR_MENU_REFRESH_MS             (100U)
@@ -271,7 +298,7 @@
 #define CAR_ROUTE_TURN_TOLERANCE_DEG    (8)
 
 /* CAR_ROUTE_TURN_IS_LEFT：1 表示默认左转，0 表示默认右转。 */
-#define CAR_ROUTE_TURN_IS_LEFT          (1U)
+#define CAR_ROUTE_TURN_IS_LEFT          (0U)
 
 /* CAR_ROUTE_PROFILE_STEP：路线层每次向目标速度平滑靠近的步进。 */
 #define CAR_ROUTE_PROFILE_STEP          (20U)
@@ -321,7 +348,7 @@
 #define GRAY_ADC_TIMEOUT_COUNT          (100000U)
 
 /* GRAY_FILTER_SAMPLE_COUNT：每次 Gray_Update 做几次采样平均。 */
-#define GRAY_FILTER_SAMPLE_COUNT        (5U)
+#define GRAY_FILTER_SAMPLE_COUNT        (1U)
 
 /* GRAY_DIGITAL_CONFIRM_COUNT：黑白状态变化前需要连续确认几次。 */
 #define GRAY_DIGITAL_CONFIRM_COUNT      (1U)

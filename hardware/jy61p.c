@@ -1,5 +1,7 @@
 #include "jy61p.h"
 
+#include "board_config.h"
+#include "log_uart.h"
 #include "ti_msp_dl_config.h"
 
 /* JY61P 一帧固定 11 字节，角度帧类型为 0x53。 */
@@ -154,6 +156,28 @@ void JY61P_Init(void)
 
 void JY61P_Task(void)
 {
+    static uint16_t logTicks;
+    int16_t rollDeg = 0;
+    int16_t pitchDeg = 0;
+    int16_t yawDeg = 0;
+    uint8_t anglesValid;
+
+    ++logTicks;
+    if (logTicks < CAR_JY61P_LOG_TICKS) {
+        return;
+    }
+    logTicks = 0U;
+
+    anglesValid = JY61P_GetAnglesDeg(&rollDeg, &pitchDeg, &yawDeg);
+    LOG_RAW("[JY61P] valid=");
+    LogUart_SendUnsigned(anglesValid);
+    LOG_RAW(" roll=");
+    LogUart_SendSigned(rollDeg);
+    LOG_RAW(" pitch=");
+    LogUart_SendSigned(pitchDeg);
+    LOG_RAW(" yaw=");
+    LogUart_SendSigned(yawDeg);
+    LOG_LINE("");
 }
 
 void JY61P_HandleUARTInterrupt(void)

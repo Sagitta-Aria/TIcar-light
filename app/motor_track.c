@@ -316,7 +316,6 @@ void MotorTrack_Start(void)
     g_motorTrack.running = 1U;
     g_motorTrack.state = MOTOR_TRACK_STATE_LINE_FAST;
     MotorEnable_SetChassis(1U);
-    LOG_LINE("[MOTOR TRACK] start");
 }
 
 void MotorTrack_Stop(void)

@@ -50,9 +50,9 @@ static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
 };
 #endif
 
-/* g_grayWeight：线路位置权重，S1~S3 在车体右侧，正数表示偏右。 */
+/* g_grayWeight：线路位置权重，当前实车左右反接，S5~S7 在车体右侧。 */
 static const int16_t g_grayWeight[GRAY_SENSOR_COUNT] = {
-    3, 2, 1, 0, -1, -2, -3
+    -3, -2, -1, 0, 1, 2, 3
 };
 
 /* g_grayRaw：最新原始采样值；数字模式下只会是 0 或 4095。 */
@@ -91,7 +91,7 @@ static uint8_t Gray_IsValidChannel(GrayChannel channel)
     return ((uint32_t)channel < GRAY_SENSOR_COUNT) ? 1U : 0U;
 }
 
-/* 作用：把 S1~S7 的数组序号映射成 bit6~bit0，保证右侧 S1~S3 是高位。 */
+/* 作用：把 S1~S7 的数组序号映射成 bit6~bit0。 */
 static uint8_t Gray_BitForIndex(uint32_t index)
 {
     return (uint8_t)(1U << ((GRAY_SENSOR_COUNT - 1U) - index));
@@ -439,6 +439,41 @@ uint8_t Gray_GetDigitalMask(void)
     return g_grayMask;
 }
 
+uint8_t Gray_ReadDigitalMaskFast(void)
+{
+#if CAR_GRAY_INPUT_DIGITAL
+    uint8_t mask = 0U;
+    uint32_t pins = DL_GPIO_readPins(PIN_GRAY_DIGITAL_PORT,
+        PIN_GRAY_1 | PIN_GRAY_2 | PIN_GRAY_3 | PIN_GRAY_4 |
+        PIN_GRAY_5 | PIN_GRAY_6 | PIN_GRAY_7);
+
+#if GRAY_DIGITAL_ACTIVE_HIGH
+    if ((pins & PIN_GRAY_1) != 0U) { mask |= 0x40U; }
+    if ((pins & PIN_GRAY_2) != 0U) { mask |= 0x20U; }
+    if ((pins & PIN_GRAY_3) != 0U) { mask |= 0x10U; }
+    if ((pins & PIN_GRAY_4) != 0U) { mask |= 0x08U; }
+    if ((pins & PIN_GRAY_5) != 0U) { mask |= 0x04U; }
+    if ((pins & PIN_GRAY_6) != 0U) { mask |= 0x02U; }
+    if ((pins & PIN_GRAY_7) != 0U) { mask |= 0x01U; }
+#else
+    if ((pins & PIN_GRAY_1) == 0U) { mask |= 0x40U; }
+    if ((pins & PIN_GRAY_2) == 0U) { mask |= 0x20U; }
+    if ((pins & PIN_GRAY_3) == 0U) { mask |= 0x10U; }
+    if ((pins & PIN_GRAY_4) == 0U) { mask |= 0x08U; }
+    if ((pins & PIN_GRAY_5) == 0U) { mask |= 0x04U; }
+    if ((pins & PIN_GRAY_6) == 0U) { mask |= 0x02U; }
+    if ((pins & PIN_GRAY_7) == 0U) { mask |= 0x01U; }
+#endif
+
+    mask = (uint8_t)(mask & CAR_GRAY_TRACK_SENSOR_MASK);
+    g_grayMask = mask;
+    return mask;
+#else
+    (void)Gray_Update();
+    return g_grayMask;
+#endif
+}
+
 /*
  * 作用：根据 0/1 黑白状态计算粗略循迹偏差。
  * 使用场景：简单循迹、调试对比、观察传感器是否接线正确。
@@ -591,7 +626,6 @@ void Gray_CalibrationReset(void)
         g_grayMax[i] = 0U;
     }
     g_grayCalibrationComplete = 0U;
-    LOG_LINE("gray calibration: reset");
 }
 
 /*

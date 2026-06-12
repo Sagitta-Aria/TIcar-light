@@ -149,8 +149,10 @@ static void Route_EnterStage(RouteStage stage)
     g_routeStage = stage;
     g_routeStageTicks = 0U;
     Route_SetTargets(stage);
-    LOG_RAW("route: stage=");
-    LOG_LINE(Route_StageText(stage));
+    if (g_routeRunning != 0U) {
+        LOG_RAW("route: stage=");
+        LOG_LINE(Route_StageText(stage));
+    }
 
     if (stage == ROUTE_STAGE_TURNING) {
         g_routeCornerStartYaw = JY61P_GetYawDeg();
@@ -212,9 +214,8 @@ void Route_Init(void)
 void Route_Start(void)
 {
     Route_Init();
-    g_routeRunning = 1U;
-    LOG_LINE("route: start");
     Route_EnterStage(ROUTE_STAGE_STRAIGHT);
+    g_routeRunning = 1U;
 }
 
 /*

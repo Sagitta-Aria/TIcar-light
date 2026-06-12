@@ -34,6 +34,9 @@ uint8_t Gray_GetDigital(GrayChannel channel);
 /* Gray_GetDigitalMask：返回参与循迹的黑白状态，当前 bit6~bit0 对应 S1~S7。 */
 uint8_t Gray_GetDigitalMask(void);
 
+/* Gray_ReadDigitalMaskFast：直接读数字 GPIO，最快返回 bit6~bit0，不走防抖。 */
+uint8_t Gray_ReadDigitalMaskFast(void);
+
 /* Gray_GetLineError：基于黑白状态返回粗略偏差，范围约为 -3~+3。 */
 uint8_t Gray_GetLineError(int16_t *error);
 

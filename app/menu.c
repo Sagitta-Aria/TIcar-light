@@ -421,8 +421,8 @@ static void Menu_RenderMotorTrack(void)
 static void Menu_RenderMotorNoYaw(void)
 {
     char phaseLine[MENU_LINE_BUFFER_SIZE];
-    char stepLine[MENU_LINE_BUFFER_SIZE];
-    char grayLine[MENU_LINE_BUFFER_SIZE];
+    char maskLine[MENU_LINE_BUFFER_SIZE];
+    char errorLine[MENU_LINE_BUFFER_SIZE];
     char *write = phaseLine;
     char *end = &phaseLine[MENU_LINE_BUFFER_SIZE - 1U];
 
@@ -431,22 +431,17 @@ static void Menu_RenderMotorNoYaw(void)
     write = Menu_AppendText(write, end, " ");
     (void)Menu_AppendText(write, end, MotorNoYaw_GetStateName());
 
-    write = stepLine;
-    end = &stepLine[MENU_LINE_BUFFER_SIZE - 1U];
-    write = Menu_AppendText(write, end, "Step ");
-    write = Menu_AppendUnsigned(write, end, MotorNoYaw_GetTravelSteps());
-    write = Menu_AppendChar(write, end, '/');
-    (void)Menu_AppendUnsigned(write, end,
-        CAR_MOTOR_NO_YAW_OPEN_LOOP_STEPS);
+    write = maskLine;
+    end = &maskLine[MENU_LINE_BUFFER_SIZE - 1U];
+    write = Menu_AppendText(write, end, "Mask ");
+    (void)Menu_AppendUnsigned(write, end, MotorNoYaw_GetDigitalMask());
 
-    write = grayLine;
-    end = &grayLine[MENU_LINE_BUFFER_SIZE - 1U];
-    write = Menu_AppendText(write, end, "M");
-    write = Menu_AppendUnsigned(write, end, MotorNoYaw_GetDigitalMask());
-    write = Menu_AppendText(write, end, " E");
+    write = errorLine;
+    end = &errorLine[MENU_LINE_BUFFER_SIZE - 1U];
+    write = Menu_AppendText(write, end, "Err ");
     (void)Menu_AppendSigned(write, end, MotorNoYaw_GetLineError());
 
-    Menu_RenderLines("NO YAW", phaseLine, stepLine, grayLine);
+    Menu_RenderLines("NO YAW", phaseLine, maskLine, errorLine);
 }
 
 /* 作用：渲染 Motor 灰度 bitmask 测试页，只观察灭灯对应的 mask 值。 */
@@ -645,13 +640,9 @@ CarEvent Menu_Confirm(void)
 {
     if (g_menuPage == MENU_PAGE_GIMBAL) {
         StaticConfig_SetActiveTask((StaticConfigTaskId)g_gimbalIndex);
-        LOG_RAW("menu: gimbal confirm ");
-        LOG_LINE(g_gimbalItems[g_gimbalIndex]);
         return CAR_EVENT_GIMBAL_TEST_START;
     }
     if (g_menuPage == MENU_PAGE_MOTOR) {
-        LOG_RAW("menu: motor confirm ");
-        LOG_LINE(g_motorItems[g_motorIndex]);
         if (g_motorIndex == MENU_MOTOR_TRACK_RUN) {
             return CAR_EVENT_MOTOR_TRACK_START;
         }
@@ -668,17 +659,14 @@ CarEvent Menu_Confirm(void)
     case MENU_MAIN_GIMBAL:
         g_menuPage = MENU_PAGE_GIMBAL;
         g_gimbalIndex = (uint8_t)StaticConfig_GetActiveTask();
-        LOG_LINE("menu: enter gimbal modes");
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
     case MENU_MAIN_MOTOR:
         g_menuPage = MENU_PAGE_MOTOR;
         g_motorIndex = MENU_MOTOR_STEP_TEST;
-        LOG_LINE("menu: enter motor modes");
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
     case MENU_MAIN_MISSION:
-        LOG_LINE("menu: confirm Mission");
         return CAR_EVENT_MISSION_1_START;
     default:
         return CAR_EVENT_NONE;

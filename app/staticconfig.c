@@ -39,7 +39,7 @@ static const StaticConfigGimbalTask g_taskNearCenter = {
     .maxSpeedX = 2000U,                            //X 最大速度：单位 SPS
     .maxSpeedY = 2000U,                            //Y 最大速度：单位 SPS
     .offsetX = -100,                                   //X 安装补偿：正值让点向左偏
-    .offsetY = 230,                                  //Y 安装补偿：正值让点向上偏
+    .offsetY = 120,                                  //Y 安装补偿：正值让点向下偏
     .useCircleError = 0U                            //误差来源：0 取第 1/2 个数
 };
 
@@ -61,7 +61,7 @@ static const StaticConfigGimbalTask g_taskNearCircle = {
     .maxSpeedX = 1500U,                            //X 最大速度：单位 SPS
     .maxSpeedY = 1500U,                            //Y 最大速度：单位 SPS
     .offsetX = -100,                                   //X 安装补偿：正值让点向右偏
-    .offsetY = 230,                                  //Y 安装补偿：正值让点向下偏
+    .offsetY = 400,                                  //Y 安装补偿：正值让点向下偏
     .useCircleError = 1U                            //误差来源：1 取第 3/4 个数
 };
 

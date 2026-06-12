@@ -258,38 +258,6 @@ static void GimbalTest_LogStatus(const char *tag)
     LOG_LINE("");
 }
 
-/* 作用：启动视觉测试时打印当前 active 云台参数，避免调试时选错模式。 */
-static void GimbalTest_LogActiveConfig(void)
-{
-    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
-
-    LOG_RAW("[GIMBAL CFG] ");
-    LOG_RAW(config->name);
-    LOG_RAW(" circle=");
-    LogUart_SendUnsigned(config->useCircleError);
-    LOG_RAW(" kp=");
-    LogUart_SendUnsigned(config->kpX);
-    LOG_RAW("/");
-    LogUart_SendUnsigned(config->kpY);
-    LOG_RAW(" kd=");
-    LogUart_SendUnsigned(config->kdX);
-    LOG_RAW("/");
-    LogUart_SendUnsigned(config->kdY);
-    LOG_RAW(" db=");
-    LogUart_SendUnsigned(config->deadbandX);
-    LOG_RAW("/");
-    LogUart_SendUnsigned(config->deadbandY);
-    LOG_RAW(" min=");
-    LogUart_SendUnsigned(config->minSpeedX);
-    LOG_RAW("/");
-    LogUart_SendUnsigned(config->minSpeedY);
-    LOG_RAW(" offset=");
-    LogUart_SendSigned(config->offsetX);
-    LOG_RAW("/");
-    LogUart_SendSigned(config->offsetY);
-    LOG_LINE("");
-}
-
 void GimbalTest_Init(void)
 {
     g_gimbalTest.running = 0U;
@@ -308,8 +276,6 @@ void GimbalTest_Init(void)
  */
 void GimbalTest_Start(void)
 {
-    LOG_LINE("[GIMBAL LINK] start clear rx");
-    GimbalTest_LogActiveConfig();
     Link_ClearRx();
     g_gimbalTest.running = 1U;
     g_gimbalTest.hasVision = 0U;
@@ -319,12 +285,9 @@ void GimbalTest_Start(void)
     g_gimbalTest.rawX = 0;
     g_gimbalTest.rawY = 0;
     g_gimbalTest.statusLogTicks = 0U;
-    LOG_LINE("[GIMBAL LINK] enable gimbal en");
     MotorEnable_SetGimbal(1U);
-    LOG_LINE("[GIMBAL LINK] gimbal en ok");
     Gimbal_SetTarget(0, 0);
     Gimbal_SetEnabled(1U);
-    GimbalTest_LogStatus("started");
 }
 
 /*

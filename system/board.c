@@ -338,6 +338,21 @@ void Board_DebugLedToggle(void)
 }
 
 /*
+ * 作用：Board_Init 后半段诊断探针。
+ * 使用场景：UART 已初始化后，用 Type-C 日志和 PA14 翻转定位卡在哪个初始化步骤。
+ */
+static void Board_BootProbe(const char *stage)
+{
+#if CAR_ENABLE_LOG_UART
+    LOG_RAW("[BOOT] ");
+    LOG_LINE(stage);
+#else
+    (void)stage;
+#endif
+    Board_DebugLedToggle();
+}
+
+/*
  * 作用：记录板级错误并点亮调试灯。
  * 使用场景：OLED I2C 超时、系统 PLL 初始化失败等不能沉默的异常。
  */
@@ -463,6 +478,7 @@ void Board_Init(void)
 #if CAR_ENABLE_LOG_UART
     SYSCFG_DL_LogUart_init();
     LogUart_Init();
+    Board_BootProbe("after log uart init");
     LOG_LINE("board uart: log/jy61p/exchange ok");
     LOG_U32("clock mclk hz=", CPUCLK_FREQ);
     LOG_U32("clock bus hz=", LogUart_INST_FREQUENCY);
@@ -475,11 +491,15 @@ void Board_Init(void)
 #endif
 #if CAR_ENABLE_LOG_UART
 #if CAR_GRAY_INPUT_DIGITAL
+    Board_BootProbe("before bootstep gray gpio");
     Board_ShowBootStep("OK UART Log/JY/Ex", "RUN Gray GPIO", "WAIT Drivers",
         "WAIT App");
+    Board_BootProbe("after bootstep gray gpio");
 #else
+    Board_BootProbe("before bootstep gray adc");
     Board_ShowBootStep("OK UART Log/JY/Ex", "RUN Gray ADC", "WAIT Drivers",
         "WAIT App");
+    Board_BootProbe("after bootstep gray adc");
 #endif
 #else
 #if CAR_GRAY_INPUT_DIGITAL
@@ -492,31 +512,47 @@ void Board_Init(void)
 #endif
 
 #if (CAR_GRAY_INPUT_DIGITAL == 0U)
+    Board_BootProbe("before gray adc init");
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();
+    Board_BootProbe("after gray adc init");
     Board_ShowBootStep("OK ADC", "RUN Stepper TIM", "WAIT Motor",
         "WAIT Gray");
 #else
     Board_ShowBootStep("OK Gray GPIO", "RUN Stepper TIM", "WAIT Motor",
         "WAIT Gray");
 #endif
+    Board_BootProbe("before stepper timer init");
     SYSCFG_DL_STEPPER_TIMER_init();
+    Board_BootProbe("after stepper timer init");
     Board_ShowBootStep("OK Stepper TIM", "RUN Motor", "WAIT Gray",
         "WAIT Key UART");
+    Board_BootProbe("before motor init");
     Motor_Init();
+    Board_BootProbe("after motor init");
     Board_ShowBootStep("OK Motor", "RUN Gray", "WAIT Key",
         "WAIT Key UART");
+    Board_BootProbe("before gray init");
     Gray_Init();
+    Board_BootProbe("after gray init");
     Board_ShowBootStep("OK Gray", "RUN Key", "WAIT UART Wrap",
         "WAIT App");
+    Board_BootProbe("before key init");
     Key_Init();
+    Board_BootProbe("after key init");
     Board_ShowBootStep("OK Key", "RUN JY61P", "WAIT Link",
         "WAIT App");
+    Board_BootProbe("before jy61p init");
     JY61P_Init();
+    Board_BootProbe("after jy61p init");
     Board_ShowBootStep("OK JY61P", "RUN Link", "WAIT App", "");
+    Board_BootProbe("before link init");
     Link_Init();
+    Board_BootProbe("after link init");
 
+    Board_BootProbe("before board done bootstep");
     Board_ShowBootStep("OK Board", "RUN App", "", "");
+    Board_BootProbe("after board done bootstep");
 #endif
 }
 

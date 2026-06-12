@@ -91,6 +91,28 @@ static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
     }
 }
 
+static uint8_t StateMachine_IsTaskStartEvent(CarEvent event)
+{
+    switch (event) {
+    case CAR_EVENT_START:
+    case CAR_EVENT_GRAY_CALIBRATION_START:
+    case CAR_EVENT_TRACKING_TEST_START:
+    case CAR_EVENT_MOTOR_TRACK_START:
+    case CAR_EVENT_MOTOR_NO_YAW_START:
+    case CAR_EVENT_MOTOR_GRAY_TEST_START:
+    case CAR_EVENT_GIMBAL_TEST_START:
+    case CAR_EVENT_GIMBAL_MOTOR_TEST_START:
+    case CAR_EVENT_MOTOR_ENABLE_TEST_START:
+    case CAR_EVENT_MISSION_1_START:
+    case CAR_EVENT_MISSION_2_START:
+    case CAR_EVENT_MISSION_3_START:
+    case CAR_EVENT_MISSION_4_START:
+        return 1U;
+    default:
+        return 0U;
+    }
+}
+
 /*
  * 作用：停止所有会让车运动的模块。
  * 使用场景：进入菜单、监视、校准、停止、错误等非运行状态时。
@@ -137,7 +159,6 @@ static void StateMachine_EnterGrayCalibration(void)
 {
     StateMachine_StopMotionModules();
     Gray_CalibrationReset();
-    LOG_LINE("state: gray calibration");
 }
 
 /*
@@ -149,7 +170,6 @@ static void StateMachine_EnterTracking(void)
     Route_Start();
     TrackingException_Reset();
     Tracking_SetEnabled(1U);
-    LOG_LINE("state: tracking");
 }
 
 /*
@@ -163,7 +183,6 @@ static void StateMachine_EnterTrackingTest(void)
     TrackingException_Reset();
     Tracking_SetEnabled(0U);
     TrackStepTest_Start();
-    LOG_LINE("state: motor step test");
 }
 
 /*
@@ -178,7 +197,6 @@ static void StateMachine_EnterMotorTrack(void)
     TrackStepTest_Stop();
     MotorNoYaw_Stop();
     MotorTrack_Start();
-    LOG_LINE("state: motor track");
 }
 
 /*
@@ -193,7 +211,6 @@ static void StateMachine_EnterMotorNoYaw(void)
     TrackStepTest_Stop();
     MotorTrack_Stop();
     MotorNoYaw_Start();
-    LOG_LINE("state: motor no yaw");
 }
 
 /*
@@ -204,7 +221,6 @@ static void StateMachine_EnterMotorGrayTest(void)
 {
     StateMachine_StopMotionModules();
     (void)Gray_Update();
-    LOG_LINE("state: motor gray test");
 }
 
 /*
@@ -218,7 +234,6 @@ static void StateMachine_EnterGimbalTest(void)
     Motion_Stop();
     GimbalMotorTest_Stop();
     GimbalTest_Start();
-    LOG_LINE("state: gimbal test");
 }
 
 /*
@@ -232,7 +247,6 @@ static void StateMachine_EnterGimbalMotorTest(void)
     Motion_Stop();
     GimbalTest_Stop();
     GimbalMotorTest_Start();
-    LOG_LINE("state: gimbal motor test");
 }
 
 /*
@@ -247,7 +261,6 @@ static void StateMachine_EnterMotorEnableTest(void)
     GimbalTest_Stop();
     GimbalMotorTest_Stop();
     MotorEnableTest_Start();
-    LOG_LINE("state: motor enable test");
 }
 
 /*
@@ -257,9 +270,6 @@ static void StateMachine_EnterMotorEnableTest(void)
 static void StateMachine_EnterMission(void)
 {
     StateMachine_StopMotionModules();
-    LOG_RAW("state: mission ");
-    LogUart_SendUnsigned(g_missionId);
-    LOG_LINE("");
 }
 
 /*
@@ -484,8 +494,10 @@ void StateMachine_Dispatch(CarEvent event)
         return;
     }
 
-    LOG_RAW("event: ");
-    LOG_LINE(StateMachine_GetEventName(event));
+    if (StateMachine_IsTaskStartEvent(event) == 0U) {
+        LOG_RAW("event: ");
+        LOG_LINE(StateMachine_GetEventName(event));
+    }
 
     if (event == CAR_EVENT_ERROR) {
         StateMachine_Enter(CAR_STATE_ERROR);

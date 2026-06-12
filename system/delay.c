@@ -13,3 +13,8 @@ void delay_ms(uint32_t ms)
 {
     delay_cycles((DELAY_CPUCLK_FREQ / 1000U) * ms);
 }
+
+void delay_us(uint32_t us)
+{
+    delay_cycles((DELAY_CPUCLK_FREQ / 1000000U) * us);
+}

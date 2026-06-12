@@ -6,6 +6,7 @@
 #include "gimbal.h"
 #include "gimbal_motor_test.h"
 #include "gimbal_test.h"
+#include "jy61p.h"
 #include "key.h"
 #include "link.h"
 #include "log_uart.h"
@@ -135,6 +136,21 @@ static void App_HandleKeyEvent(KeyEvent event)
 }
 
 /*
+ * 作用：NO YAW 运行时，把原来整块 1ms 等待拆成多次灰度快采样。
+ * 使用场景：直角弯 S1/S2 触发时间很短时，提高抓到触发的概率。
+ * 说明：快采样只抓直角触发/退出，真正的速度控制和软件计时仍在 1ms 控制拍里做。
+ */
+static void App_MotorNoYawFastWait(void)
+{
+    uint32_t i;
+
+    for (i = 0U; i < CAR_MOTOR_NO_YAW_FAST_SAMPLE_COUNT; ++i) {
+        MotorNoYaw_FastSample();
+        delay_us(CAR_MOTOR_NO_YAW_FAST_SAMPLE_DELAY_US);
+    }
+}
+
+/*
  * 作用：初始化所有 app 层模块。
  * 使用场景：Board_Init 完成且没有致命错误后调用一次。
  * 说明：这里允许按顺序初始化模块，但不要放底层引脚配置；硬件初始化属于 system/hardware。
@@ -193,6 +209,8 @@ void App_Init(void)
  */
 void App_Task(void)
 {
+    CarState state;
+
 #if CAR_GIMBAL_PIN_TEST_BUILD
     StepperPinTest_Task();
     return;
@@ -201,13 +219,26 @@ void App_Task(void)
     Key_Task();
     App_HandleKeyEvent(Key_PopEvent());
 
-    StateMachine_Task();
+    state = StateMachine_GetState();
+    if ((state == CAR_STATE_MOTOR_NO_YAW) &&
+        (MotorNoYaw_IsRunning() != 0U)) {
+        MotorNoYaw_Task();
+        Motor_Task();
+        App_MotorNoYawFastWait();
+        return;
+    }
 
-    Menu_Task(StateMachine_GetState());
+    StateMachine_Task();
+    state = StateMachine_GetState();
+
+    Menu_Task(state);
     LogUart_Task();
     Link_Task();
+    JY61P_Task();
     PoseSolver_Task();
     Gimbal_Task();
     Motor_Task();
+    MotorNoYaw_LogStopReason();
+
     delay_ms(CAR_APP_LOOP_DELAY_MS);
 }

@@ -22,7 +22,6 @@ void MotorEnableTest_Start(void)
     Motor_SetAllStop();
     MotorEnable_SetAll(1U);
     g_motorEnableTestRunning = 1U;
-    LOG_LINE("motor enable test: all enabled");
 }
 
 /*
