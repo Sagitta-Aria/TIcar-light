@@ -24,8 +24,8 @@ void MotorNoYaw_Stop(void);
 /* MotorNoYaw_Task：执行一轮灰度循迹、触发转向或转向退出。 */
 void MotorNoYaw_Task(void);
 
-/* MotorNoYaw_FastSample：NO YAW 运行时快速补采灰度，只抓直角触发/退出。 */
-void MotorNoYaw_FastSample(void);
+/* MotorNoYaw_TimerSample：TIMG0 中断里调用，只读灰度并置请求标志。 */
+void MotorNoYaw_TimerSample(void);
 
 /* MotorNoYaw_LogStopReason：低优先级打印异常停车原因，正常运行时不打印。 */
 void MotorNoYaw_LogStopReason(void);

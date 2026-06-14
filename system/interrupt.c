@@ -3,6 +3,7 @@
 #include "jy61p.h"
 #include "key.h"
 #include "link.h"
+#include "motor_no_yaw.h"
 #include "stepper_pulse.h"
 #include "ti_msp_dl_config.h"
 
@@ -81,4 +82,5 @@ void UART3_IRQHandler(void)
 void TIMG0_IRQHandler(void)
 {
     StepperPulse_HandleTimerInterrupt();
+    MotorNoYaw_TimerSample();
 }

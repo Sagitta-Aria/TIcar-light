@@ -185,19 +185,19 @@
 #define CAR_MOTOR_NO_YAW_BASE_SPEED_SPS  (2500U)
 
 /* Motor NO YAW：普通循迹最低轮速，正常巡线时不让任何一边停死。 */
-#define CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_SPS (200U)
+#define CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_SPS (500U)
 
 /* Motor NO YAW：普通循迹的小误差死区，降低轻微偏线时的来回摆动。 */
 #define CAR_MOTOR_NO_YAW_LINE_DEADBAND    (30)
 
 /* Motor NO YAW：普通循迹差速增益，独立于带 yaw 的 Track 模式。 */
-#define CAR_MOTOR_NO_YAW_TURN_GAIN        (200)
+#define CAR_MOTOR_NO_YAW_TURN_GAIN        (160)
 
 /* Motor NO YAW：普通循迹最大差速修正，避免正常循迹变成停车强转。 */
-#define CAR_MOTOR_NO_YAW_TURN_LIMIT_SPS   (1800U)
+#define CAR_MOTOR_NO_YAW_TURN_LIMIT_SPS   (1500U)
 
 /* Motor NO YAW：右直角强转速度，左轮用该速度，右轮 0。 */
-#define CAR_MOTOR_NO_YAW_TURN_SPEED_SPS  (2500U)
+#define CAR_MOTOR_NO_YAW_TURN_SPEED_SPS  (3500U)
 
 /* Motor NO YAW：丢线后默认向灰度高位侧搜线的外轮速度。 */
 #define CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_SPS (800U)
@@ -208,11 +208,14 @@
 /* Motor NO YAW：S1/S2 右直角触发时间窗口。 */
 #define CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS (100U)
 
+/* Motor NO YAW：TIMG0 中断里每隔多少 us 快速读一次灰度。 */
+#define CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US      (100U)
+
 /* Motor NO YAW：低三位 S5/S6/S7 同时灭灯/有效就强制左转，bit2~bit0。 */
 #define CAR_MOTOR_NO_YAW_LEFT_TURN_TRIGGER_MASK  (0x07U)
 
 /* Motor NO YAW：直角触发后继续前进多久再强转。 */
-#define CAR_MOTOR_NO_YAW_TURN_APPROACH_MS (10U)
+#define CAR_MOTOR_NO_YAW_TURN_APPROACH_MS (240U)
 
 /* Motor NO YAW：强转最长等待 S2 的时间；只作兜底保护。 */
 #define CAR_MOTOR_NO_YAW_TURN_HOLD_MS    (1000U)

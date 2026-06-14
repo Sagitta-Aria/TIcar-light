@@ -5,6 +5,7 @@
 #include "log_uart.h"
 #include "motion.h"
 #include "motor_enable.h"
+#include "ti_msp_dl_config.h"
 
 #define MOTOR_NO_YAW_S1_MASK        (0x40U)
 #define MOTOR_NO_YAW_S2_MASK        (0x20U)
@@ -14,7 +15,27 @@
 #define MOTOR_NO_YAW_S6_MASK        (0x02U)
 #define MOTOR_NO_YAW_S7_MASK        (0x01U)
 
+/* 强转回归参考点：现在用 S4 重新压线作为回到普通循迹的条件。 */
+#define MOTOR_NO_YAW_RETURN_MASK    MOTOR_NO_YAW_S4_MASK
+
 #define MOTOR_NO_YAW_INVALID_TICKS  (0xFFFFU)
+
+#if (CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US == 0U)
+#error "CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US must be greater than 0"
+#endif
+
+#define MOTOR_NO_YAW_TIMER_DIV_TICKS \
+    (((STEPPER_TIMER_TICK_HZ * CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US) + \
+        999999U) / 1000000U)
+
+#if (MOTOR_NO_YAW_TIMER_DIV_TICKS == 0U)
+#error "MOTOR_NO_YAW_TIMER_DIV_TICKS must be greater than 0"
+#endif
+
+#define MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES \
+    (((CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS * 1000U) + \
+        CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US - 1U) / \
+        CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US)
 
 typedef struct {
     int16_t lineError;
@@ -22,17 +43,19 @@ typedef struct {
     int16_t lastRightSpeedSps;
     uint16_t turnTicks;
     uint16_t lineLostTicks;
-    uint16_t s1RecentTicks;
-    uint16_t s2RecentTicks;
+    volatile uint16_t s1RecentSamples;
+    volatile uint16_t s2RecentSamples;
     uint8_t phase;
-    uint8_t digitalMask;
+    volatile uint8_t digitalMask;
     uint8_t hasLastLineCommand;
-    uint8_t turnFlag;
-    uint8_t returnFlag;
-    uint8_t running;
+    volatile uint8_t turnFlag;
+    volatile uint8_t returnFlag;
+    volatile uint8_t rightTurnRequest;
+    volatile uint8_t returnLineRequest;
+    volatile uint8_t running;
     uint8_t stopLogPending;
     const char *stopReason;
-    MotorNoYawState state;
+    volatile MotorNoYawState state;
 } MotorNoYawControl;
 
 static MotorNoYawControl g_motorNoYaw;
@@ -202,38 +225,30 @@ void MotorNoYaw_LogStopReason(void)
 }
 
 /* 作用：记录 S1/S2 最近有没有灭灯，窗口内两个都出现就认为是右直角。 */
-static uint8_t MotorNoYaw_IsRightTurnDetected(void)
+static uint8_t MotorNoYaw_RecordRightTurnSample(uint8_t mask)
 {
-    uint16_t windowTicks =
-        MotorNoYaw_MsToTicks(CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS);
-
-    if ((g_motorNoYaw.digitalMask & MOTOR_NO_YAW_S1_MASK) != 0U) {
-        g_motorNoYaw.s1RecentTicks = windowTicks;
+    if ((mask & MOTOR_NO_YAW_S1_MASK) != 0U) {
+        g_motorNoYaw.s1RecentSamples =
+            (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES;
+    } else if (g_motorNoYaw.s1RecentSamples > 0U) {
+        --g_motorNoYaw.s1RecentSamples;
     }
 
-    if ((g_motorNoYaw.digitalMask & MOTOR_NO_YAW_S2_MASK) != 0U) {
-        g_motorNoYaw.s2RecentTicks = windowTicks;
+    if ((mask & MOTOR_NO_YAW_S2_MASK) != 0U) {
+        g_motorNoYaw.s2RecentSamples =
+            (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES;
+    } else if (g_motorNoYaw.s2RecentSamples > 0U) {
+        --g_motorNoYaw.s2RecentSamples;
     }
 
-    if ((g_motorNoYaw.s1RecentTicks > 0U) &&
-        (g_motorNoYaw.s2RecentTicks > 0U)) {
-        g_motorNoYaw.s1RecentTicks = 0U;
-        g_motorNoYaw.s2RecentTicks = 0U;
+    if ((g_motorNoYaw.s1RecentSamples > 0U) &&
+        (g_motorNoYaw.s2RecentSamples > 0U)) {
+        g_motorNoYaw.s1RecentSamples = 0U;
+        g_motorNoYaw.s2RecentSamples = 0U;
         return 1U;
     }
 
     return 0U;
-}
-
-/* 作用：让右直角窗口只在 1ms 控制拍里递减，不被快速补采抢掉。 */
-static void MotorNoYaw_DecayRightTurnRecent(void)
-{
-    if (g_motorNoYaw.s1RecentTicks > 0U) {
-        --g_motorNoYaw.s1RecentTicks;
-    }
-    if (g_motorNoYaw.s2RecentTicks > 0U) {
-        --g_motorNoYaw.s2RecentTicks;
-    }
 }
 
 /* 作用：S1/S2 触发后，先让车头继续往直角里走一点。 */
@@ -241,8 +256,12 @@ static void MotorNoYaw_StartTurnApproach(void)
 {
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
+    g_motorNoYaw.s1RecentSamples = 0U;
+    g_motorNoYaw.s2RecentSamples = 0U;
     g_motorNoYaw.turnFlag = 0U;      /* 进弯后不再允许重复触发强转。 */
-    g_motorNoYaw.returnFlag = 0U;    /* 前进阶段不判断 S2 回归。 */
+    g_motorNoYaw.returnFlag = 0U;    /* 前进阶段不判断回归点。 */
+    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.returnLineRequest = 0U;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_TURN_APPROACH;
 }
 
@@ -253,49 +272,66 @@ static void MotorNoYaw_StartRightTurn(void)
     g_motorNoYaw.lineLostTicks = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
     g_motorNoYaw.turnFlag = 0U;      /* 强转中不准再次进入强转。 */
-    g_motorNoYaw.returnFlag = 1U;    /* 强转中只允许 S2 触发回循迹。 */
+    g_motorNoYaw.returnFlag = 1U;    /* 强转中只允许 S4 触发回循迹。 */
+    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.returnLineRequest = 0U;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_TURN_RIGHT;
 }
 
-/* 作用：S2 再次灭灯后，认为右直角转够了，回普通循迹。 */
+/* 作用：S4 再次灭灯后，认为右直角转够了，回普通循迹。 */
 static void MotorNoYaw_FinishRightTurn(void)
 {
     g_motorNoYaw.phase = (uint8_t)((g_motorNoYaw.phase + 1U) & 0x03U);
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
-    g_motorNoYaw.s1RecentTicks = 0U;
-    g_motorNoYaw.s2RecentTicks = 0U;
+    g_motorNoYaw.s1RecentSamples = 0U;
+    g_motorNoYaw.s2RecentSamples = 0U;
     g_motorNoYaw.turnFlag = 1U;      /* 回到正常循迹后，重新允许下一次强转。 */
-    g_motorNoYaw.returnFlag = 0U;    /* 正常循迹中不判断 S2 回归。 */
+    g_motorNoYaw.returnFlag = 0U;    /* 正常循迹中不判断 S4 回归。 */
+    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.returnLineRequest = 0U;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_LINE;
 }
 
 /*
- * 作用：NO YAW 运行时的快速补采。
- * 使用场景：App_Task 的短等待阶段，只抓 S1/S2 的直角触发和回归。
- * 说明：这里不改 turnTicks / lineLostTicks，避免把 1ms 控制拍算乱。
+ * 作用：TIMG0 中断里的灰度快采样。
+ * 使用场景：每个 STEP 定时器 tick 调一次，本函数内部再分频到 100us 左右。
+ * 说明：中断里只读 GPIO 和置请求标志，不直接控制电机、不打印、不刷屏。
  */
-void MotorNoYaw_FastSample(void)
+void MotorNoYaw_TimerSample(void)
 {
+    static uint16_t sampleDivTicks;
+    uint8_t mask;
+    MotorNoYawState state;
+
     if (g_motorNoYaw.running == 0U) {
+        sampleDivTicks = 0U;
         return;
     }
 
-    MotorNoYaw_UpdateGrayFast();
+    ++sampleDivTicks;
+    if (sampleDivTicks < (uint16_t)MOTOR_NO_YAW_TIMER_DIV_TICKS) {
+        return;
+    }
+    sampleDivTicks = 0U;
 
-    if (g_motorNoYaw.state == MOTOR_NO_YAW_STATE_LINE) {
+    mask = Gray_ReadDigitalMaskFast();
+    g_motorNoYaw.digitalMask = mask;
+    state = g_motorNoYaw.state;
+
+    if (state == MOTOR_NO_YAW_STATE_LINE) {
         if ((g_motorNoYaw.turnFlag != 0U) &&
-            (MotorNoYaw_IsRightTurnDetected() != 0U)) {
-            MotorNoYaw_StartTurnApproach();
+            (MotorNoYaw_RecordRightTurnSample(mask) != 0U)) {
+            g_motorNoYaw.rightTurnRequest = 1U;
         }
         return;
     }
 
-    if (g_motorNoYaw.state == MOTOR_NO_YAW_STATE_TURN_RIGHT) {
+    if (state == MOTOR_NO_YAW_STATE_TURN_RIGHT) {
         if ((g_motorNoYaw.returnFlag != 0U) &&
-            ((g_motorNoYaw.digitalMask & MOTOR_NO_YAW_S2_MASK) != 0U)) {
-            MotorNoYaw_FinishRightTurn();
+            ((mask & MOTOR_NO_YAW_RETURN_MASK) != 0U)) {
+            g_motorNoYaw.returnLineRequest = 1U;
         }
     }
 }
@@ -308,13 +344,11 @@ static void MotorNoYaw_TaskLine(void)
 
     MotorNoYaw_UpdateGrayFast();
 
-    if ((g_motorNoYaw.turnFlag != 0U) &&
-        (MotorNoYaw_IsRightTurnDetected() != 0U)) {
+    if (g_motorNoYaw.rightTurnRequest != 0U) {
+        g_motorNoYaw.rightTurnRequest = 0U;
         MotorNoYaw_StartTurnApproach();
         return;
     }
-
-    MotorNoYaw_DecayRightTurnRecent();
 
     if (g_motorNoYaw.digitalMask == 0U) {
         MotorNoYaw_ApplyLineLostCommand();
@@ -354,7 +388,7 @@ static void MotorNoYaw_TaskTurnApproach(void)
     }
 }
 
-/* 作用：强右转，只在 returnFlag 打开时才用 S2 回到正常循迹。 */
+/* 作用：强右转，只在 returnFlag 打开时才用 S4 回到正常循迹。 */
 static void MotorNoYaw_TaskTurnRight(void)
 {
     uint16_t timeoutTicks =
@@ -367,8 +401,10 @@ static void MotorNoYaw_TaskTurnRight(void)
         ++g_motorNoYaw.turnTicks;
     }
 
-    if ((g_motorNoYaw.returnFlag != 0U) &&
-        ((g_motorNoYaw.digitalMask & MOTOR_NO_YAW_S2_MASK) != 0U)) {
+    if ((g_motorNoYaw.returnLineRequest != 0U) ||
+        ((g_motorNoYaw.returnFlag != 0U) &&
+        ((g_motorNoYaw.digitalMask & MOTOR_NO_YAW_RETURN_MASK) != 0U))) {
+        g_motorNoYaw.returnLineRequest = 0U;
         MotorNoYaw_FinishRightTurn();
         return;
     }
@@ -385,13 +421,15 @@ static void MotorNoYaw_ResetControl(void)
     g_motorNoYaw.lastRightSpeedSps = 0;
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
-    g_motorNoYaw.s1RecentTicks = 0U;
-    g_motorNoYaw.s2RecentTicks = 0U;
+    g_motorNoYaw.s1RecentSamples = 0U;
+    g_motorNoYaw.s2RecentSamples = 0U;
     g_motorNoYaw.phase = 0U;
     g_motorNoYaw.digitalMask = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
     g_motorNoYaw.turnFlag = 1U;
     g_motorNoYaw.returnFlag = 0U;
+    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.returnLineRequest = 0U;
     g_motorNoYaw.stopLogPending = 0U;
     g_motorNoYaw.stopReason = 0;
 }
