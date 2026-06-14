@@ -1,65 +1,190 @@
-# light-car CCS
+# TIcar Light
 
-MSPM0G3507 laser tracking car firmware for TI CCS / TI Arm Clang.
+MSPM0G3507-based firmware for a laser line-tracking car with a two-axis laser gimbal.
 
-当前工作工程：
+This repository contains the TI Code Composer Studio / TI Arm Clang version of the project. It targets a Dimensity-style MSPM0G3507 minimum system board, four closed-loop stepper drivers, digital gray sensors, an OLED menu, a JY61P yaw sensor, and a UART vision module.
+
+> Current firmware line: `ccs1.2`<br>
+> Active development branch: `1.2ccsadc`
+
+## Features
+
+- Differential-drive chassis controlled by STEP/DIR closed-loop stepper drivers.
+- Timer-driven STEP pulse scheduler using TIMG0 at 50 kHz.
+- Digital gray-sensor line tracking with a NO-YAW right-angle turn mode.
+- Optional yaw-assisted motor tracking with JY61P heading feedback.
+- Two-axis laser gimbal for vision-guided target tracking.
+- UART vision link for laser/target error input.
+- OLED menu for motor tests, gimbal tests, and mission entry.
+- XDS110 build and safe flashing scripts.
+- Recovery-oriented boot diagnostics and PA14 status LED.
+
+## Hardware Overview
+
+Main hardware used by the current firmware:
+
+| Module | Interface | Notes |
+| --- | --- | --- |
+| MCU | TI MSPM0G3507 | CCS / TI Arm Clang project |
+| Chassis motors | 2 x STEP/DIR drivers | Left and right differential drive |
+| Gimbal motors | 2 x STEP/DIR drivers | Yaw and pitch axes |
+| Gray sensors | Digital GPIO inputs | S1-S7, bit6-bit0 |
+| OLED | I2C0 | PA0 SDA, PA1 SCL |
+| JY61P | UART1 | Yaw feedback |
+| Vision / Link | UART3 | Line-based target/laser error input |
+| Log UART | UART0 | Type-C CH340, 115200 baud |
+
+## Pin Map
+
+### Stepper Drivers
+
+| Axis | STEP | DIR | EN |
+| --- | --- | --- | --- |
+| Chassis left | PA13 | PB24 | PA28 |
+| Chassis right | PA12 | PA22 | PA2 |
+| Gimbal yaw | PA7 | PB18 | PA31 |
+| Gimbal pitch | PA8 | PA9 | PB19 |
+
+The chassis left/right logical mapping follows `config/pin_map.h`, where the real car wiring is already corrected in software.
+
+### UART
+
+| UART | Pins | Purpose |
+| --- | --- | --- |
+| UART0 | PA10 TX / PA11 RX | Type-C CH340 log UART |
+| UART1 | PB6 TX / PB7 RX | JY61P |
+| UART3 | PB2 TX / PB3 RX | Vision / Link / Exchange |
+
+### Gray Sensors
+
+Digital gray sensor inputs are mapped as `S1` to `S7`:
+
+| Sensor | Pin | Mask bit |
+| --- | --- | --- |
+| S1 | PA15 | `0x40` |
+| S2 | PA16 | `0x20` |
+| S3 | PA17 | `0x10` |
+| S4 | PA24 | `0x08` |
+| S5 | PA25 | `0x04` |
+| S6 | PA26 | `0x02` |
+| S7 | PA27 | `0x01` |
+
+### Reserved Pins
+
+- PA0 / PA1: OLED I2C0.
+- PA5 / PA6: external crystal hardware reservation.
+- PA10 / PA11: UART0 log and BSL data lines.
+- PA18: BSL invoke.
+- PA14: debug/status LED.
+- PA19 / PA20: SWD.
+- PA21 / PA23: VREF-related pins.
+- PB14 / PB15 / PB16 / PB17: onboard SPI flash reservation.
+
+## Repository Layout
+
+```text
+app/            Application logic: menu, state machine, line tracking, gimbal, route, pose solver
+config/         Board parameters and pin map
+doc/            Wiring notes, recovery notes, style notes, project logs
+generated/      SysConfig-style generated configuration
+hardware/       Peripheral drivers: motor, gray, OLED, UART, key, stepper pulse
+system/         Board init, interrupt entry, delay, system-level diagnostics
+targetConfigs/  CCS target configurations for XDS110, J-Link, and recovery flows
+tools/          Build, flash, recovery, and diagnostic scripts
+```
+
+## Quick Start
+
+### Prerequisites
+
+- Windows with PowerShell.
+- TI Code Composer Studio or CCS Theia.
+- TI Arm Clang toolchain compatible with the project settings.
+- MSPM0 SDK 2.10.00.04 or matching SDK path configured in CCS.
+- XDS110 debugger for the safe flashing script.
+
+### Clone
 
 ```powershell
-D:\Ti\light-car1.0ccs
+git clone https://github.com/Sagitta-Aria/TIcar-light.git
+cd TIcar-light
+git checkout 1.2ccsadc
 ```
 
-当前开发分支：`1.2ccsadc`
+### Build
 
-固件版本线：`ccs1.2`
+```powershell
+.\tools\build_ccs.ps1 -Clean
+```
 
-最后整理：2026-05-24
+Successful builds produce:
 
-Keil 旧工程在 `D:\激光循迹\light-car1.0`，不要和本 CCS 工程混用。
+```text
+Debug\codex-build\light-car-ccs1.2.out
+```
 
-## 当前目标
+### Flash With XDS110
 
-这一版面向地猛星 MSPM0G3507 最小系统板，电机控制采用四个闭环步进驱动器的 `STEP/DIR` 方案。
+The safe flashing script downloads the MAIN program only. It does not perform Factory Reset, mass erase, or NONMAIN writes.
 
-当前重点：
+```powershell
+.\tools\flash_xds110_safe.ps1 -SkipBuild
+```
 
-- 底盘左右步进电机用于循迹和任务运动。
-- 云台两个步进电机用于激光方向控制。
-- 视觉模块通过 UART3/Link 提供激光点或目标点坐标。
-- 墙面画圆优先走视觉闭环：摄像头识别墙面/激光点，MCU 根据视觉误差驱动云台。
-- 底盘位姿解算已保留，用于后续一边走一边补偿墙面目标，但当前不强依赖它。
+If the debugger is busy, close CCS debug sessions before flashing.
 
-## 工程结构
+## Firmware Modes
 
-- `app/`：应用层逻辑，包含菜单、状态机、循迹、路线、云台控制、云台测试、车体位姿解算。
-- `hardware/`：硬件驱动，包含 OLED、按键、四步进电机、STEP 定时器调度、灰度输入、JY61P、Link、日志串口。
-- `system/`：板级初始化、延时、中断入口、错误状态。
-- `config/`：工程参数和引脚映射。
-- `generated/`：CCS/SysConfig 风格生成代码。
-- `targetConfigs/`：J-Link / XDS110 / BSL 目标配置。
-- `tools/`：构建、下载、恢复辅助脚本。
-- `doc/`：接线表、状态说明、恢复记录和代码风格。
+### Motor NO YAW
 
-## 主流程
+`app/motor_no_yaw.c` implements digital-gray line tracking without yaw feedback.
 
-`app/main.c` 保持干净，只做板级初始化、应用初始化和主循环调度：
+Current behavior:
+
+- Gray sensors are read as digital GPIO signals.
+- S1/S2 within the configured time window triggers a right-angle turn.
+- After trigger, the car continues forward briefly, then performs a strong right turn.
+- Strong turn command: left wheel moves, right wheel stops.
+- S2 reacquisition returns the car to normal line tracking.
+- Normal line tracking always keeps both wheels above the configured minimum speed.
+- UART logs are avoided during normal motion and only emitted after error stop.
+
+Important parameters live in `config/board_config.h`:
 
 ```c
-Board_Init();
-if (Board_HasFatalError() == 0U) {
-    App_Init();
-}
-
-while (1) {
-    Board_Task();
-    if (Board_HasFatalError() == 0U) {
-        App_Task();
-    }
-}
+CAR_MOTOR_NO_YAW_BASE_SPEED_SPS
+CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_SPS
+CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS
+CAR_MOTOR_NO_YAW_FAST_SAMPLE_COUNT
+CAR_MOTOR_NO_YAW_FAST_SAMPLE_DELAY_US
+CAR_MOTOR_NO_YAW_TURN_APPROACH_MS
+CAR_MOTOR_NO_YAW_TURN_SPEED_SPS
 ```
 
-## 菜单
+### Motor Track
 
-OLED 当前主菜单：
+`app/motor_track.c` is the yaw-assisted tracking mode. It uses gray sensors plus JY61P yaw feedback for right-angle confirmation.
+
+### Gimbal Tracking
+
+`app/gimbal.c` controls the two-axis laser gimbal:
+
+- X error controls `MOTOR_GIMBAL_1` / yaw.
+- Y error controls `MOTOR_GIMBAL_2` / pitch.
+- Deadband, PID-like gains, speed limits, offsets, and target selection come from `app/staticconfig.c`.
+- Pitch travel is limited using relative STEP count from the moment gimbal tracking is enabled.
+
+Vision input is parsed by the Link path. The expected line format is:
+
+```text
+centerDx,centerDy;circleDx,circleDy
+```
+
+Each value represents an error from the vision side. The active static configuration decides whether to use center error or circle error.
+
+## Menu
+
+The OLED menu is intentionally simple:
 
 ```text
 Gimbal
@@ -67,321 +192,72 @@ Motor
 Mission
 ```
 
-`Gimbal` 二级菜单：
+Typical pages:
 
-```text
-Near Center
-Near Circle
-Mid Center
-Mid Circle
-Far Center
-Far Circle
-```
+- `Gimbal`: choose one of the predefined static gimbal configurations.
+- `Motor / Step Test`: fixed-distance chassis motor test.
+- `Motor / Track Run`: line-tracking run.
+- `Motor / NO YAW`: digital gray tracking without yaw feedback.
+- `Mission`: placeholder for integrated competition tasks.
 
-`Motor` 二级菜单：
+Long-press K2 exits running test pages.
 
-```text
-Step Test
-Track Run
-```
+## Status LED
 
-灰度校准页：
+PA14 is used as the board status LED:
 
-```text
-Cal Done: YES/NO
-Save Exit
-No Save Exit
-```
+| LED behavior | Meaning |
+| --- | --- |
+| Slow blink | Main loop is alive |
+| Fast blink | Non-fatal board error, such as OLED/I2C issue |
+| Solid on | Fatal board error |
 
-说明：
+## Development Notes
 
-- `Gimbal`：选择六套 `staticconfig` 云台参数之一，K2 进入视觉追踪。
-- `Motor / Step Test`：底盘固定平均 STEP 测试，到目标脉冲后自动停车。
-- `Motor / Track Run`：读取灰度和 JY61P yaw 的真实循迹状态机。
-- `Mission`：任务入口，具体任务流程后续继续补。
+- STEP pulse output is handled in the TIMG0 interrupt.
+- Interrupt handlers should only copy bytes, count events, clear flags, or set state flags.
+- Do not print UART logs, refresh OLED, or run heavy control logic inside interrupts.
+- Normal builds use the internal 32 MHz SYSOSC by default.
+- XDS110 safe download should be preferred during normal development.
+- Do not write NONMAIN, change BSL configuration, or run Factory Reset unless you are intentionally recovering the chip.
 
-## 主要模块
+## Recovery
 
-### 电机与 STEP 调度
+Recovery-related scripts are in `tools/`.
 
-- `hardware/motor.c/h`
-  - 负责四个步进电机的速度命令、DIR 方向、停车和命令读取。
-  - 逻辑电机编号：
-    - `MOTOR_CHASSIS_LEFT`
-    - `MOTOR_CHASSIS_RIGHT`
-    - `MOTOR_GIMBAL_1`
-    - `MOTOR_GIMBAL_2`
-
-- `hardware/stepper_pulse.c/h`
-  - 使用 TIMG0 每 20us 中断调度 STEP 脉冲。
-  - 50kHz tick。
-  - 支持读取各电机累计 STEP 输出计数。
-  - 速度命令直接使用 SPS，并带 1ms 斜坡限速。
-
-STEP 接线：
-
-```text
-底盘左：PA12 STEP，PA22 DIR
-底盘右：PA13 STEP，PB24 DIR
-云台左右轴：PA7 STEP，PB18 DIR
-云台上下轴：PA8 STEP，PA9 DIR
-```
-
-### 云台控制
-
-- `app/gimbal.c/h`
-  - 二维云台闭环控制。
-  - 视觉差值入口：
-
-```c
-Gimbal_UpdateFromCameraError(targetMinusCurrentX, targetMinusCurrentY);
-```
-
-控制逻辑：
-
-```text
-errorX = targetMinusCurrentX + offsetX
-errorY = targetMinusCurrentY + offsetY
-误差进入死区：停止对应轴
-误差超过死区：按比例输出 STEP 命令
-```
-
-deadband、kp、kd、min/maxSpeed、offset 都来自 `app/staticconfig.c` 当前 active 参数。
-
-当前默认映射：
-
-```text
-X 轴/左右 -> MOTOR_GIMBAL_1 -> PA7 STEP / PB18 DIR / PA31 EN
-Y 轴/上下 -> MOTOR_GIMBAL_2 -> PA8 STEP / PA9 DIR / PB19 EN
-```
-
-方向反了优先改：
-
-```c
-CAR_GIMBAL_X_REVERSE
-CAR_GIMBAL_Y_REVERSE
-```
-
-### 云台测试
-
-- `app/gimbal_test.c/h`
-  - 菜单选择 `Gimbal` 六套参数之一后启用。
-  - 清空 Link 接收缓存。
-  - 接收视觉差值并调用 `Gimbal_UpdateFromCameraError()`。
-
-视觉输入行尾用 `\n` 或 `\r`：
-
-```text
-centerDx,centerDy;circleDx,circleDy
-```
-
-dx/dy 已经是 `target - current`；MCU 解析后放大到 0.1 像素单位。当前 active 参数的 `useCircleError=0` 使用前两个数，`useCircleError=1` 使用后两个数。
-
-实车现象：
-
-- 进入 `Gimbal Test` 后底盘停车。
-- 未收到视觉数据：OLED 显示 `Waiting Link`，云台不动。
-- 收到有效坐标：OLED 显示 `Tracking`，云台按视觉误差追踪。
-- 连续约 200ms 没有视觉更新，云台自动停止。
-
-### 云台电机测试
-
-- `app/gimbal_motor_test.c/h`
-  - 当前是云台 yaw/pitch 持续 SPS 输出测试。
-  - 进入后同时输出 `MOTOR_GIMBAL_1` 和 `MOTOR_GIMBAL_2`。
-  - K1/K2 可按 `CAR_STEPPER_SPEED_STEP_SPS` 调整测试速度。
-  - OLED 显示 yaw/pitch 当前 SPS。
-
-关键参数：
-
-```c
-CAR_GIMBAL_TEST_YAW_SPEED_SPS
-CAR_GIMBAL_TEST_PITCH_SPEED_SPS
-CAR_GIMBAL_MOTOR_TEST_REVERSE
-CAR_STEPPER_SPEED_STEP_SPS
-```
-
-实车现象：
-
-- `Speed`：只验证云台两个轴能按 STEP/DIR 持续输出。
-- 长按 K2 退出后停止云台轴，并恢复默认 EN 状态。
-
-### 四电机使能测试
-
-- `hardware/motor_enable.c/h`
-  - 管四路步进驱动器 EN 输出。
-  - 默认按 ZDT 示例配置为低电平使能。
-- `app/motor_enable_test.c/h`
-  - 菜单进入 `Gimbal Test / Enable Test` 后启用。
-  - 只拉四路 EN，不输出 STEP 脉冲。
-
-接线：
-
-```text
-底盘左 EN  -> PA2
-底盘右 EN  -> PA28
-云台左右 EN -> PA31
-云台上下 EN -> PB19
-```
-
-实车现象：进入 `Enable Test` 后，如果驱动器供电、COM、GND、EN 极性都正确，四个电机会立刻抱住；退出后会释放。
-
-### Link / 视觉串口
-
-- `hardware/link.c/h`
-  - 使用 UART3。
-  - PB2 TX，PB3 RX。
-  - 115200。
-  - 中断里只收字节并拼行，不做业务解析、不打印日志。
-  - 主循环通过 `Link_PopLine()` 取完整行。
-
-当前 Link 主要给云台测试使用，后续可扩展为视觉协议层。
-
-### 车体位姿解算
-
-- `app/pose_solver.c/h`
-  - 用底盘左右 STEP 输出计数估算位移。
-  - 用 JY61P yaw 作为车体朝向。
-  - 输出车体相对零点的 `xMm/yMm/travelMm/yawDeg`。
-
-坐标约定：
-
-```text
-yMm：yaw=0 时车头前进方向
-xMm：车体右侧方向
-yawDeg：相对启动或 PoseSolver_Reset() 时的航向角
-```
-
-当前 STEP 到毫米比例只是占位：
-
-```c
-CAR_POSE_STEP_TO_MM_NUMERATOR
-CAR_POSE_STEP_TO_MM_DENOMINATOR
-```
-
-默认 `4 step = 1 mm`，后续必须用尺子实车标定。
-
-注意：
-
-- 这个模块只解算车体位姿，不解算云台绝对姿态。
-- 云台当前没有独立编码器或回零开关，不能可靠知道绝对角度。
-- 墙面画圆当前推荐视觉闭环，不优先做复杂三维几何模型。
-
-### JY61P
-
-- `hardware/jy61p.c/h`
-  - UART1，PB6 TX / PB7 RX。
-  - 解析 JY61P 角度帧。
-  - 当前缓存 roll/pitch/yaw。
-  - `PoseSolver` 主要使用 yaw。
-
-### 灰度输入与循迹
-
-- `hardware/gray.c/h`
-  - 当前默认数字灰度输入模式。
-  - 传感器模块自己完成黑白比较，MCU 读取 GPIO 高低电平。
-
-- `app/tracking.c/h`
-  - 根据灰度数字量计算循迹误差。
-  - 输出底盘左右 STEP 命令。
-
-- `app/tracking_exception.c/h`
-  - 处理丢线、搜线、传感器异常等情况。
-
-### 路线
-
-- `app/route.c/h`
-  - 使用底盘 STEP 输出计数估算路线距离。
-  - 不再使用旧编码器模块。
-  - 当前仍是任务路线框架，后续按实车继续标定距离和状态机。
-
-## UART 分配
-
-```text
-UART0：PA10 TX / PA11 RX，Type-C CH340 日志，115200
-UART1：PB6  TX / PB7  RX，JY61P，115200
-UART3：PB2  TX / PB3  RX，视觉/Exchange/Link，115200
-```
-
-JQ8400 语音模块当前暂停接入，不占串口。
-
-## 当前保留和禁止复用引脚
-
-- PA0 / PA1：OLED I2C0，开漏释放，必须上拉。
-- PA5 / PA6：外部晶振硬件保留，当前软件默认不用 PLL。
-- PA10 / PA11：Type-C CH340 日志 UART0，同时也是 BSL 数据线。
-- PA18：BSL invoke，保留恢复入口。
-- PA14：状态 LED。
-- PA19 / PA20：SWD 下载调试脚，禁止复用。
-- PA21 / PA23：VREF 相关，暂不做普通 GPIO/ADC。
-- PB14 / PB15 / PB16 / PB17：板载 SPI Flash，禁止应用层复用。
-
-## 状态 LED
-
-PA14：
-
-```text
-慢闪：主循环存活
-快闪：非致命错误，例如 OLED/I2C 超时
-常亮：致命错误，例如时钟失败
-```
-
-## 构建
+The normal safe flash path is:
 
 ```powershell
-& "D:\Ti\light-car1.0ccs\tools\build_ccs.ps1" -Clean
+.\tools\flash_xds110_safe.ps1 -SkipBuild
 ```
 
-构建只编译链接，不下载、不擦除芯片。成功输出类似：
+Factory Reset scripts exist for recovery, but they require explicit confirmation flags and should not be part of the normal workflow.
 
-```text
-Build OK: D:\Ti\light-car1.0ccs\Debug\codex-build\light-car-ccs1.2.out
-```
+For detailed recovery notes, see:
 
-## 下载和恢复
+- `doc/XDS110_RECOVERY_DEBUG_LOG_2026-05-23.md`
+- `tools/read_boot_diag.js`
 
-默认不要随便下载、擦除或 Factory Reset。
+## Roadmap
 
-普通 XDS110 安全下载脚本：
+- Stabilize NO-YAW tracking on right-angle turns.
+- Tune gimbal yaw/pitch direction, deadband, and speed limits on real hardware.
+- Finalize the UART vision protocol.
+- Add mission-level task orchestration.
+- Calibrate chassis STEP-to-distance conversion.
+- Add a formal open-source license.
 
-```powershell
-& "D:\Ti\light-car1.0ccs\tools\flash_xds110_safe.ps1" -SkipBuild
-```
+## Contributing
 
-Factory Reset 必须显式确认：
+This is an embedded firmware project tied to a specific robot build. Contributions are easiest to review when they are small and hardware-aware.
 
-```powershell
-& "D:\Ti\light-car1.0ccs\tools\factory_reset_xds110.ps1" -ConfirmFactoryReset
-```
+Recommended workflow:
 
-恢复安全模式开关：
+1. Keep pin-map changes isolated and document the real wiring.
+2. Build before submitting changes.
+3. Avoid mixing generated SysConfig changes with unrelated application logic.
+4. Describe whether a change was tested on hardware, simulated, or only compiled.
 
-```c
-#define CAR_RECOVERY_SAFE_BUILD       (0U)
-```
+## License
 
-只有救板子或首次恢复下载时才临时改成 `1U`。此模式只初始化 PA14 和三路 UART 心跳，不进入 App，不初始化 OLED/I2C/PLL/灰度/步进电机。
-
-## 安全策略
-
-- 正常构建使用内部 `SYSOSC 32MHz`，不启用 HFXT/SYSPLL。
-- OLED/I2C 所有等待都有超时。
-- I2C 异常时执行 bus clear，不允许死等。
-- 中断里不打印日志、不刷 OLED、不做 I2C/UART 阻塞等待。
-- TIMG0 只负责 STEP 调度。
-- UART3 中断只收字节入缓存，业务解析放主循环。
-- 不写 NONMAIN，不改 BSL 配置，不做 mass erase。
-
-## GitHub 分支
-
-当前推送分支：`1.2ccsadc`。
-
-如果 GitHub 首页仍显示旧代码，需要在 GitHub 仓库设置里把默认分支改到当前需要展示的 CCS 分支。
-
-## 后续计划
-
-- 实车测试 `Gimbal Test` 的视觉追踪方向、死区和增益。
-- 确认视觉模块实际输出协议，必要时把 Link 从“行解析”升级为正式帧协议。
-- 做墙面画圆任务框架：视觉给圆心/当前激光点，MCU 生成圆周目标点并驱动云台追踪。
-- 标定底盘 STEP 到毫米比例。
-- 如后续需要云台开环角度，再增加云台回零、step/deg 标定和 `GimbalPose`。
+No open-source license has been selected yet. Until a `LICENSE` file is added, reuse is not formally granted. Add a license such as MIT, Apache-2.0, or BSD-3-Clause before presenting this as a fully reusable open-source project.
