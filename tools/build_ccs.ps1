@@ -68,6 +68,11 @@ Assert-FileExists $LinkerCmd
 $sourceDirs = @("app", "hardware", "system", "generated") | ForEach-Object {
     Join-Path $ProjectDir $_
 }
+
+$FreeRtosDir = Join-Path $ProjectDir "Middlewares\FreeRTOS-Kernel"
+$FreeRtosPortDir = Join-Path $FreeRtosDir "portable\GCC\ARM_CM0"
+Assert-DirExists $FreeRtosDir
+Assert-DirExists $FreeRtosPortDir
 foreach ($dir in $sourceDirs) {
     Assert-DirExists $dir
 }
@@ -91,6 +96,8 @@ $includeDirs = @(
     (Join-Path $ProjectDir "system"),
     (Join-Path $ProjectDir "config"),
     (Join-Path $ProjectDir "generated"),
+    (Join-Path $FreeRtosDir "include"),
+    $FreeRtosPortDir,
     (Join-Path $SdkDir "source"),
     (Join-Path $SdkDir "source\third_party\CMSIS\Core\Include")
 )
@@ -115,6 +122,13 @@ $sources = @()
 foreach ($dir in $sourceDirs) {
     $sources += Get-ChildItem -LiteralPath $dir -Filter *.c -File
 }
+$sources += @(
+    (Get-Item -LiteralPath (Join-Path $FreeRtosDir "tasks.c"))
+    (Get-Item -LiteralPath (Join-Path $FreeRtosDir "list.c"))
+    (Get-Item -LiteralPath (Join-Path $FreeRtosDir "queue.c"))
+    (Get-Item -LiteralPath (Join-Path $FreeRtosPortDir "port.c"))
+    (Get-Item -LiteralPath (Join-Path $FreeRtosPortDir "portasm.c"))
+)
 if (-not (Test-Path -LiteralPath $ProjectStartup -PathType Leaf)) {
     Assert-FileExists $SdkStartup
     $sources += Get-Item -LiteralPath $SdkStartup
@@ -132,9 +146,9 @@ foreach ($source in $sources) {
     }
 }
 
-$output = Join-Path $BuildDir "light-car-ccs1.2.out"
-$map = Join-Path $BuildDir "light-car-ccs1.2.map"
-$linkInfo = Join-Path $BuildDir "light-car-ccs1.2_linkInfo.xml"
+$output = Join-Path $BuildDir "m0-light-rtos.out"
+$map = Join-Path $BuildDir "m0-light-rtos.map"
+$linkInfo = Join-Path $BuildDir "m0-light-rtos_linkInfo.xml"
 
 $linkArgs = @(
     "-march=thumbv6m",

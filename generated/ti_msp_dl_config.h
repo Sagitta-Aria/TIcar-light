@@ -36,7 +36,7 @@ extern "C" {
 #define CPUCLK_FREQ                                                     32000000
 #define SYSCFG_DL_ENABLE_HFXT_PLL                                           (0U)
 
-/* STEP 调度定时器：TIMG0 每 20us 进一次中断，不占用任何 STEP 引脚复用。 */
+/* 云台 STEP 调度定时器：TIMG0 每 20us 进一次中断。 */
 #define STEPPER_TIMER_INST                                                (TIMG0)
 #define STEPPER_TIMER_INST_IRQHandler                            TIMG0_IRQHandler
 #define STEPPER_TIMER_INST_INT_IRQN                              (TIMG0_INT_IRQn)
@@ -51,28 +51,7 @@ extern "C" {
 #define GPIO_HFXOUT_PIN                                            DL_GPIO_PIN_6
 #define GPIO_HFXOUT_IOMUX                                        (IOMUX_PINCM11)
 
-/*
- * Stepper DIR/STEP outputs.
- * 底盘左: PA12 STEP, PA22 DIR
- * 底盘右: PA13 STEP, PB24 DIR
- * 云台左右轴: PA7 STEP, PB18 DIR
- * 云台上下轴: PA8 STEP, PA9 DIR
- * EN 使能测试: PA2 / PA28 / PA31 / PB19
- */
-#define STEPPER_CHASSIS_LEFT_STEP_PORT                                     GPIOA
-#define STEPPER_CHASSIS_LEFT_STEP_PIN                             DL_GPIO_PIN_12
-#define STEPPER_CHASSIS_LEFT_STEP_IOMUX                           (IOMUX_PINCM34)
-#define STEPPER_CHASSIS_LEFT_DIR_PORT                                      GPIOA
-#define STEPPER_CHASSIS_LEFT_DIR_PIN                              DL_GPIO_PIN_22
-#define STEPPER_CHASSIS_LEFT_DIR_IOMUX                            (IOMUX_PINCM47)
-
-#define STEPPER_CHASSIS_RIGHT_STEP_PORT                                    GPIOA
-#define STEPPER_CHASSIS_RIGHT_STEP_PIN                            DL_GPIO_PIN_13
-#define STEPPER_CHASSIS_RIGHT_STEP_IOMUX                          (IOMUX_PINCM35)
-#define STEPPER_CHASSIS_RIGHT_DIR_PORT                                     GPIOB
-#define STEPPER_CHASSIS_RIGHT_DIR_PIN                             DL_GPIO_PIN_24
-#define STEPPER_CHASSIS_RIGHT_DIR_IOMUX                           (IOMUX_PINCM52)
-
+/* 云台两轴继续使用 STEP/DIR，底盘已经改为 PWM 编码电机。 */
 #define STEPPER_GIMBAL_1_STEP_PORT                                         GPIOA
 #define STEPPER_GIMBAL_1_STEP_PIN                                  DL_GPIO_PIN_7
 #define STEPPER_GIMBAL_1_STEP_IOMUX                               (IOMUX_PINCM14)
@@ -86,22 +65,6 @@ extern "C" {
 #define STEPPER_GIMBAL_2_DIR_PORT                                          GPIOA
 #define STEPPER_GIMBAL_2_DIR_PIN                                   DL_GPIO_PIN_9
 #define STEPPER_GIMBAL_2_DIR_IOMUX                                (IOMUX_PINCM20)
-
-#define STEPPER_CHASSIS_LEFT_EN_PORT                                       GPIOA
-#define STEPPER_CHASSIS_LEFT_EN_PIN                                DL_GPIO_PIN_2
-#define STEPPER_CHASSIS_LEFT_EN_IOMUX                              (IOMUX_PINCM7)
-
-#define STEPPER_CHASSIS_RIGHT_EN_PORT                                      GPIOA
-#define STEPPER_CHASSIS_RIGHT_EN_PIN                              DL_GPIO_PIN_28
-#define STEPPER_CHASSIS_RIGHT_EN_IOMUX                             (IOMUX_PINCM3)
-
-#define STEPPER_GIMBAL_1_EN_PORT                                           GPIOA
-#define STEPPER_GIMBAL_1_EN_PIN                                  DL_GPIO_PIN_31
-#define STEPPER_GIMBAL_1_EN_IOMUX                                  (IOMUX_PINCM6)
-
-#define STEPPER_GIMBAL_2_EN_PORT                                           GPIOB
-#define STEPPER_GIMBAL_2_EN_PIN                                  DL_GPIO_PIN_19
-#define STEPPER_GIMBAL_2_EN_IOMUX                                 (IOMUX_PINCM45)
 
 /* OLED I2C0: PA0 SDA, PA1 SCL，开漏释放并带上拉。 */
 #define OLED_INST                                                           I2C0

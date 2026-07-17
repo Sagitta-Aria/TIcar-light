@@ -21,7 +21,14 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
     uint16_t speedSps);
 
 /*
- * StepperPulse_StopAll：停止四路 STEP 输出并清空调度累加器。
+ * StepperPulse_SetRampStep：单独设置某一路 STEP 斜坡速度。
+ * 使用场景：Task4 强转时临时提高云台 yaw 轴响应，不影响底盘。
+ */
+void StepperPulse_SetRampStep(MotorId motor, uint16_t accelStepSps,
+    uint16_t decelStepSps);
+
+/*
+ * StepperPulse_StopAll：停止两路云台 STEP 输出并清空调度累加器。
  * 使用场景：状态切换、异常停车和电机初始化。
  */
 void StepperPulse_StopAll(void);

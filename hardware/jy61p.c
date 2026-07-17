@@ -4,31 +4,34 @@
 #include "log_uart.h"
 #include "ti_msp_dl_config.h"
 
-/* JY61P 一帧固定 11 字节，角度帧类型为 0x53。 */
+#define JY61P_FRAME_SIZE              (11U)
 #define JY61P_FRAME_HEAD              (0x55U)
 #define JY61P_FRAME_ANGLE             (0x53U)
-#define JY61P_FRAME_LENGTH            (11U)
-#define JY61P_CHECKSUM_LENGTH         (10U)
-#define JY61P_UART_TX_TIMEOUT_COUNT   (100000U)
+#define JY61P_UART_SERVICE_LIMIT      (16U)
+#define JY61P_UART_RX_DRAIN_LIMIT     (64U)
+#define JY61P_PRINT_PERIOD_MS         (100U)
+#define JY61P_PRINT_WAIT_MS           (1000U)
+#define JY61P_PRINT_PERIOD_TICKS \
+    ((JY61P_PRINT_PERIOD_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
+        CAR_APP_LOOP_DELAY_MS)
+#define JY61P_PRINT_WAIT_TICKS \
+    ((JY61P_PRINT_WAIT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
+        CAR_APP_LOOP_DELAY_MS)
 
-/* 单次 JY61P UART 中断最多服务的中断源和字节数，避免串口噪声长期占住 CPU。 */
-#define JY61P_IRQ_SERVICE_LIMIT       (16U)
-#define JY61P_IRQ_RX_DRAIN_LIMIT      (64U)
+typedef struct {
+    volatile int16_t rollX100;
+    volatile int16_t pitchX100;
+    volatile int16_t yawX100;
+    volatile uint32_t angleFrameCount;
+    volatile uint32_t badFrameCount;
+    uint8_t frame[JY61P_FRAME_SIZE];
+    uint8_t frameIndex;
+    uint16_t printTicks;
+    uint16_t waitTicks;
+    uint32_t lastPrintedFrameCount;
+} JY61P_State;
 
-/* g_jy61pRollDeg/PitchDeg/YawDeg：当前缓存的姿态角。 */
-static volatile int16_t g_jy61pRollDeg;
-static volatile int16_t g_jy61pPitchDeg;
-static volatile int16_t g_jy61pYawDeg;
-
-/* g_jy61pAnglesValid：是否已经写入过有效姿态角。 */
-static volatile uint8_t g_jy61pYawValid;
-static volatile uint8_t g_jy61pAnglesValid;
-
-/* g_jy61pFrame：串口中断里拼出的当前 JY61P 数据帧。 */
-static uint8_t g_jy61pFrame[JY61P_FRAME_LENGTH];
-
-/* g_jy61pFrameIndex：当前已经接收到的数据帧位置。 */
-static uint8_t g_jy61pFrameIndex;
+static JY61P_State g_jy61p;
 
 static uint32_t JY61P_EnterCritical(void)
 {
@@ -42,142 +45,120 @@ static void JY61P_ExitCritical(uint32_t primask)
     __set_PRIMASK(primask);
 }
 
-/*
- * 作用：带超时发送 JY61P 串口数据。
- * 使用场景：后续配置 JY61P 输出频率或校准命令。
- * 说明：避免外设异常时永久停在串口发送等待里。
- */
-static uint8_t JY61P_TrySendByte(uint8_t data)
+static int16_t JY61P_ReadInt16(const uint8_t *data)
 {
-    uint32_t timeout = JY61P_UART_TX_TIMEOUT_COUNT;
-
-    while (timeout > 0U) {
-        if (DL_UART_Main_transmitDataCheck(JY61P_INST, data)) {
-            return 1U;
-        }
-        --timeout;
-    }
-    return 0U;
+    return (int16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8U));
 }
 
-/*
- * 作用：检查 JY61P 数据帧校验和。
- * 使用场景：串口收到 11 字节完整帧后，先确认数据可信再更新 yaw。
- */
-static uint8_t JY61P_CheckFrame(const uint8_t *frame)
+static int16_t JY61P_AngleRawToX100(int16_t raw)
 {
+    return (int16_t)(((int32_t)raw * 18000L) / 32768L);
+}
+
+static uint8_t JY61P_FrameChecksumOk(const uint8_t frame[JY61P_FRAME_SIZE])
+{
+    uint8_t sum = 0U;
     uint8_t i;
-    uint8_t checksum = 0U;
 
-    for (i = 0U; i < JY61P_CHECKSUM_LENGTH; ++i) {
-        checksum = (uint8_t)(checksum + frame[i]);
+    for (i = 0U; i < (uint8_t)(JY61P_FRAME_SIZE - 1U); ++i) {
+        sum = (uint8_t)(sum + frame[i]);
+    }
+    return (uint8_t)(sum == frame[JY61P_FRAME_SIZE - 1U]);
+}
+
+static void JY61P_ApplyFrame(const uint8_t frame[JY61P_FRAME_SIZE])
+{
+    if (JY61P_FrameChecksumOk(frame) == 0U) {
+        ++g_jy61p.badFrameCount;
+        return;
     }
 
-    return (checksum == frame[JY61P_CHECKSUM_LENGTH]) ? 1U : 0U;
+    if (frame[1] != JY61P_FRAME_ANGLE) {
+        return;
+    }
+
+    g_jy61p.rollX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[2]));
+    g_jy61p.pitchX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[4]));
+    g_jy61p.yawX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[6]));
+    ++g_jy61p.angleFrameCount;
 }
 
-/*
- * 作用：把小端格式的 int16 原始值取出来。
- * 使用场景：解析 JY61P 角度帧里的 yaw 原始值。
- */
-static int16_t JY61P_ReadInt16LE(uint8_t low, uint8_t high)
-{
-    return (int16_t)(((uint16_t)high << 8) | (uint16_t)low);
-}
-
-/*
- * 作用：把 JY61P 角度原始值换算成整数角度。
- * 使用场景：路线外环判断是否已经转过 90 度。
- */
-static int16_t JY61P_RawAngleToDeg(int16_t rawAngle)
-{
-    return (int16_t)(((int32_t)rawAngle * 180L) / 32768L);
-}
-
-/*
- * 作用：处理完整角度帧，提取 yaw 并写入缓存。
- * 使用场景：接收到 0x55 0x53 姿态角帧后调用。
- */
-static void JY61P_HandleAngleFrame(const uint8_t *frame)
-{
-    int16_t rawRoll = JY61P_ReadInt16LE(frame[2], frame[3]);
-    int16_t rawPitch = JY61P_ReadInt16LE(frame[4], frame[5]);
-    int16_t rawYaw = JY61P_ReadInt16LE(frame[6], frame[7]);
-
-    JY61P_SetAnglesDeg(JY61P_RawAngleToDeg(rawRoll),
-        JY61P_RawAngleToDeg(rawPitch), JY61P_RawAngleToDeg(rawYaw));
-}
-
-/*
- * 作用：逐字节同步并解析 JY61P 数据帧。
- * 使用场景：JY61P 接收中断每拿到 1 个字节就喂给它。
- */
 static void JY61P_ParseByte(uint8_t data)
 {
-    if (g_jy61pFrameIndex == 0U) {
+    if (g_jy61p.frameIndex == 0U) {
+        if (data != JY61P_FRAME_HEAD) {
+            return;
+        }
+        g_jy61p.frame[g_jy61p.frameIndex] = data;
+        ++g_jy61p.frameIndex;
+        return;
+    }
+
+    if ((g_jy61p.frameIndex == 1U) && (data != JY61P_FRAME_ANGLE)) {
+        g_jy61p.frameIndex = 0U;
         if (data == JY61P_FRAME_HEAD) {
-            g_jy61pFrame[0] = data;
-            g_jy61pFrameIndex = 1U;
+            g_jy61p.frame[0] = data;
+            g_jy61p.frameIndex = 1U;
         }
         return;
     }
 
-    if ((g_jy61pFrameIndex == 1U) && (data == JY61P_FRAME_HEAD)) {
-        g_jy61pFrame[0] = data;
-        return;
+    g_jy61p.frame[g_jy61p.frameIndex] = data;
+    ++g_jy61p.frameIndex;
+    if (g_jy61p.frameIndex >= JY61P_FRAME_SIZE) {
+        JY61P_ApplyFrame(g_jy61p.frame);
+        g_jy61p.frameIndex = 0U;
     }
+}
 
-    g_jy61pFrame[g_jy61pFrameIndex] = data;
-    ++g_jy61pFrameIndex;
+static void JY61P_PrintAngle(const char *label, int16_t valueX100)
+{
+    int32_t value = valueX100;
+    uint32_t magnitude;
+    uint32_t fraction;
 
-    if (g_jy61pFrameIndex >= JY61P_FRAME_LENGTH) {
-        if ((g_jy61pFrame[1] == JY61P_FRAME_ANGLE) &&
-            JY61P_CheckFrame(g_jy61pFrame)) {
-            JY61P_HandleAngleFrame(g_jy61pFrame);
-        }
-        g_jy61pFrameIndex = 0U;
+    LogUart_SendString(label);
+    if (value < 0) {
+        LogUart_SendByte((uint8_t)'-');
+        magnitude = (uint32_t)(-value);
+    } else {
+        magnitude = (uint32_t)value;
     }
+    LogUart_SendUnsigned(magnitude / 100U);
+    LogUart_SendByte((uint8_t)'.');
+    fraction = magnitude % 100U;
+    if (fraction < 10U) {
+        LogUart_SendByte((uint8_t)'0');
+    }
+    LogUart_SendUnsigned(fraction);
 }
 
 void JY61P_Init(void)
 {
+    uint8_t i;
+
+    g_jy61p.rollX100 = 0;
+    g_jy61p.pitchX100 = 0;
+    g_jy61p.yawX100 = 0;
+    g_jy61p.angleFrameCount = 0U;
+    g_jy61p.badFrameCount = 0U;
+    for (i = 0U; i < JY61P_FRAME_SIZE; ++i) {
+        g_jy61p.frame[i] = 0U;
+    }
+    g_jy61p.frameIndex = 0U;
+    g_jy61p.printTicks = 0U;
+    g_jy61p.waitTicks = 0U;
+    g_jy61p.lastPrintedFrameCount = 0U;
+
     DL_UART_Main_setRXFIFOThreshold(
         JY61P_INST, DL_UART_MAIN_RX_FIFO_LEVEL_ONE_ENTRY);
-    DL_UART_Main_enableInterrupt(JY61P_INST, DL_UART_MAIN_INTERRUPT_RX);
+    DL_UART_Main_enableInterrupt(JY61P_INST,
+        DL_UART_MAIN_INTERRUPT_RX |
+        DL_UART_MAIN_INTERRUPT_OVERRUN_ERROR |
+        DL_UART_MAIN_INTERRUPT_FRAMING_ERROR |
+        DL_UART_MAIN_INTERRUPT_NOISE_ERROR);
     NVIC_ClearPendingIRQ(JY61P_INST_INT_IRQN);
     NVIC_EnableIRQ(JY61P_INST_INT_IRQN);
-    g_jy61pRollDeg = 0;
-    g_jy61pPitchDeg = 0;
-    g_jy61pYawDeg = 0;
-    g_jy61pYawValid = 0U;
-    g_jy61pAnglesValid = 0U;
-    g_jy61pFrameIndex = 0U;
-}
-
-void JY61P_Task(void)
-{
-    static uint16_t logTicks;
-    int16_t rollDeg = 0;
-    int16_t pitchDeg = 0;
-    int16_t yawDeg = 0;
-    uint8_t anglesValid;
-
-    ++logTicks;
-    if (logTicks < CAR_JY61P_LOG_TICKS) {
-        return;
-    }
-    logTicks = 0U;
-
-    anglesValid = JY61P_GetAnglesDeg(&rollDeg, &pitchDeg, &yawDeg);
-    LOG_RAW("[JY61P] valid=");
-    LogUart_SendUnsigned(anglesValid);
-    LOG_RAW(" roll=");
-    LogUart_SendSigned(rollDeg);
-    LOG_RAW(" pitch=");
-    LogUart_SendSigned(pitchDeg);
-    LOG_RAW(" yaw=");
-    LogUart_SendSigned(yawDeg);
-    LOG_LINE("");
 }
 
 void JY61P_HandleUARTInterrupt(void)
@@ -191,91 +172,73 @@ void JY61P_HandleUARTInterrupt(void)
         pending = DL_UART_Main_getPendingInterrupt(JY61P_INST);
         if (pending == DL_UART_MAIN_IIDX_RX) {
             rxCount = 0U;
-            while ((rxCount < JY61P_IRQ_RX_DRAIN_LIMIT) &&
+            while ((rxCount < JY61P_UART_RX_DRAIN_LIMIT) &&
                 DL_UART_Main_receiveDataCheck(JY61P_INST, &data)) {
                 JY61P_ParseByte(data);
                 ++rxCount;
             }
+        } else if ((pending == DL_UART_MAIN_IIDX_FRAMING_ERROR) ||
+            (pending == DL_UART_MAIN_IIDX_NOISE_ERROR) ||
+            (pending == DL_UART_MAIN_IIDX_OVERRUN_ERROR)) {
+            ++g_jy61p.badFrameCount;
         }
         ++serviceCount;
     } while ((pending != DL_UART_MAIN_IIDX_NO_INTERRUPT) &&
-        (serviceCount < JY61P_IRQ_SERVICE_LIMIT));
+        (serviceCount < JY61P_UART_SERVICE_LIMIT));
 }
 
-void JY61P_SendByte(uint8_t data)
+uint8_t JY61P_GetAttitude(JY61P_Attitude *attitude)
 {
-    (void)JY61P_TrySendByte(data);
-}
-
-void JY61P_SendBytes(const uint8_t *data, uint16_t length)
-{
-    uint16_t i;
-
-    if (data == 0) {
-        return;
-    }
-    for (i = 0U; i < length; ++i) {
-        if (!JY61P_TrySendByte(data[i])) {
-            return;
-        }
-    }
-}
-
-void JY61P_SetYawDeg(int16_t yawDeg)
-{
-    g_jy61pYawDeg = yawDeg;
-    g_jy61pYawValid = 1U;
-}
-
-void JY61P_SetAnglesDeg(int16_t rollDeg, int16_t pitchDeg, int16_t yawDeg)
-{
-    g_jy61pRollDeg = rollDeg;
-    g_jy61pPitchDeg = pitchDeg;
-    g_jy61pYawDeg = yawDeg;
-    g_jy61pYawValid = 1U;
-    g_jy61pAnglesValid = 1U;
-}
-
-int16_t JY61P_GetRollDeg(void)
-{
-    return g_jy61pRollDeg;
-}
-
-int16_t JY61P_GetPitchDeg(void)
-{
-    return g_jy61pPitchDeg;
-}
-
-uint8_t JY61P_GetAnglesDeg(int16_t *rollDeg, int16_t *pitchDeg,
-    int16_t *yawDeg)
-{
-    uint8_t valid;
     uint32_t primask;
 
-    if ((rollDeg == 0) || (pitchDeg == 0) || (yawDeg == 0)) {
+    if (attitude == 0) {
         return 0U;
     }
 
     primask = JY61P_EnterCritical();
-    *rollDeg = g_jy61pRollDeg;
-    *pitchDeg = g_jy61pPitchDeg;
-    *yawDeg = g_jy61pYawDeg;
-    valid = g_jy61pAnglesValid;
+    attitude->rollX100 = g_jy61p.rollX100;
+    attitude->pitchX100 = g_jy61p.pitchX100;
+    attitude->yawX100 = g_jy61p.yawX100;
+    attitude->angleFrameCount = g_jy61p.angleFrameCount;
+    attitude->badFrameCount = g_jy61p.badFrameCount;
     JY61P_ExitCritical(primask);
-    return valid;
+
+    return (attitude->angleFrameCount != 0U) ? 1U : 0U;
 }
 
-int16_t JY61P_GetYawDeg(void)
+void JY61P_PrintTask(void)
 {
-    return g_jy61pYawDeg;
-}
+    JY61P_Attitude attitude;
 
-uint8_t JY61P_HasYaw(void)
-{
-    return g_jy61pYawValid;
-}
+    if (g_jy61p.printTicks < (uint16_t)JY61P_PRINT_PERIOD_TICKS) {
+        ++g_jy61p.printTicks;
+        return;
+    }
+    g_jy61p.printTicks = 0U;
 
-uint8_t JY61P_HasAngles(void)
-{
-    return g_jy61pAnglesValid;
+    if (JY61P_GetAttitude(&attitude) == 0U) {
+        if (g_jy61p.waitTicks < (uint16_t)JY61P_PRINT_WAIT_TICKS) {
+            ++g_jy61p.waitTicks;
+            return;
+        }
+        g_jy61p.waitTicks = 0U;
+        LOG_LINE("jy61p wait");
+        return;
+    }
+
+    g_jy61p.waitTicks = 0U;
+    if (attitude.angleFrameCount == g_jy61p.lastPrintedFrameCount) {
+        return;
+    }
+    g_jy61p.lastPrintedFrameCount = attitude.angleFrameCount;
+
+    LogUart_SendString("jy61p ");
+    JY61P_PrintAngle("roll=", attitude.rollX100);
+    JY61P_PrintAngle(" pitch=", attitude.pitchX100);
+    JY61P_PrintAngle(" yaw=", attitude.yawX100);
+    LogUart_SendString(" frame=");
+    LogUart_SendUnsigned(attitude.angleFrameCount);
+    LogUart_SendString(" bad=");
+    LogUart_SendUnsigned(attitude.badFrameCount);
+    LogUart_SendString("\r\n");
 }

@@ -10,6 +10,18 @@ void LogUart_Init(void);
 /* LogUart_Task：日志串口后台任务入口，当前发送为同步有限等待。 */
 void LogUart_Task(void);
 
+/* LogUart_HandleUARTInterrupt：UART0 ISR入口，只缓存接收字节。 */
+void LogUart_HandleUARTInterrupt(void);
+
+/* LogUart_TryReadByte：从UART0接收环形缓冲取一个字节。 */
+uint8_t LogUart_TryReadByte(uint8_t *data);
+
+/* LogUart_ClearRx：清空软件接收缓冲和累计错误计数。 */
+void LogUart_ClearRx(void);
+
+uint32_t LogUart_GetRxDropCount(void);
+uint32_t LogUart_GetRxErrorCount(void);
+
 /* LogUart_SendByte：向 Type-C 日志串口发送 1 个字节，内部带超时。 */
 void LogUart_SendByte(uint8_t data);
 

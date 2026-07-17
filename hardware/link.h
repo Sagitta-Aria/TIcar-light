@@ -5,7 +5,7 @@
 
 void Link_Init(void);
 void Link_Task(void);
-void Link_HandleUARTInterrupt(void);
+uint8_t Link_HandleUARTInterrupt(void);
 void Link_SendByte(uint8_t data);
 void Link_SendBytes(const uint8_t *data, uint16_t length);
 void Link_SendString(const char *text);

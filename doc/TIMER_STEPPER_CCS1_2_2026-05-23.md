@@ -1,39 +1,27 @@
-# ccs1.2 STEP 定时器调度说明
+# 云台 STEP 与灰度快采样定时器
 
-最后更新：2026-05-23
+TIMG0 是 50 kHz 周期中断，周期 20 us。底盘已改为 TIMA0 PWM 编码电机，不再使用 TIMG0 生成底盘 STEP。
 
-## 为什么改
+## 中断链路
 
-上一版中 STEP 脉冲由 `Motor_Task()` 在主循环里补发。OLED 刷新、串口日志、按键菜单或灰度读取变慢时，STEP 节奏也会跟着抖。ccs1.2 把脉冲生成迁到 TIMG0 周期中断，主循环只负责设置目标速度和方向。
-
-## 当前结构
+```text
+TIMG0_IRQHandler
+  -> StepperPulse_HandleTimerInterrupt   两路云台STEP调度
+  -> MotorNoYaw_TimerSample             内部分频到100 us读取数字灰度
+```
 
 | 文件 | 职责 |
 | --- | --- |
-| `hardware/motor.c/h` | 电机逻辑接口：设置方向、速度命令、停车、读取当前命令 |
-| `hardware/stepper_pulse.c/h` | STEP 脉冲调度：把速度命令换算成 Hz，在 TIMG0 ISR 中翻转 STEP |
-| `generated/ti_msp_dl_config.c/h` | 配置 TIMG0 为 20us 周期定时器 |
-| `system/interrupt.c` | `TIMG0_IRQHandler()` 分发到 `StepperPulse_HandleTimerInterrupt()` |
+| `generated/ti_msp_dl_config.c/h` | 配置 TIMG0 50 kHz 周期中断 |
+| `system/interrupt.c` | TIMG0 ISR 入口 |
+| `hardware/stepper_pulse.c/h` | PA7/PA8 两路云台 STEP 脉冲和斜坡 |
+| `app/motor_no_yaw.c` | 数字灰度事件快采样 |
 
-## 定时器参数
+当前系统时钟和 BUSCLK 都是内部 SYSOSC 32 MHz，TIMG0 `LOAD = 639`。云台命令仍使用 step/s；底盘目标使用编码器 count/s，两者不可混用。
 
-- 定时器：`TIMG0`
-- 周期：20us
-- 中断频率：50kHz
-- STEP 高电平：1 个 tick，约 20us
-- 当前换算：速度命令直接使用 SPS，`4000` 表示 `4000 step/s`
+## 中断约束
 
-当前默认仍使用内部 `SYSOSC 32MHz`，TIMG0 的 `LOAD` 按 32MHz/50kHz 计算为 639。后续如需更高主频，必须先确认 HFXT/SYSPLL 能稳定锁定。
-
-## 硬件现象
-
-- STEP 输出仍由 TIMG0 调度；当前云台左右轴使用 PA7，云台上下轴使用 PA8，底盘临时使用 PA12/PA13。
-- 低速测试时，电机速度和上一版接近，但声音应该更均匀。
-- OLED 刷新或串口日志变多时，电机 STEP 不会再被主循环明显拖慢。
-- 如果 OLED/I2C 异常，程序仍会走原来的超时和错误兜底，STEP 模块本身没有等待和死循环。
-
-## 注意事项
-
-- TIMG0 ISR 里禁止打印日志、刷 OLED、做 I2C/UART 阻塞等待。
-- `Motor_Task()` 现在保留为空任务，方便以后加入温度、告警或驱动器反馈处理。
-- 如果将来要极高速同步 STEP，可以再评估硬件 PWM/CCP 或多定时器方案；那一步才需要重新确认引脚复用和定时器通道。
+- ISR 内禁止日志、OLED、I2C、阻塞 UART 和 FreeRTOS 非 ISR API。
+- `MotorNoYaw_TimerSample()` 只读 GPIO、更新短计数器和置请求标志。
+- `StepperPulse_HandleTimerInterrupt()` 只轮询两路云台电机。
+- 修改时钟树后必须同步重新计算 TIMG0 load、TIMA0 PWM 周期和 FreeRTOS `configCPU_CLOCK_HZ`。

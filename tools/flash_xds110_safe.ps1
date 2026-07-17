@@ -10,7 +10,7 @@ $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 $CcsDir = (Resolve-Path -LiteralPath $CcsDir).Path
 $BuildScript = Join-Path $ProjectDir "tools\build_ccs.ps1"
 $Config = Join-Path $ProjectDir "targetConfigs\MSPM0G3507_XDS110.ccxml"
-$Output = Join-Path $ProjectDir "Debug\codex-build\light-car-ccs1.2.out"
+$Output = Join-Path $ProjectDir "Debug\codex-build\m0-light-rtos.out"
 $Dslite = Join-Path $CcsDir "ccs_base\DebugServer\bin\DSLite.exe"
 
 if (-not (Test-Path -LiteralPath $BuildScript -PathType Leaf)) {

@@ -3,13 +3,12 @@
 #include "board_config.h"
 #include "delay.h"
 #include "gray.h"
-#include "jy61p.h"
+#include "interrupt.h"
 #include "key.h"
 #include "link.h"
 #include "log_uart.h"
 #include "motor.h"
 #include "oled.h"
-#include "stepper_pin_test.h"
 #include "ti_msp_dl_config.h"
 
 #define BOARD_BOOT_STEP_DELAY_MS    (80U)
@@ -17,12 +16,11 @@
 #define BOARD_DEBUG_LED_IOMUX       (IOMUX_PINCM36)
 #define BOARD_DEBUG_LED_PIN         (DL_GPIO_PIN_14)
 #define BOARD_FATAL_ERROR_MASK      (BOARD_ERROR_CLOCK)
-/* 正常模式下 App_Task 每轮约 10ms，因此 50 拍约 0.5s 翻转一次。 */
+/* Board_Task由20ms UI任务调用，50拍约1s翻转一次。 */
 #define BOARD_SIGNAL_BLINK_TICKS    (50U)
 /* 非致命错误用更快频率提示，例如 OLED/I2C 超时。 */
 #define BOARD_ERROR_BLINK_TICKS     (10U)
 #define BOARD_OLED_RECOVER_PERIOD_TICKS (200U)
-#define BOARD_OLED_RECOVER_MAX_TRIES    (3U)
 #define BOARD_RECOVERY_BLINK_CYCLES (16000000U)
 #define BOARD_RECOVERY_POWER_DELAY  (16U)
 #define BOARD_RECOVERY_UART_TIMEOUT (100000U)
@@ -35,40 +33,12 @@
 #define BOARD_BOOT_LINE_STEP        (12U)
 
 static uint32_t g_boardErrors;
-static uint8_t g_boardOledRecoverTries;
-static uint8_t g_boardOledDisabled;
 
 #if CAR_RECOVERY_SAFE_BUILD
 static void Board_RecoveryUartInit(void);
 static void Board_RecoveryUartSendAll(const char *text);
 static uint8_t Board_RecoveryUartSendByte(UART_Regs *uart, uint8_t data);
 #endif
-
-/*
- * 作用：错误码变化时打一行日志。
- * 使用场景：OLED/I2C 超时、时钟错误等需要同时从 PA14 和串口确认的场景。
- */
-static void Board_LogErrorChange(uint32_t errors)
-{
-#if CAR_ENABLE_LOG_UART
-    if (errors == BOARD_ERROR_NONE) {
-        LOG_LINE("board error mask=0x00000000 CLEAR");
-        return;
-    }
-
-    LOG_RAW("board error mask=");
-    LogUart_SendHex32(errors);
-    if ((errors & BOARD_ERROR_OLED_I2C) != 0U) {
-        LOG_RAW(" OLED_I2C");
-    }
-    if ((errors & BOARD_ERROR_CLOCK) != 0U) {
-        LOG_RAW(" CLOCK");
-    }
-    LOG_LINE("");
-#else
-    (void)errors;
-#endif
-}
 
 /* 作用：清除已经恢复的板级错误位。 */
 static void Board_ClearError(BoardErrorCode error)
@@ -82,15 +52,8 @@ static void Board_ClearError(BoardErrorCode error)
  */
 static uint8_t Board_UpdateOledError(void)
 {
-    if (g_boardOledDisabled != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
-        return 0U;
-    }
-
     if (OLED_HasError() == 0U) {
         Board_ClearError(BOARD_ERROR_OLED_I2C);
-        g_boardOledRecoverTries = 0U;
-        g_boardOledDisabled = 0U;
         return 1U;
     }
 
@@ -104,35 +67,16 @@ static uint8_t Board_UpdateOledError(void)
  */
 static uint8_t Board_TryRecoverOled(void)
 {
-    if (g_boardOledDisabled != 0U) {
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
-        return 0U;
-    }
-
     if (OLED_HasError() == 0U) {
         Board_ClearError(BOARD_ERROR_OLED_I2C);
-        g_boardOledRecoverTries = 0U;
-        g_boardOledDisabled = 0U;
         return 1U;
     }
 
-    if (g_boardOledRecoverTries >= BOARD_OLED_RECOVER_MAX_TRIES) {
-        g_boardOledDisabled = 1U;
-        Board_ReportError(BOARD_ERROR_OLED_I2C);
-        return 0U;
-    }
-
-    ++g_boardOledRecoverTries;
     if ((OLED_TryRecover() != 0U) && (OLED_HasError() == 0U)) {
         Board_ClearError(BOARD_ERROR_OLED_I2C);
-        g_boardOledRecoverTries = 0U;
-        g_boardOledDisabled = 0U;
         return 1U;
     }
 
-    if (g_boardOledRecoverTries >= BOARD_OLED_RECOVER_MAX_TRIES) {
-        g_boardOledDisabled = 1U;
-    }
     Board_ReportError(BOARD_ERROR_OLED_I2C);
     return 0U;
 }
@@ -232,16 +176,14 @@ static void Board_ShowBootStep(const char *done, const char *running,
 /*
  * 作用：恢复安全模式下只拉起串口打印，不初始化其它外设。
  * 使用场景：XDS110/CCS 下载流程不稳定时，用串口判断程序是否真的烧录并运行。
- * 说明：同时打开日志、姿态、视觉三路 UART，便于恢复时观察任意一路。
+ * 说明：同时打开日志和视觉两路 UART，便于恢复时观察输出。
  */
 static void Board_RecoveryUartInit(void)
 {
     DL_UART_Main_reset(LogUart_INST);
-    DL_UART_Main_reset(JY61P_INST);
     DL_UART_Main_reset(Exchange_INST);
 
     DL_UART_Main_enablePower(LogUart_INST);
-    DL_UART_Main_enablePower(JY61P_INST);
     DL_UART_Main_enablePower(Exchange_INST);
 
     DL_GPIO_initPeripheralOutputFunction(
@@ -249,16 +191,11 @@ static void Board_RecoveryUartInit(void)
     DL_GPIO_initPeripheralInputFunction(
         GPIO_LogUart_IOMUX_RX, GPIO_LogUart_IOMUX_RX_FUNC);
     DL_GPIO_initPeripheralOutputFunction(
-        GPIO_JY61P_IOMUX_TX, GPIO_JY61P_IOMUX_TX_FUNC);
-    DL_GPIO_initPeripheralInputFunction(
-        GPIO_JY61P_IOMUX_RX, GPIO_JY61P_IOMUX_RX_FUNC);
-    DL_GPIO_initPeripheralOutputFunction(
         GPIO_Exchange_IOMUX_TX, GPIO_Exchange_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_Exchange_IOMUX_RX, GPIO_Exchange_IOMUX_RX_FUNC);
 
     SYSCFG_DL_LogUart_init();
-    SYSCFG_DL_JY61P_init();
     SYSCFG_DL_Exchange_init();
 }
 
@@ -281,14 +218,13 @@ static uint8_t Board_RecoveryUartSendByte(UART_Regs *uart, uint8_t data)
 }
 
 /*
- * 作用：把恢复心跳同时打印到三路 UART。
- * 使用场景：不知道 USB-TTL 现在接在哪一路 TX 时，三路都能看到同一条消息。
+ * 作用：把恢复心跳同时打印到两路 UART。
+ * 使用场景：不知道 USB-TTL 现在接在哪一路 TX 时，两路都能看到同一条消息。
  */
 static void Board_RecoveryUartSendAll(const char *text)
 {
     while ((text != NULL) && (*text != '\0')) {
         (void)Board_RecoveryUartSendByte(LogUart_INST, (uint8_t)*text);
-        (void)Board_RecoveryUartSendByte(JY61P_INST, (uint8_t)*text);
         (void)Board_RecoveryUartSendByte(Exchange_INST, (uint8_t)*text);
         ++text;
     }
@@ -376,9 +312,6 @@ uint8_t Board_HasFatalError(void)  //有致命错误返回 1，没有返回 0
 
 uint8_t Board_IsOledAvailable(void)
 {
-    if (g_boardOledDisabled != 0U) {
-        return 0U;
-    }
     if ((g_boardErrors & BOARD_ERROR_OLED_I2C) != 0U) {
         return 0U;
     }
@@ -388,27 +321,8 @@ uint8_t Board_IsOledAvailable(void)
 void Board_Init(void)
 {
     g_boardErrors = BOARD_ERROR_NONE;
-    g_boardOledRecoverTries = 0U;
-    g_boardOledDisabled = 0U;
 
-#if CAR_GIMBAL_PIN_TEST_BUILD
-    /*
-     * 云台引脚测试模式：
-     * 只打开 SYSOSC、GPIOA/GPIOB、PA14 和两路云台 STEP/DIR。
-     * 不初始化 OLED/I2C、UART、灰度、按键、TIMG0，避免复杂外设干扰排查。
-     */
-    DL_SYSCTL_setBORThreshold(DL_SYSCTL_BOR_THRESHOLD_LEVEL_0);
-    DL_SYSCTL_setSYSOSCFreq(DL_SYSCTL_SYSOSC_FREQ_BASE);
-    DL_SYSCTL_disableHFXT();
-    DL_SYSCTL_disableSYSPLL();
-
-    DL_GPIO_enablePower(GPIOA);
-    DL_GPIO_enablePower(GPIOB);
-    delay_cycles(POWER_STARTUP_DELAY);
-    Board_DebugLedInit();
-    StepperPinTest_InitPins();
-    return;
-#elif CAR_RECOVERY_SAFE_BUILD
+#if CAR_RECOVERY_SAFE_BUILD
     /*
      * 恢复安全模式：
      * 只用内部 SYSOSC，关闭 HFXT/PLL，只给 GPIOA/GPIOB 上电并配置 PA14、UART。
@@ -459,6 +373,8 @@ void Board_Init(void)
         return;
     }
 
+    Interrupt_Init();
+
     SYSCFG_DL_OLED_init();
     OLED_Init();
     (void)Board_UpdateOledError();
@@ -473,13 +389,13 @@ void Board_Init(void)
     Board_ShowBootStep("OK Stepper GPIO", "RUN UART", "WAIT Gray",
         "WAIT Drivers");
 
-    SYSCFG_DL_JY61P_init();
     SYSCFG_DL_Exchange_init();
+    SYSCFG_DL_JY61P_init();
 #if CAR_ENABLE_LOG_UART
     SYSCFG_DL_LogUart_init();
     LogUart_Init();
     Board_BootProbe("after log uart init");
-    LOG_LINE("board uart: log/jy61p/exchange ok");
+    LOG_LINE("board uart: log/exchange ok");
     LOG_U32("clock mclk hz=", CPUCLK_FREQ);
     LOG_U32("clock bus hz=", LogUart_INST_FREQUENCY);
     LOG_U32("step timer clk hz=", STEPPER_TIMER_CLOCK_HZ);
@@ -492,21 +408,21 @@ void Board_Init(void)
 #if CAR_ENABLE_LOG_UART
 #if CAR_GRAY_INPUT_DIGITAL
     Board_BootProbe("before bootstep gray gpio");
-    Board_ShowBootStep("OK UART Log/JY/Ex", "RUN Gray GPIO", "WAIT Drivers",
+    Board_ShowBootStep("OK UART Log/Ex", "RUN Gray GPIO", "WAIT Drivers",
         "WAIT App");
     Board_BootProbe("after bootstep gray gpio");
 #else
     Board_BootProbe("before bootstep gray adc");
-    Board_ShowBootStep("OK UART Log/JY/Ex", "RUN Gray ADC", "WAIT Drivers",
+    Board_ShowBootStep("OK UART Log/Ex", "RUN Gray ADC", "WAIT Drivers",
         "WAIT App");
     Board_BootProbe("after bootstep gray adc");
 #endif
 #else
 #if CAR_GRAY_INPUT_DIGITAL
-    Board_ShowBootStep("OK UART JY/Ex", "RUN Gray GPIO", "WAIT Drivers",
+    Board_ShowBootStep("OK UART Ex", "RUN Gray GPIO", "WAIT Drivers",
         "WAIT App");
 #else
-    Board_ShowBootStep("OK UART JY/Ex", "RUN Gray ADC", "WAIT Drivers",
+    Board_ShowBootStep("OK UART Ex", "RUN Gray ADC", "WAIT Drivers",
         "WAIT App");
 #endif
 #endif
@@ -540,12 +456,7 @@ void Board_Init(void)
     Board_BootProbe("before key init");
     Key_Init();
     Board_BootProbe("after key init");
-    Board_ShowBootStep("OK Key", "RUN JY61P", "WAIT Link",
-        "WAIT App");
-    Board_BootProbe("before jy61p init");
-    JY61P_Init();
-    Board_BootProbe("after jy61p init");
-    Board_ShowBootStep("OK JY61P", "RUN Link", "WAIT App", "");
+    Board_ShowBootStep("OK Key", "RUN Link", "WAIT App", "");
     Board_BootProbe("before link init");
     Link_Init();
     Board_BootProbe("after link init");
@@ -566,7 +477,6 @@ void Board_Task(void)
 {
     static uint32_t signalCounter;
     static uint32_t errorCounter;
-    static uint32_t lastLoggedErrors;
     static uint16_t oledRecoverTicks;
 
 #if CAR_RECOVERY_SAFE_BUILD
@@ -578,11 +488,10 @@ void Board_Task(void)
     return;
 #endif
 
+    /* 运行时 I2C 错误先同步为板级状态；这里只读取一个错误标志。 */
+    (void)Board_UpdateOledError();
+
     if (Board_HasFatalError() != 0U) {
-        if (lastLoggedErrors != g_boardErrors) {
-            lastLoggedErrors = g_boardErrors;
-            Board_LogErrorChange(g_boardErrors);
-        }
 #if CAR_ENABLE_PA14_DEBUG_LED
         DL_GPIO_setPins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
@@ -590,17 +499,14 @@ void Board_Task(void)
     }
 
     if (g_boardErrors != BOARD_ERROR_NONE) {
-        if (lastLoggedErrors != g_boardErrors) {
-            lastLoggedErrors = g_boardErrors;
-            Board_LogErrorChange(g_boardErrors);
-        }
-        if (((g_boardErrors & BOARD_ERROR_OLED_I2C) != 0U) &&
-            (g_boardOledRecoverTries < BOARD_OLED_RECOVER_MAX_TRIES)) {
+        if ((g_boardErrors & BOARD_ERROR_OLED_I2C) != 0U) {
             ++oledRecoverTicks;
             if (oledRecoverTicks >= BOARD_OLED_RECOVER_PERIOD_TICKS) {
                 oledRecoverTicks = 0U;
                 (void)Board_TryRecoverOled();
             }
+        } else {
+            oledRecoverTicks = 0U;
         }
         ++errorCounter;
         if (errorCounter >= BOARD_ERROR_BLINK_TICKS) {
@@ -610,10 +516,6 @@ void Board_Task(void)
 #endif
         }
     } else {
-        if (lastLoggedErrors != BOARD_ERROR_NONE) {
-            lastLoggedErrors = BOARD_ERROR_NONE;
-            Board_LogErrorChange(BOARD_ERROR_NONE);
-        }
         oledRecoverTicks = 0U;
         errorCounter = 0U;
         ++signalCounter;

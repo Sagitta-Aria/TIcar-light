@@ -9,10 +9,10 @@
 	<createSlaveProjects value=""/>
 	<ignoreDefaultDeviceSettings value="true"/>
 	<ignoreDefaultCCSSettings value="true"/>
-	<templateProperties value="id=light-car-ccs1.2.projectspec.light-car-ccs1.2,buildProfile=release,isHybrid=true"/>
+	<templateProperties value="id=m0-light-rtos.projectspec.m0-light-rtos,buildProfile=release,isHybrid=true"/>
 	<activeTargetConfiguration value="targetConfigs/MSPM0G3507_XDS110.ccxml"/>
 	<isTargetConfigurationManual value="true"/>
 	<sourceLookupPath value="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/ti/driverlib"/>
-	<origin value="D:\Ti\light-car1.0ccs"/>
+	<origin value="D:\Ti\m0-light-rtos"/>
 	<filesToOpen value="app/main.c,README.md"/>
 </projectOptions>

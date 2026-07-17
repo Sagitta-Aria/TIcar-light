@@ -1,12 +1,19 @@
 #include "gimbal.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "board_config.h"
 #include "motor.h"
+#include "rtos_app.h"
 #include "staticconfig.h"
 
-#if (CAR_GIMBAL_PITCH_STEPS_PER_90 == 0U)
-#error "CAR_GIMBAL_PITCH_STEPS_PER_90 must be greater than 0"
+#if (CAR_GIMBAL_PITCH_LIMIT_STEPS == 0U)
+#error "CAR_GIMBAL_PITCH_LIMIT_STEPS must be greater than 0"
 #endif
+
+/* D 项只对相邻视觉帧差做轻量低通，P 项继续直接使用最新误差。 */
+#define GIMBAL_D_FILTER_DIVISOR    (4L)
 
 typedef struct {
     /* target/current 使用同一个视觉坐标系，当前视觉输入单位为 0.1 像素。 */
@@ -22,16 +29,26 @@ typedef struct {
     /* command 是输出给 motor.c 的有符号 SPS，绝对值越大 STEP 越快。 */
     int16_t commandX;
     int16_t commandY;
-    /* staleTicks 用来做视觉掉线保护，长时间没新数据就停云台。 */
-    uint16_t staleTicks;
+    int16_t yawFeedForwardSps;
+    /* lastVisionTick 用绝对RTOS时间做掉线保护，不依赖任务调用频率。 */
+    TickType_t lastVisionTick;
     /* pitchBaseStep 是进入视觉闭环时的上下轴 STEP 计数，作为相对 0 度。 */
     int32_t pitchBaseStep;
     uint8_t enabled;
     uint8_t hasVision;
     uint8_t hasLastError;
+    uint8_t controlPending;
+    uint8_t axisActiveX;
+    uint8_t axisActiveY;
 } GimbalControl;
 
 static GimbalControl g_gimbal;
+
+static void Gimbal_MarkVisionFresh(void)
+{
+    g_gimbal.hasVision = 1U;
+    g_gimbal.lastVisionTick = xTaskGetTickCount();
+}
 
 /*
  * 作用：把 int32_t 限制到 int16_t 可表达范围。
@@ -54,21 +71,48 @@ static uint16_t Gimbal_Abs16(int16_t value)
     return (value < 0) ? (uint16_t)(-(int32_t)value) : (uint16_t)value;
 }
 
+/* 作用：按 1/4 步长滤波相邻视觉帧误差变化，避免 D 项放大单帧噪声。 */
+static int16_t Gimbal_FilterErrorDelta(int16_t filtered, int16_t sample)
+{
+    int32_t difference = (int32_t)sample - (int32_t)filtered;
+    int32_t adjustment;
+
+    if (difference > 0) {
+        adjustment = (difference + GIMBAL_D_FILTER_DIVISOR - 1L) /
+            GIMBAL_D_FILTER_DIVISOR;
+    } else if (difference < 0) {
+        adjustment = -((-difference + GIMBAL_D_FILTER_DIVISOR - 1L) /
+            GIMBAL_D_FILTER_DIVISOR);
+    } else {
+        adjustment = 0;
+    }
+
+    return Gimbal_ClampInt16((int32_t)filtered + adjustment);
+}
+
 /*
  * 作用：把视觉误差转换成某一轴的有符号 PD SPS。
  * 说明：P 负责响应，D 根据相邻视觉帧的误差变化做阻尼，不累加误差。
  */
 static int16_t Gimbal_ComputeAxisCommand(int16_t error, int16_t errorDelta,
-    uint16_t deadband, uint16_t kp, uint16_t kd, uint16_t gainScale,
-    uint16_t minSpeedSps, uint16_t maxSpeedSps)
+    uint16_t deadband, uint16_t restartDeadband, uint16_t kp, uint16_t kd,
+    uint16_t gainScale, uint16_t minSpeedSps, uint16_t maxSpeedSps,
+    uint8_t *axisActive)
 {
     uint16_t absError = Gimbal_Abs16(error);
+    uint16_t threshold;
     int32_t command;
     uint32_t commandAbs;
 
-    if (absError <= deadband) {
+    if (restartDeadband < deadband) {
+        restartDeadband = deadband;
+    }
+    threshold = (*axisActive != 0U) ? deadband : restartDeadband;
+    if (absError <= threshold) {
+        *axisActive = 0U;
         return 0;
     }
+    *axisActive = 1U;
     if (gainScale == 0U) {
         gainScale = 1U;
     }
@@ -108,22 +152,26 @@ static int16_t Gimbal_ApplyReverse(int16_t command, uint8_t reverse)
     return reverse ? (int16_t)(-command) : command;
 }
 
-/* 作用：计算 pitch 限幅对应的 STEP 数。 */
-static int32_t Gimbal_GetPitchLimitSteps(void)
+static int16_t Gimbal_ClampCommand(int32_t command)
 {
-    return ((int32_t)CAR_GIMBAL_PITCH_STEPS_PER_90 *
-        (int32_t)CAR_GIMBAL_PITCH_LIMIT_DEG) / 90;
+    if (command > (int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
+        return (int16_t)CAR_STEPPER_SPEED_MAX_SPS;
+    }
+    if (command < -(int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
+        return (int16_t)(-(int32_t)CAR_STEPPER_SPEED_MAX_SPS);
+    }
+    return Gimbal_ClampInt16(command);
 }
 
 /*
- * 作用：按 pitch 相对角限幅裁剪上下轴命令。
+ * 作用：按 pitch 相对 STEP 限幅裁剪上下轴命令。
  * 说明：没有编码器/回零开关时，只能用进入闭环时的 STEP 计数作为相对零点。
  */
 static int16_t Gimbal_LimitPitchCommand(int16_t command)
 {
     int32_t pitchDelta =
         Motor_GetStepCount(MOTOR_GIMBAL_2) - g_gimbal.pitchBaseStep;
-    int32_t limitSteps = Gimbal_GetPitchLimitSteps();
+    int32_t limitSteps = (int32_t)CAR_GIMBAL_PITCH_LIMIT_STEPS;
 
     if ((command > 0) && (pitchDelta >= limitSteps)) {
         return 0;
@@ -149,6 +197,24 @@ static void Gimbal_SetAxis(MotorId motor, int16_t command)
     }
 }
 
+/* 作用：Task4 临时覆盖结束后恢复两个云台轴的默认斜坡。 */
+void Gimbal_ResetRamp(void)
+{
+    Motor_ResetRampStep(MOTOR_GIMBAL_1);
+    Motor_ResetRampStep(MOTOR_GIMBAL_2);
+}
+
+static void Gimbal_ApplyYawFeedForwardOnly(void)
+{
+    int16_t commandX = Gimbal_ApplyReverse(g_gimbal.yawFeedForwardSps,
+        CAR_GIMBAL_YAW_REVERSE);
+
+    g_gimbal.commandX = commandX;
+    g_gimbal.commandY = 0;
+    Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
+    Gimbal_SetAxis(MOTOR_GIMBAL_2, 0);
+}
+
 /*
  * 作用：写入最新视觉误差，并记录相邻视觉帧的误差变化量。
  * 使用场景：target/current 或激光差值变化后调用。
@@ -156,10 +222,15 @@ static void Gimbal_SetAxis(MotorId motor, int16_t command)
 static void Gimbal_SetError(int16_t errorX, int16_t errorY)
 {
     if (g_gimbal.hasLastError != 0U) {
-        g_gimbal.errorDeltaX = Gimbal_ClampInt16(
+        int16_t sampleDeltaX = Gimbal_ClampInt16(
             (int32_t)errorX - (int32_t)g_gimbal.lastErrorX);
-        g_gimbal.errorDeltaY = Gimbal_ClampInt16(
+        int16_t sampleDeltaY = Gimbal_ClampInt16(
             (int32_t)errorY - (int32_t)g_gimbal.lastErrorY);
+
+        g_gimbal.errorDeltaX = Gimbal_FilterErrorDelta(
+            g_gimbal.errorDeltaX, sampleDeltaX);
+        g_gimbal.errorDeltaY = Gimbal_FilterErrorDelta(
+            g_gimbal.errorDeltaY, sampleDeltaY);
     } else {
         g_gimbal.errorDeltaX = 0;
         g_gimbal.errorDeltaY = 0;
@@ -170,6 +241,7 @@ static void Gimbal_SetError(int16_t errorX, int16_t errorY)
     g_gimbal.errorY = errorY;
     g_gimbal.lastErrorX = errorX;
     g_gimbal.lastErrorY = errorY;
+    g_gimbal.controlPending = 1U;
 }
 
 /* 作用：根据 target/current 刷新误差。 */
@@ -194,14 +266,18 @@ static void Gimbal_ApplyControl(void)
     int16_t commandY;
 
     commandX = Gimbal_ComputeAxisCommand(g_gimbal.errorX,
-        g_gimbal.errorDeltaX, config->deadbandX, config->kpX, config->kdX,
-        config->gainScale, config->minSpeedX, config->maxSpeedX);
+        g_gimbal.errorDeltaX, config->deadbandX, config->restartDeadbandX,
+        config->kpX, config->kdX, config->gainScale, config->minSpeedX,
+        config->maxSpeedX, &g_gimbal.axisActiveX);
     commandY = Gimbal_ComputeAxisCommand(g_gimbal.errorY,
-        g_gimbal.errorDeltaY, config->deadbandY, config->kpY, config->kdY,
-        config->gainScale, config->minSpeedY, config->maxSpeedY);
+        g_gimbal.errorDeltaY, config->deadbandY, config->restartDeadbandY,
+        config->kpY, config->kdY, config->gainScale, config->minSpeedY,
+        config->maxSpeedY, &g_gimbal.axisActiveY);
 
-    commandX = Gimbal_ApplyReverse(commandX, CAR_GIMBAL_X_REVERSE);
-    commandY = Gimbal_ApplyReverse(commandY, CAR_GIMBAL_Y_REVERSE);
+    commandX = Gimbal_ClampCommand((int32_t)commandX +
+        (int32_t)g_gimbal.yawFeedForwardSps);
+    commandX = Gimbal_ApplyReverse(commandX, CAR_GIMBAL_YAW_REVERSE);
+    commandY = Gimbal_ApplyReverse(commandY, CAR_GIMBAL_PITCH_REVERSE);
     commandY = Gimbal_LimitPitchCommand(commandY);
 
     g_gimbal.commandX = commandX;
@@ -231,11 +307,15 @@ void Gimbal_Init(void)
     g_gimbal.lastErrorY = 0;
     g_gimbal.commandX = 0;
     g_gimbal.commandY = 0;
-    g_gimbal.staleTicks = 0U;
+    g_gimbal.yawFeedForwardSps = 0;
+    g_gimbal.lastVisionTick = 0U;
     g_gimbal.pitchBaseStep = Motor_GetStepCount(MOTOR_GIMBAL_2);
     g_gimbal.enabled = 0U;
     g_gimbal.hasVision = 0U;
     g_gimbal.hasLastError = 0U;
+    g_gimbal.controlPending = 0U;
+    g_gimbal.axisActiveX = 0U;
+    g_gimbal.axisActiveY = 0U;
     Gimbal_Stop();
 }
 
@@ -249,18 +329,27 @@ void Gimbal_SetEnabled(uint8_t enabled)
     uint8_t nextEnabled = enabled ? 1U : 0U;
 
     if ((g_gimbal.enabled == 0U) && (nextEnabled != 0U)) {
+        Gimbal_ResetRamp();
         g_gimbal.pitchBaseStep = Motor_GetStepCount(MOTOR_GIMBAL_2);
-        g_gimbal.staleTicks = 0U;
+        g_gimbal.lastVisionTick = xTaskGetTickCount();
         g_gimbal.hasVision = 0U;
         g_gimbal.errorDeltaX = 0;
         g_gimbal.errorDeltaY = 0;
         g_gimbal.hasLastError = 0U;
+        g_gimbal.controlPending = 0U;
+        g_gimbal.axisActiveX = 0U;
+        g_gimbal.axisActiveY = 0U;
     }
 
     g_gimbal.enabled = nextEnabled;
     if (!g_gimbal.enabled) {
+        g_gimbal.controlPending = 0U;
+        g_gimbal.axisActiveX = 0U;
+        g_gimbal.axisActiveY = 0U;
         Gimbal_Stop();
+        Gimbal_ResetRamp();
     }
+    RtosApp_NotifyGimbal();
 }
 
 /* 作用：返回云台闭环是否启用。 */
@@ -269,12 +358,19 @@ uint8_t Gimbal_IsEnabled(void)
     return g_gimbal.enabled;
 }
 
+uint8_t Gimbal_NeedsTimeoutService(void)
+{
+    return (uint8_t)(((g_gimbal.enabled != 0U) &&
+        (g_gimbal.hasVision != 0U)) ? 1U : 0U);
+}
+
 /* 作用：单独更新目标点，坐标单位跟视觉输入一致，当前为 0.1 像素。 */
 void Gimbal_SetTarget(int16_t x, int16_t y)
 {
     g_gimbal.target.x = x;
     g_gimbal.target.y = y;
     Gimbal_UpdateError();
+    RtosApp_NotifyGimbal();
 }
 
 /* 作用：单独更新当前识别点，并标记已有视觉数据，当前单位为 0.1 像素。 */
@@ -282,9 +378,9 @@ void Gimbal_SetCurrent(int16_t x, int16_t y)
 {
     g_gimbal.current.x = x;
     g_gimbal.current.y = y;
-    g_gimbal.hasVision = 1U;
-    g_gimbal.staleTicks = 0U;
+    Gimbal_MarkVisionFresh();
     Gimbal_UpdateError();
+    RtosApp_NotifyGimbal();
 }
 
 void Gimbal_UpdateFromVision(int16_t targetX, int16_t targetY,
@@ -292,14 +388,13 @@ void Gimbal_UpdateFromVision(int16_t targetX, int16_t targetY,
 {
     /*
      * 这里只更新控制输入和误差，不直接等待或阻塞。
-     * 真正的 STEP 命令在 Gimbal_Task() 里周期输出。
+     * 真正的 STEP 命令在 Gimbal_Task() 被通知后输出。
      */
     g_gimbal.target.x = targetX;
     g_gimbal.target.y = targetY;
     g_gimbal.current.x = currentX;
     g_gimbal.current.y = currentY;
-    g_gimbal.hasVision = 1U;
-    g_gimbal.staleTicks = 0U;
+    Gimbal_MarkVisionFresh();
     Gimbal_UpdateError();
 }
 
@@ -341,13 +436,12 @@ void Gimbal_UpdateFromCameraError(int16_t targetMinusCurrentX,
     g_gimbal.current.y = Gimbal_ClampInt16(
         -(int32_t)adjustedErrorY);
     Gimbal_SetError(adjustedErrorX, adjustedErrorY);
-    g_gimbal.hasVision = 1U;
-    g_gimbal.staleTicks = 0U;
+    Gimbal_MarkVisionFresh();
 }
 
 /*
- * 作用：云台闭环周期任务。
- * 使用场景：App_Task 每轮调用。
+ * 作用：处理一次云台闭环更新或视觉掉线超时。
+ * 使用场景：Gimbal任务收到视觉/控制通知或超时后调用。
  * 说明：没有视觉数据或视觉超时时会停止云台，防止丢帧后继续输出旧命令。
  */
 void Gimbal_Task(void)
@@ -356,20 +450,50 @@ void Gimbal_Task(void)
         return;
     }
 
-    /* 启用了闭环但还没有视觉数据时，保持云台停止。 */
+    /* 没有视觉数据时，允许 Task4 yaw 基础速度继续输出。 */
     if (!g_gimbal.hasVision) {
+        if (g_gimbal.yawFeedForwardSps != 0) {
+            Gimbal_ApplyYawFeedForwardOnly();
+            return;
+        }
         Gimbal_Stop();
         return;
     }
 
-    /* 视觉数据超时后停止输出，避免目标丢失时云台继续乱转。 */
-    if (g_gimbal.staleTicks >= CAR_GIMBAL_VISION_TIMEOUT_TICKS) {
+    /* 视觉超时后保留 Task4 yaw 基础速度，pitch 轴停止。 */
+    if ((xTaskGetTickCount() - g_gimbal.lastVisionTick) >=
+        pdMS_TO_TICKS(CAR_GIMBAL_VISION_TIMEOUT_TICKS)) {
+        g_gimbal.hasVision = 0U;
+        g_gimbal.hasLastError = 0U;
+        g_gimbal.errorDeltaX = 0;
+        g_gimbal.errorDeltaY = 0;
+        g_gimbal.controlPending = 0U;
+        g_gimbal.axisActiveX = 0U;
+        g_gimbal.axisActiveY = 0U;
+        if (g_gimbal.yawFeedForwardSps != 0) {
+            Gimbal_ApplyYawFeedForwardOnly();
+            return;
+        }
         Gimbal_Stop();
         return;
     }
-    ++g_gimbal.staleTicks;
-
+    if (g_gimbal.controlPending == 0U) {
+        return;
+    }
+    g_gimbal.controlPending = 0U;
     Gimbal_ApplyControl();
+}
+
+void Gimbal_SetYawFeedForward(int16_t speedSps)
+{
+    int16_t nextSpeedSps = Gimbal_ClampCommand((int32_t)speedSps);
+
+    if (nextSpeedSps == g_gimbal.yawFeedForwardSps) {
+        return;
+    }
+    g_gimbal.yawFeedForwardSps = nextSpeedSps;
+    g_gimbal.controlPending = 1U;
+    RtosApp_NotifyGimbal();
 }
 
 /* 作用：停止云台两个轴，不改变底盘速度。 */

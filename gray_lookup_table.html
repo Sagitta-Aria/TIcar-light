@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task1 灰度查找表</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #1d2733;
+      --muted: #667085;
+      --line: #d9dee7;
+      --head: #263241;
+      --head-text: #ffffff;
+      --lost: #fff1f0;
+      --center: #edf7ed;
+      --left: #eef4ff;
+      --right: #fff7e6;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+    }
+
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      line-height: 1.25;
+    }
+
+    .note {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .summary div {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+
+    code {
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      table-layout: fixed;
+    }
+
+    caption {
+      caption-side: top;
+      text-align: left;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 6px 7px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--head);
+      color: var(--head-text);
+      font-weight: 600;
+    }
+
+    td.mask,
+    td.bits {
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    tr.lost td {
+      background: var(--lost);
+    }
+
+    tr.center td.result {
+      background: var(--center);
+    }
+
+    tr.left-fast td.result {
+      background: var(--left);
+    }
+
+    tr.right-fast td.result {
+      background: var(--right);
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Task1 灰度亮灭到左右轮速度查找表</h1>
+    <p class="note">
+      按当前源码计算：位序为 <code>S1S2S3S4S5S6S7</code>，<code>1</code> 表示该灰度有效/亮；速度单位是 <code>encoder count / 20ms</code>。
+      当前权重行 <code>-6 -4, -2, 0, 2, 4, 6</code> 在 C 中实际等于 <code>S1=-10, S2=-2, S3=0, S4=2, S5=4, S6=6, S7=0</code>。
+    </p>
+
+    <section class="summary">
+      <div><strong>base</strong><br><code>-40</code></div>
+      <div><strong>min / max</strong><br><code>-55 / -10</code></div>
+      <div><strong>turn_gain</strong><br><code>20</code></div>
+      <div><strong>turn_limit</strong><br><code>45</code></div>
+      <div><strong>丢线默认</strong><br><code>无上一拍: 左=0, 右=-20</code></div>
+    </section>
+
+    <div class="table-wrap">
+      <table id="lookup-table">
+        <caption>结果列格式：左轮 target / 右轮 target</caption>
+        <thead>
+          <tr>
+            <th>Mask</th>
+            <th>S1</th>
+            <th>S2</th>
+            <th>S3</th>
+            <th>S4</th>
+            <th>S5</th>
+            <th>S6</th>
+            <th>S7</th>
+            <th>平均权重</th>
+            <th>修正量</th>
+            <th>左轮</th>
+            <th>右轮</th>
+            <th>结果</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const weights = [-10, -2, 0, 2, 4, 6, 0];
+    const base = -40;
+    const minSpeed = -55;
+    const maxSpeed = -10;
+    const turnGain = 20;
+    const turnLimit = 45;
+
+    function cDiv(a, b) {
+      return Math.trunc(a / b);
+    }
+
+    function clampSpeed(value) {
+      if (value < minSpeed) {
+        return minSpeed;
+      }
+      if (value > maxSpeed) {
+        return maxSpeed;
+      }
+      return value;
+    }
+
+    function clampCorrection(value) {
+      if (value > turnLimit) {
+        return turnLimit;
+      }
+      if (value < -turnLimit) {
+        return -turnLimit;
+      }
+      return value;
+    }
+
+    function calculate(mask) {
+      let sum = 0;
+      let count = 0;
+      for (let i = 0; i < 7; i += 1) {
+        const bit = 1 << (6 - i);
+        if ((mask & bit) !== 0) {
+          sum += weights[i];
+          count += 1;
+        }
+      }
+      if (count === 0) {
+        return null;
+      }
+      const avg = cDiv(sum, count);
+      const error = avg * 100;
+      const correction = clampCorrection(cDiv(error * turnGain, 100));
+      const left = clampSpeed(base - correction);
+      const right = clampSpeed(base + correction);
+      return { avg, correction, left, right };
+    }
+
+    function classify(row) {
+      if (!row) {
+        return "lost";
+      }
+      if (row.left === row.right) {
+        return "center";
+      }
+      return row.left > row.right ? "left-fast" : "right-fast";
+    }
+
+    const tbody = document.querySelector("#lookup-table tbody");
+    for (let mask = 0; mask < 128; mask += 1) {
+      const bits = mask.toString(2).padStart(7, "0");
+      const result = calculate(mask);
+      const tr = document.createElement("tr");
+      tr.className = classify(result);
+
+      const cells = [
+        bits,
+        ...bits.split(""),
+        result ? result.avg : "丢线",
+        result ? result.correction : "丢线",
+        result ? result.left : "上一拍/搜线",
+        result ? result.right : "上一拍/搜线",
+        result ? `${result.left} / ${result.right}` : "有上一拍沿用；无上一拍 0 / -20"
+      ];
+
+      cells.forEach((value, index) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        if (index === 0) {
+          td.className = "mask";
+        } else if (index >= 1 && index <= 7) {
+          td.className = "bits";
+        } else if (index === 12) {
+          td.className = "result";
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+  </script>
+</body>
+</html>

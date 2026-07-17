@@ -30,7 +30,7 @@
 - 行为日志统一用 `LOG_LINE()`、`LOG_RAW()`、`LOG_U32()`、`LOG_I32()`、`LOG_HEX32()`。
 - 不在业务代码里直接调用 `LogUart_SendString()`，除非正在维护 `hardware/log_uart.c` 本身。
 - `CAR_ENABLE_LOG_UART` 是总开关，改成 0 后日志宏必须为空操作。
-- 高频数据只在监视页按周期打印，不要在每轮电机输出或每次 ADC 采样里刷屏。
+- 比赛正式版运行阶段不刷串口日志，初始化阶段只允许少量启动日志。
 
 ## 注释风格
 
@@ -43,14 +43,14 @@
 
 - 电机层只描述四个 `STEP/DIR` 闭环步进驱动器，不保留历史电机方案命名。
 - 单电机接口用 `Motor_Set(motor, dir, command)`；底盘左右联动接口用 `Motor_SetChassisCommand(leftCommand, rightCommand)`。
-- `command` 表示步进速度命令，范围由 `CAR_MOTOR_COMMAND_MAX` 统一限制。
-- `Motor_Task()` 是当前的软件步进调度点。
-- 方向反相、加速度曲线、高速同步和驱动器反馈闭环，后续应继续在 `hardware/motor.c`、`app/motion.c` 或独立速度模块中分层实现。
+- `command` 表示步进速度，单位 SPS，范围由 `CAR_STEPPER_SPEED_MAX_SPS` 限制。
+- `hardware/stepper_pulse.c` 在 TIMG0 中断里输出 STEP，`Motor_Task()` 只保留低优先级空任务入口。
+- 方向反相、斜坡和速度限制放在 `hardware/motor.c`、`hardware/stepper_pulse.c`、`app/motion.c` 分层处理。
 
 ## 生成层维护
 
 - `generated/ti_msp_dl_config.*` 现在是 CCS/SysConfig 风格手工维护文件。
-- 改引脚必须同步更新 `doc/PIN_ASSIGNMENT_2026-05-23.md`、`config/pin_map.h` 和生成层宏。
+- 改引脚必须同步更新 `doc/PINOUT.md`、`config/pin_map.h` 和生成层宏。
 - 再次用 SysConfig 图形界面生成后，必须重点复查 PA0/PA1、PA14、PA19/PA20、PA21/PA23、PB14-PB17。
 
 ## 验证习惯
@@ -58,7 +58,7 @@
 每次较大改动至少跑：
 
 ```powershell
-& "D:\Ti\light-car1.0ccs\tools\build_ccs.ps1" -Clean
+& "D:\Ti\m0-light-rtos\tools\build_ccs.ps1" -Clean
 ```
 
 硬件下载前先确认：

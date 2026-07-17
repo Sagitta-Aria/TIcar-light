@@ -1,7 +1,6 @@
 #include "link.h"
 
 #include "board_config.h"
-#include "log_uart.h"
 #include "ti_msp_dl_config.h"
 
 #define LINK_UART_TX_TIMEOUT_COUNT    (100000U)
@@ -81,26 +80,12 @@ static void Link_ResetRxState(void)
     g_linkRxNoiseErrorCount = 0U;
 }
 
-/*
- * 作用：把 PB3/UART3 RX 收到的一整行转发到 Type-C 日志。
- * 说明：只在主循环取行时打印，不在 UART3 中断里阻塞打印。
- */
-static void Link_DebugLogRxLine(const char *line)
-{
-#if CAR_LINK_DEBUG_LOG
-    LOG_RAW("[PB3 RX] ");
-    LOG_LINE(line);
-#else
-    (void)line;
-#endif
-}
-
-static void Link_FinishRxLine(void)
+static uint8_t Link_FinishRxLine(void)
 {
     uint8_t i;
 
     if (g_linkRxBuildLength == 0U) {
-        return;
+        return 0U;
     }
 
     if (g_linkRxHasLine != 0U) {
@@ -116,13 +101,14 @@ static void Link_FinishRxLine(void)
 
     ++g_linkRxLineCount;
     g_linkRxBuildLength = 0U;
+    return 1U;
 }
 
 /*
  * 作用：在 UART3 中断里拼接一行视觉数据。
  * 说明：以 '\n' 或 '\r' 结束一帧，超长行直接丢弃，避免阻塞和越界。
  */
-static void Link_ParseRxByte(uint8_t data)
+static uint8_t Link_ParseRxByte(uint8_t data)
 {
     ++g_linkRxByteCount;
     g_linkRxLastByte = data;
@@ -131,25 +117,25 @@ static void Link_ParseRxByte(uint8_t data)
         if (g_linkRxDiscardingLine != 0U) {
             g_linkRxDiscardingLine = 0U;
             g_linkRxBuildLength = 0U;
-            return;
+            return 0U;
         }
-        Link_FinishRxLine();
-        return;
+        return Link_FinishRxLine();
     }
 
     if (g_linkRxDiscardingLine != 0U) {
-        return;
+        return 0U;
     }
 
     if (g_linkRxBuildLength >= (uint8_t)(LINK_RX_LINE_SIZE - 1U)) {
         g_linkRxBuildLength = 0U;
         g_linkRxDiscardingLine = 1U;
         ++g_linkRxLongLineDropCount;
-        return;
+        return 0U;
     }
 
     g_linkRxBuild[g_linkRxBuildLength] = (char)data;
     ++g_linkRxBuildLength;
+    return 0U;
 }
 
 void Link_Init(void)
@@ -176,12 +162,13 @@ void Link_Task(void)
     }
 }
 
-void Link_HandleUARTInterrupt(void)
+uint8_t Link_HandleUARTInterrupt(void)
 {
     uint8_t data;
     DL_UART_IIDX pending;
     uint8_t serviceCount = 0U;
     uint8_t rxCount;
+    uint8_t lineCompleted = 0U;
 
     do {
         pending = DL_UART_Main_getPendingInterrupt(Exchange_INST);
@@ -189,7 +176,9 @@ void Link_HandleUARTInterrupt(void)
             rxCount = 0U;
             while ((rxCount < LINK_IRQ_RX_DRAIN_LIMIT) &&
                 DL_UART_Main_receiveDataCheck(Exchange_INST, &data)) {
-                Link_ParseRxByte(data);
+                if (Link_ParseRxByte(data) != 0U) {
+                    lineCompleted = 1U;
+                }
                 ++rxCount;
             }
         } else if (pending == DL_UART_MAIN_IIDX_FRAMING_ERROR) {
@@ -204,6 +193,7 @@ void Link_HandleUARTInterrupt(void)
         ++serviceCount;
     } while ((pending != DL_UART_MAIN_IIDX_NO_INTERRUPT) &&
         (serviceCount < LINK_IRQ_SERVICE_LIMIT));
+    return lineCompleted;
 }
 
 void Link_SendByte(uint8_t data)
@@ -264,7 +254,6 @@ uint8_t Link_PopLine(char *buffer, uint16_t bufferSize)
     g_linkRxLatestLength = 0U;
     g_linkRxHasLine = 0U;
     Link_ExitCritical(primask);
-    Link_DebugLogRxLine(buffer);
     return 1U;
 }
 

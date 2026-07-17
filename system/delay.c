@@ -3,7 +3,7 @@
 #include "board_config.h"
 #include "ti_msp_dl_config.h"
 
-#if (CAR_RECOVERY_SAFE_BUILD != 0U) || (CAR_GIMBAL_PIN_TEST_BUILD != 0U)
+#if (CAR_RECOVERY_SAFE_BUILD != 0U)
 #define DELAY_CPUCLK_FREQ (32000000U)
 #else
 #define DELAY_CPUCLK_FREQ (CPUCLK_FREQ)

@@ -1,15 +1,12 @@
 #include "key.h"
 
 #include "board_config.h"
-#include "log_uart.h"
 #include "pin_map.h"
 
-/* 单次 GPIOB 中断最多处理的按键事件数，避免抖动异常时长时间停在 ISR。 */
-#define KEY_IRQ_SERVICE_LIMIT    (8U)
-/* 短按只要被主循环采到一次就认可，避免日志/视觉任务拖慢采样导致漏按。 */
+/* 按键按住期间InputTask每1ms运行一次，短按至少确认一拍。 */
 #define KEY_SHORT_PRESS_TICKS    (1U)
-/* 长按阈值：当前 10ms 一轮，80 轮约 800ms。 */
-#define KEY_LONG_PRESS_TICKS     (80U)
+/* InputTask每1ms调用一次，800拍约800ms。 */
+#define KEY_LONG_PRESS_TICKS     (800U)
 #define KEY_EVENT_MASK_1         (0x01U)
 #define KEY_EVENT_MASK_2         (0x02U)
 #define KEY_EVENT_MASK_1_LONG    (0x04U)
@@ -19,8 +16,6 @@ static volatile uint8_t g_keyEventMask;
 static volatile uint16_t g_keyPressedTicks[KEY_ID_COUNT];
 static volatile uint8_t g_keyLongReported[KEY_ID_COUNT];
 static volatile uint8_t g_keyWasPressed[KEY_ID_COUNT];
-static uint8_t g_keyLastLevelHigh[KEY_ID_COUNT];
-static uint16_t g_keyDebugTicks;
 
 /*
  * 作用：保护主循环和 GPIO 中断共享的按键事件状态。
@@ -85,56 +80,6 @@ static void Key_HandleReleaseEdge(KeyId key)
     g_keyWasPressed[key] = 0U;
 }
 
-/* 作用：打印 PB9/PB8 原始电平和按下判断，用来定位按键误触发。 */
-static void Key_LogRawState(const char *tag)
-{
-#if CAR_KEY_DEBUG_LOG
-    uint8_t k1High = Key_ReadLevelHigh(KEY_ID_1);
-    uint8_t k2High = Key_ReadLevelHigh(KEY_ID_2);
-
-    LOG_RAW("[KEY] ");
-    LOG_RAW(tag);
-    LOG_RAW(" PB9=");
-    LOG_RAW(k1High ? "H" : "L");
-    LOG_RAW(" PB8=");
-    LOG_RAW(k2High ? "H" : "L");
-    LOG_RAW(" pressed=");
-    LOG_RAW(Key_LevelToPressed(k1High) ? "K1" : "-");
-    LOG_RAW(",");
-    LOG_LINE(Key_LevelToPressed(k2High) ? "K2" : "-");
-#else
-    (void)tag;
-#endif
-}
-
-/* 作用：按周期和电平变化打印原始按键状态。 */
-static void Key_DebugTask(void)
-{
-#if CAR_KEY_DEBUG_LOG
-    uint8_t k1High = Key_ReadLevelHigh(KEY_ID_1);
-    uint8_t k2High = Key_ReadLevelHigh(KEY_ID_2);
-
-    if ((k1High != g_keyLastLevelHigh[KEY_ID_1]) ||
-        (k2High != g_keyLastLevelHigh[KEY_ID_2])) {
-        g_keyLastLevelHigh[KEY_ID_1] = k1High;
-        g_keyLastLevelHigh[KEY_ID_2] = k2High;
-        g_keyDebugTicks = 0U;
-        Key_LogRawState("change");
-        return;
-    }
-
-#if CAR_KEY_DEBUG_POLL_LOG
-    if (g_keyDebugTicks < CAR_KEY_DEBUG_PERIOD_TICKS) {
-        ++g_keyDebugTicks;
-        return;
-    }
-
-    g_keyDebugTicks = 0U;
-    Key_LogRawState("poll");
-#endif
-#endif
-}
-
 /*
  * 作用：按项目配置重新设置按键输入上下拉。
  * 说明：SysConfig 里原本是下拉高有效；这里用 board_config 覆盖，便于适配实物接法。
@@ -165,19 +110,16 @@ void Key_Init(void)
     g_keyLongReported[KEY_ID_2] = 0U;
     g_keyWasPressed[KEY_ID_1] = 0U;
     g_keyWasPressed[KEY_ID_2] = 0U;
-    g_keyLastLevelHigh[KEY_ID_1] = Key_ReadLevelHigh(KEY_ID_1);
-    g_keyLastLevelHigh[KEY_ID_2] = Key_ReadLevelHigh(KEY_ID_2);
-    g_keyDebugTicks = 0U;
-    Key_LogRawState("init");
+    DL_GPIO_setLowerPinsPolarity(PIN_KEY_PORT,
+        DL_GPIO_PIN_9_EDGE_RISE_FALL | DL_GPIO_PIN_8_EDGE_RISE_FALL);
     DL_GPIO_clearInterruptStatus(PIN_KEY_PORT, PIN_KEY_1 | PIN_KEY_2);
+    DL_GPIO_enableInterrupt(PIN_KEY_PORT, PIN_KEY_1 | PIN_KEY_2);
     NVIC_EnableIRQ(GPIOB_INT_IRQn);
 }
 
 void Key_Task(void)
 {
     uint8_t i;
-
-    Key_DebugTask();
 
     /*
      * 按键事件统一在主循环里轮询生成：
@@ -196,7 +138,6 @@ void Key_Task(void)
                 g_keyEventMask |= Key_LongEventMaskFromId((KeyId)i);
                 Key_ExitCritical(primask);
                 g_keyLongReported[i] = 1U;
-                Key_LogRawState("long");
             }
             g_keyWasPressed[i] = 1U;
         } else {
@@ -217,6 +158,16 @@ void Key_Task(void)
 uint8_t Key_IsPressed(KeyId key)
 {
     return Key_LevelToPressed(Key_ReadLevelHigh(key));
+}
+
+uint8_t Key_HasPendingEvent(void)
+{
+    uint8_t hasEvent;
+    uint32_t primask = Key_EnterCritical();
+
+    hasEvent = (g_keyEventMask != 0U) ? 1U : 0U;
+    Key_ExitCritical(primask);
+    return hasEvent;
 }
 
 KeyEvent Key_PopEvent(void)
@@ -244,24 +195,21 @@ KeyEvent Key_PopEvent(void)
     return event;
 }
 
-void Key_HandleGPIOInterrupt(void)
+uint8_t Key_HandleGPIOInterrupt(void)
 {
-    DL_GPIO_IIDX pending;
-    uint8_t serviceCount = 0U;
+    uint32_t pending = DL_GPIO_getEnabledInterruptStatus(PIN_KEY_PORT,
+        PIN_KEY_1 | PIN_KEY_2);
 
-    do {
-        pending = DL_GPIO_getPendingInterrupt(PIN_KEY_PORT);
-        switch (pending) {
-        case KEY_1_IIDX:
-            Key_HandleReleaseEdge(KEY_ID_1);
-            break;
-        case KEY_2_IIDX:
-            Key_HandleReleaseEdge(KEY_ID_2);
-            break;
-        default:
-            break;
-        }
-        ++serviceCount;
-    } while ((pending != DL_GPIO_IIDX_NO_INTR) &&
-        (serviceCount < KEY_IRQ_SERVICE_LIMIT));
+    if (((pending & PIN_KEY_1) != 0U) &&
+        (Key_IsPressed(KEY_ID_1) == 0U)) {
+        Key_HandleReleaseEdge(KEY_ID_1);
+    }
+    if (((pending & PIN_KEY_2) != 0U) &&
+        (Key_IsPressed(KEY_ID_2) == 0U)) {
+        Key_HandleReleaseEdge(KEY_ID_2);
+    }
+    if (pending != 0U) {
+        DL_GPIO_clearInterruptStatus(PIN_KEY_PORT, pending);
+    }
+    return (pending != 0U) ? 1U : 0U;
 }

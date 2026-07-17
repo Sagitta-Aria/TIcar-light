@@ -33,6 +33,8 @@ typedef struct {
     volatile uint32_t targetRateHz;
     volatile uint32_t accumulator;
     volatile uint32_t rampTicks;
+    volatile uint16_t accelStepSps;
+    volatile uint16_t decelStepSps;
     volatile uint8_t highTicksLeft;
     volatile int8_t directionSign;
     volatile int32_t stepCount;
@@ -45,32 +47,36 @@ typedef struct {
     uint32_t gpiobClearMask;
 } StepperPulseGpioBatch;
 
-static StepperPulseChannel g_stepperPulse[MOTOR_COUNT] = {
+#define STEPPER_GIMBAL_CHANNEL_COUNT    (2U)
+
+static StepperPulseChannel g_stepperPulse[STEPPER_GIMBAL_CHANNEL_COUNT] = {
     {
-        PIN_STEPPER_CHASSIS_LEFT_STEP_PORT,
-        PIN_STEPPER_CHASSIS_LEFT_STEP,
-        0U, 0U, 0U, 0U, 0U, 1, 0
+        PIN_STEPPER_GIMBAL_YAW_STEP_PORT,
+        PIN_STEPPER_GIMBAL_YAW_STEP,
+        0U, 0U, 0U, 0U,
+        (uint16_t)CAR_STEPPER_ACCEL_STEP_SPS,
+        (uint16_t)CAR_STEPPER_DECEL_STEP_SPS,
+        0U, 1, 0
     },
     {
-        PIN_STEPPER_CHASSIS_RIGHT_STEP_PORT,
-        PIN_STEPPER_CHASSIS_RIGHT_STEP,
-        0U, 0U, 0U, 0U, 0U, 1, 0
-    },
-    {
-        PIN_STEPPER_GIMBAL_1_STEP_PORT,
-        PIN_STEPPER_GIMBAL_1_STEP,
-        0U, 0U, 0U, 0U, 0U, 1, 0
-    },
-    {
-        PIN_STEPPER_GIMBAL_2_STEP_PORT,
-        PIN_STEPPER_GIMBAL_2_STEP,
-        0U, 0U, 0U, 0U, 0U, 1, 0
+        PIN_STEPPER_GIMBAL_PITCH_STEP_PORT,
+        PIN_STEPPER_GIMBAL_PITCH_STEP,
+        0U, 0U, 0U, 0U,
+        (uint16_t)CAR_STEPPER_ACCEL_STEP_SPS,
+        (uint16_t)CAR_STEPPER_DECEL_STEP_SPS,
+        0U, 1, 0
     }
 };
 
 static uint8_t StepperPulse_IsValid(MotorId motor)
 {
-    return ((uint32_t)motor < (uint32_t)MOTOR_COUNT) ? 1U : 0U;
+    return ((motor == MOTOR_GIMBAL_1) || (motor == MOTOR_GIMBAL_2)) ?
+        1U : 0U;
+}
+
+static uint32_t StepperPulse_GetIndex(MotorId motor)
+{
+    return (uint32_t)motor - (uint32_t)MOTOR_GIMBAL_1;
 }
 
 /*
@@ -95,6 +101,8 @@ static void StepperPulse_ResetOne(StepperPulseChannel *channel)
     channel->targetRateHz = 0U;
     channel->accumulator = 0U;
     channel->rampTicks = 0U;
+    channel->accelStepSps = (uint16_t)CAR_STEPPER_ACCEL_STEP_SPS;
+    channel->decelStepSps = (uint16_t)CAR_STEPPER_DECEL_STEP_SPS;
     channel->highTicksLeft = 0U;
     channel->directionSign = 1;
     DL_GPIO_clearPins(channel->stepPort, channel->stepPin);
@@ -122,14 +130,14 @@ static void StepperPulse_UpdateRampOne(StepperPulseChannel *channel)
 
     if (channel->stepRateHz < channel->targetRateHz) {
         step = channel->targetRateHz - channel->stepRateHz;
-        if (step > CAR_STEPPER_ACCEL_STEP_SPS) {
-            step = CAR_STEPPER_ACCEL_STEP_SPS;
+        if (step > channel->accelStepSps) {
+            step = channel->accelStepSps;
         }
         channel->stepRateHz += step;
     } else {
         step = channel->stepRateHz - channel->targetRateHz;
-        if (step > CAR_STEPPER_DECEL_STEP_SPS) {
-            step = CAR_STEPPER_DECEL_STEP_SPS;
+        if (step > channel->decelStepSps) {
+            step = channel->decelStepSps;
         }
         channel->stepRateHz -= step;
     }
@@ -227,7 +235,7 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
         return;
     }
 
-    channel = &g_stepperPulse[(uint32_t)motor];
+    channel = &g_stepperPulse[StepperPulse_GetIndex(motor)];
     primask = StepperPulse_EnterCritical();
     channel->directionSign = (directionSign < 0) ? -1 : 1;
     if (speedSps == 0U) {
@@ -243,12 +251,30 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
     StepperPulse_ExitCritical(primask);
 }
 
+void StepperPulse_SetRampStep(MotorId motor, uint16_t accelStepSps,
+    uint16_t decelStepSps)
+{
+    StepperPulseChannel *channel;
+    uint32_t primask;
+
+    if (!StepperPulse_IsValid(motor) ||
+        (accelStepSps == 0U) || (decelStepSps == 0U)) {
+        return;
+    }
+
+    channel = &g_stepperPulse[StepperPulse_GetIndex(motor)];
+    primask = StepperPulse_EnterCritical();
+    channel->accelStepSps = accelStepSps;
+    channel->decelStepSps = decelStepSps;
+    StepperPulse_ExitCritical(primask);
+}
+
 void StepperPulse_StopAll(void)
 {
     uint32_t i;
     uint32_t primask = StepperPulse_EnterCritical();
 
-    for (i = 0U; i < (uint32_t)MOTOR_COUNT; ++i) {
+    for (i = 0U; i < STEPPER_GIMBAL_CHANNEL_COUNT; ++i) {
         StepperPulse_ResetOne(&g_stepperPulse[i]);
     }
     StepperPulse_ExitCritical(primask);
@@ -264,7 +290,7 @@ int32_t StepperPulse_GetStepCount(MotorId motor)
     }
 
     primask = StepperPulse_EnterCritical();
-    count = g_stepperPulse[(uint32_t)motor].stepCount;
+    count = g_stepperPulse[StepperPulse_GetIndex(motor)].stepCount;
     StepperPulse_ExitCritical(primask);
     return count;
 }
@@ -278,7 +304,7 @@ void StepperPulse_ResetStepCount(MotorId motor)
     }
 
     primask = StepperPulse_EnterCritical();
-    g_stepperPulse[(uint32_t)motor].stepCount = 0;
+    g_stepperPulse[StepperPulse_GetIndex(motor)].stepCount = 0;
     StepperPulse_ExitCritical(primask);
 }
 
@@ -287,7 +313,7 @@ void StepperPulse_ResetAllStepCounts(void)
     uint32_t i;
     uint32_t primask = StepperPulse_EnterCritical();
 
-    for (i = 0U; i < (uint32_t)MOTOR_COUNT; ++i) {
+    for (i = 0U; i < STEPPER_GIMBAL_CHANNEL_COUNT; ++i) {
         g_stepperPulse[i].stepCount = 0;
     }
     StepperPulse_ExitCritical(primask);
@@ -300,7 +326,7 @@ void StepperPulse_HandleTimerInterrupt(void)
 
     switch (DL_TimerG_getPendingInterrupt(STEPPER_TIMER_INST)) {
         case DL_TIMER_IIDX_ZERO:
-            for (i = 0U; i < (uint32_t)MOTOR_COUNT; ++i) {
+            for (i = 0U; i < STEPPER_GIMBAL_CHANNEL_COUNT; ++i) {
                 StepperPulse_TickOne(&g_stepperPulse[i], &batch);
             }
             StepperPulse_ApplyBatch(&batch);

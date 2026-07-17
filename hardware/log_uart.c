@@ -4,6 +4,45 @@
 #include "ti_msp_dl_config.h"
 
 #define LOG_UART_TX_TIMEOUT_COUNT    (100000U)
+#define LOG_UART_RX_BUFFER_SIZE      (128U)
+#define LOG_UART_RX_BUFFER_MASK      (LOG_UART_RX_BUFFER_SIZE - 1U)
+#define LOG_UART_IRQ_SERVICE_LIMIT   (16U)
+#define LOG_UART_IRQ_RX_DRAIN_LIMIT  (64U)
+
+#if ((LOG_UART_RX_BUFFER_SIZE & LOG_UART_RX_BUFFER_MASK) != 0U)
+#error "LOG_UART_RX_BUFFER_SIZE must be a power of two"
+#endif
+
+static volatile uint8_t g_logRxBuffer[LOG_UART_RX_BUFFER_SIZE];
+static volatile uint8_t g_logRxWriteIndex;
+static volatile uint8_t g_logRxReadIndex;
+static volatile uint32_t g_logRxDropCount;
+static volatile uint32_t g_logRxErrorCount;
+
+static uint32_t LogUart_EnterCritical(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    return primask;
+}
+
+static void LogUart_ExitCritical(uint32_t primask)
+{
+    __set_PRIMASK(primask);
+}
+
+static void LogUart_PushRxByte(uint8_t data)
+{
+    uint8_t next = (uint8_t)((g_logRxWriteIndex + 1U) &
+        LOG_UART_RX_BUFFER_MASK);
+
+    if (next == g_logRxReadIndex) {
+        ++g_logRxDropCount;
+        return;
+    }
+    g_logRxBuffer[g_logRxWriteIndex] = data;
+    g_logRxWriteIndex = next;
+}
 
 /*
  * 作用：带超时发送 1 字节日志。
@@ -30,12 +69,115 @@ static uint8_t LogUart_TrySendByte(uint8_t data)
 void LogUart_Init(void)
 {
 #if CAR_ENABLE_LOG_UART
+    g_logRxWriteIndex = 0U;
+    g_logRxReadIndex = 0U;
+    g_logRxDropCount = 0U;
+    g_logRxErrorCount = 0U;
+    DL_UART_Main_setRXFIFOThreshold(LogUart_INST,
+        DL_UART_MAIN_RX_FIFO_LEVEL_ONE_ENTRY);
+    DL_UART_Main_enableInterrupt(LogUart_INST,
+        DL_UART_MAIN_INTERRUPT_RX |
+        DL_UART_MAIN_INTERRUPT_OVERRUN_ERROR |
+        DL_UART_MAIN_INTERRUPT_FRAMING_ERROR |
+        DL_UART_MAIN_INTERRUPT_NOISE_ERROR);
     NVIC_ClearPendingIRQ(LogUart_INST_INT_IRQN);
+    NVIC_EnableIRQ(LogUart_INST_INT_IRQN);
 #endif
 }
 
 void LogUart_Task(void)
 {
+}
+
+void LogUart_HandleUARTInterrupt(void)
+{
+#if CAR_ENABLE_LOG_UART
+    DL_UART_IIDX pending;
+    uint8_t data;
+    uint8_t serviceCount = 0U;
+    uint8_t rxCount;
+
+    do {
+        pending = DL_UART_Main_getPendingInterrupt(LogUart_INST);
+        if (pending == DL_UART_MAIN_IIDX_RX) {
+            rxCount = 0U;
+            while ((rxCount < LOG_UART_IRQ_RX_DRAIN_LIMIT) &&
+                DL_UART_Main_receiveDataCheck(LogUart_INST, &data)) {
+                LogUart_PushRxByte(data);
+                ++rxCount;
+            }
+        } else if ((pending == DL_UART_MAIN_IIDX_FRAMING_ERROR) ||
+            (pending == DL_UART_MAIN_IIDX_NOISE_ERROR) ||
+            (pending == DL_UART_MAIN_IIDX_OVERRUN_ERROR)) {
+            ++g_logRxErrorCount;
+        }
+        ++serviceCount;
+    } while ((pending != DL_UART_MAIN_IIDX_NO_INTERRUPT) &&
+        (serviceCount < LOG_UART_IRQ_SERVICE_LIMIT));
+#endif
+}
+
+uint8_t LogUart_TryReadByte(uint8_t *data)
+{
+#if CAR_ENABLE_LOG_UART
+    uint32_t primask;
+
+    if (data == 0) {
+        return 0U;
+    }
+    primask = LogUart_EnterCritical();
+    if (g_logRxReadIndex == g_logRxWriteIndex) {
+        LogUart_ExitCritical(primask);
+        return 0U;
+    }
+    *data = g_logRxBuffer[g_logRxReadIndex];
+    g_logRxReadIndex = (uint8_t)((g_logRxReadIndex + 1U) &
+        LOG_UART_RX_BUFFER_MASK);
+    LogUart_ExitCritical(primask);
+    return 1U;
+#else
+    (void)data;
+    return 0U;
+#endif
+}
+
+void LogUart_ClearRx(void)
+{
+#if CAR_ENABLE_LOG_UART
+    uint8_t data;
+    uint8_t count = 0U;
+    uint32_t primask = LogUart_EnterCritical();
+
+    g_logRxWriteIndex = 0U;
+    g_logRxReadIndex = 0U;
+    g_logRxDropCount = 0U;
+    g_logRxErrorCount = 0U;
+    while ((count < LOG_UART_IRQ_RX_DRAIN_LIMIT) &&
+        DL_UART_Main_receiveDataCheck(LogUart_INST, &data)) {
+        ++count;
+    }
+    LogUart_ExitCritical(primask);
+#endif
+}
+
+uint32_t LogUart_GetRxDropCount(void)
+{
+    uint32_t value;
+    uint32_t primask = LogUart_EnterCritical();
+
+    value = g_logRxDropCount;
+    LogUart_ExitCritical(primask);
+    return value;
+}
+
+uint32_t LogUart_GetRxErrorCount(void)
+{
+    uint32_t value;
+    uint32_t primask = LogUart_EnterCritical();
+
+    value = g_logRxErrorCount;
+    LogUart_ExitCritical(primask);
+    return value;
 }
 
 void LogUart_SendByte(uint8_t data)

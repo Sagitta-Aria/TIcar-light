@@ -3,12 +3,12 @@
 #include "motor.h"
 
 /*
- * 作用：把无符号 SPS 压到 int16_t 可表达范围。
- * 使用场景：Motion_Forward/Backward/Turn* 把速度转成左右轮有符号 SPS。
+ * 作用：把无符号底盘目标count/s压到int16_t可表达范围。
+ * 使用场景：Motion_Forward/Backward/Turn* 生成左右轮有符号目标。
  */
-static int16_t Motion_ToSignedSpeed(uint16_t speedSps)
+static int16_t Motion_ToSignedSpeed(uint16_t speedCps)
 {
-    return (speedSps > 32767U) ? 32767 : (int16_t)speedSps;
+    return (speedCps > 32767U) ? 32767 : (int16_t)speedCps;
 }
 
 /*
@@ -22,38 +22,43 @@ void Motion_Stop(void)
 }
 
 /*
- * 作用：设置底盘左右轮的有符号 SPS。
+ * 作用：设置底盘左右轮的有符号目标count/s。
  * 使用场景：循迹、路线外环或手写运动动作需要直接控制底盘时。
  */
-void Motion_SetChassisCommand(int16_t leftSpeedSps, int16_t rightSpeedSps)
+void Motion_SetChassisCommand(int16_t leftSpeedCps, int16_t rightSpeedCps)
 {
-    Motor_SetChassisCommand(leftSpeedSps, rightSpeedSps);
+    Motor_SetChassisCommand(leftSpeedCps, rightSpeedCps);
 }
 
-/* 作用：让底盘以相同 SPS 前进。 */
-void Motion_Forward(uint16_t speedSps)
+void Motion_SetChassisPeriodCommand(int16_t leftCounts, int16_t rightCounts)
 {
-    int16_t speed = Motion_ToSignedSpeed(speedSps);
+    Motor_SetChassisPeriodCommand(leftCounts, rightCounts);
+}
+
+/* 作用：让底盘以相同目标count/s前进。 */
+void Motion_Forward(uint16_t speedCps)
+{
+    int16_t speed = Motion_ToSignedSpeed(speedCps);
     Motion_SetChassisCommand(speed, speed);
 }
 
-/* 作用：让底盘以相同 SPS 后退。 */
-void Motion_Backward(uint16_t speedSps)
+/* 作用：让底盘以相同目标count/s后退。 */
+void Motion_Backward(uint16_t speedCps)
 {
-    int16_t speed = Motion_ToSignedSpeed(speedSps);
+    int16_t speed = Motion_ToSignedSpeed(speedCps);
     Motion_SetChassisCommand((int16_t)-speed, (int16_t)-speed);
 }
 
 /* 作用：让底盘原地左转，主要用于测试或后续任务动作。 */
-void Motion_TurnLeft(uint16_t speedSps)
+void Motion_TurnLeft(uint16_t speedCps)
 {
-    int16_t speed = Motion_ToSignedSpeed(speedSps);
+    int16_t speed = Motion_ToSignedSpeed(speedCps);
     Motion_SetChassisCommand((int16_t)-speed, speed);
 }
 
 /* 作用：让底盘原地右转，主要用于测试或后续任务动作。 */
-void Motion_TurnRight(uint16_t speedSps)
+void Motion_TurnRight(uint16_t speedCps)
 {
-    int16_t speed = Motion_ToSignedSpeed(speedSps);
+    int16_t speed = Motion_ToSignedSpeed(speedCps);
     Motion_SetChassisCommand(speed, (int16_t)-speed);
 }

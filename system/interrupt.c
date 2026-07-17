@@ -1,18 +1,22 @@
 #include "interrupt.h"
 
+#include "encoder_motor.h"
 #include "jy61p.h"
 #include "key.h"
 #include "link.h"
+#include "log_uart.h"
 #include "motor_no_yaw.h"
+#include "rtos_app.h"
 #include "stepper_pulse.h"
 #include "ti_msp_dl_config.h"
 
-/* UART 兜底处理只清理有限数量，避免异常 RX 噪声导致中断里死循环。 */
-#define INTERRUPT_UART_SERVICE_LIMIT    (16U)
-#define INTERRUPT_UART_RX_DRAIN_LIMIT   (32U)
-
 void Interrupt_Init(void)
 {
+    NVIC_SetPriority(TIMG0_INT_IRQn, 0U);
+    NVIC_SetPriority(GPIOB_INT_IRQn, 0U);
+    NVIC_SetPriority(UART3_INT_IRQn, 1U);
+    NVIC_SetPriority(UART1_INT_IRQn, 2U);
+    NVIC_SetPriority(UART0_INT_IRQn, 2U);
 }
 
 /*
@@ -22,32 +26,10 @@ void Interrupt_Init(void)
  */
 static void Interrupt_HandleGroup1(void)
 {
-    Key_HandleGPIOInterrupt();
-}
-
-/*
- * 作用：兜底清掉暂未使用的 UART 中断源。
- * 使用场景：某个 UART 只打开 NVIC 但暂时没有接收业务时，避免落入默认死循环。
- */
-static void Interrupt_ClearUART(UART_Regs *uart)
-{
-    DL_UART_IIDX pending;
-    uint8_t serviceCount = 0U;
-    uint8_t rxCount;
-    uint8_t data;
-
-    do {
-        pending = DL_UART_Main_getPendingInterrupt(uart);
-        if (pending == DL_UART_MAIN_IIDX_RX) {
-            rxCount = 0U;
-            while ((rxCount < INTERRUPT_UART_RX_DRAIN_LIMIT) &&
-                DL_UART_Main_receiveDataCheck(uart, &data)) {
-                ++rxCount;
-            }
-        }
-        ++serviceCount;
-    } while ((pending != DL_UART_MAIN_IIDX_NO_INTERRUPT) &&
-        (serviceCount < INTERRUPT_UART_SERVICE_LIMIT));
+    EncoderMotor_HandleGPIOInterrupt();
+    if (Key_HandleGPIOInterrupt() != 0U) {
+        RtosApp_NotifyInputFromISR();
+    }
 }
 
 void GROUP1_IRQHandler(void)
@@ -57,16 +39,20 @@ void GROUP1_IRQHandler(void)
 
 void GPIOA_IRQHandler(void)
 {
+    EncoderMotor_HandleGPIOInterrupt();
 }
 
 void GPIOB_IRQHandler(void)
 {
-    Key_HandleGPIOInterrupt();
+    EncoderMotor_HandleGPIOInterrupt();
+    if (Key_HandleGPIOInterrupt() != 0U) {
+        RtosApp_NotifyInputFromISR();
+    }
 }
 
 void UART0_IRQHandler(void)
 {
-    Interrupt_ClearUART(LogUart_INST);
+    LogUart_HandleUARTInterrupt();
 }
 
 void UART1_IRQHandler(void)
@@ -76,11 +62,15 @@ void UART1_IRQHandler(void)
 
 void UART3_IRQHandler(void)
 {
-    Link_HandleUARTInterrupt();
+    if (Link_HandleUARTInterrupt() != 0U) {
+        RtosApp_NotifyGimbalFromISR();
+    }
 }
 
 void TIMG0_IRQHandler(void)
 {
     StepperPulse_HandleTimerInterrupt();
-    MotorNoYaw_TimerSample();
+    if (MotorNoYaw_TimerSample() != 0U) {
+        RtosApp_NotifyControlFromISR();
+    }
 }

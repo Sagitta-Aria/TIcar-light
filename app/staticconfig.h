@@ -61,9 +61,12 @@ typedef struct {
     /* turnAngleMin/MaxDeg：累计旋转角分段范围，闭区间，单位度。 */
     int16_t turnAngleMinDeg;
     int16_t turnAngleMaxDeg;
-    /* deadbandX/Y：误差死区，单位 0.1 像素；10 表示 1 像素。 */
+    /* deadbandX/Y：停止阈值，单位 0.1 像素；10 表示 1 像素。 */
     uint16_t deadbandX;
     uint16_t deadbandY;
+    /* restartDeadbandX/Y：停止后重新动作的阈值，必须不小于停止阈值。 */
+    uint16_t restartDeadbandX;
+    uint16_t restartDeadbandY;
     /* kpX/Y：比例增益；配合 gainScale 换算成云台 SPS。 */
     uint16_t kpX;
     uint16_t kpY;

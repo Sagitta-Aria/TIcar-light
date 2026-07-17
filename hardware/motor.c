@@ -1,6 +1,7 @@
 #include "motor.h"
 
 #include "board_config.h"
+#include "encoder_motor.h"
 #include "motor_enable.h"
 #include "pin_map.h"
 #include "stepper_pulse.h"
@@ -10,163 +11,132 @@ typedef struct {
     uint32_t dirPin;
     uint16_t speedSps;
     int8_t directionSign;
-} MotorStepper;
+} GimbalStepper;
 
-static MotorStepper g_motors[MOTOR_COUNT] = {
-    {
-        PIN_STEPPER_CHASSIS_LEFT_DIR_PORT,
-        PIN_STEPPER_CHASSIS_LEFT_DIR,
-        0U, 1
-    },
-    {
-        PIN_STEPPER_CHASSIS_RIGHT_DIR_PORT,
-        PIN_STEPPER_CHASSIS_RIGHT_DIR,
-        0U, 1
-    },
-    {
-        PIN_STEPPER_GIMBAL_1_DIR_PORT,
-        PIN_STEPPER_GIMBAL_1_DIR,
-        0U, 1
-    },
-    {
-        PIN_STEPPER_GIMBAL_2_DIR_PORT,
-        PIN_STEPPER_GIMBAL_2_DIR,
-        0U, 1
-    }
+static GimbalStepper g_gimbalMotors[2] = {
+    { PIN_STEPPER_GIMBAL_YAW_DIR_PORT, PIN_STEPPER_GIMBAL_YAW_DIR, 0U, 1 },
+    { PIN_STEPPER_GIMBAL_PITCH_DIR_PORT, PIN_STEPPER_GIMBAL_PITCH_DIR,
+        0U, 1 }
 };
-
-/*
- * 作用：把上层 SPS 限制到步进调度可接受范围。
- * 使用场景：Motor_Set 接收上层速度后先做保护。
- */
-static uint16_t Motor_ClampSpeed(uint16_t speedSps)
-{
-    return (speedSps > CAR_STEPPER_SPEED_MAX_SPS) ?
-        CAR_STEPPER_SPEED_MAX_SPS : speedSps;
-}
-
-/*
- * 作用：把 int16_t 有符号 SPS 转成正向幅值。
- * 使用场景：Motor_SetChassisCommand 接收左右底盘有符号速度。
- */
-static uint16_t Motor_SpeedFromSigned(int16_t speedSps)
-{
-    int32_t value = (int32_t)speedSps;
-
-    if (value < 0) {
-        value = -value;
-    }
-    if (value > (int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
-        value = (int32_t)CAR_STEPPER_SPEED_MAX_SPS;
-    }
-    return (uint16_t)value;
-}
 
 static uint8_t Motor_IsValid(MotorId motor)
 {
     return ((uint32_t)motor < (uint32_t)MOTOR_COUNT) ? 1U : 0U;
 }
 
-/*
- * 作用：根据底盘左右电机安装方向修正 DIR 电平。
- * 使用场景：Motor_Set 收到逻辑方向后，写实际 DIR 引脚前调用。
- * 说明：只改变物理 DIR 电平，不改变 STEP 计数的逻辑正负号。
- */
-static MotorDir Motor_ApplyDirectionReverse(MotorId motor, MotorDir dir)
+static uint8_t Motor_IsChassis(MotorId motor)
 {
-    uint8_t reverse = 0U;
-
-    if (motor == MOTOR_CHASSIS_LEFT) {
-        reverse = CAR_CHASSIS_LEFT_REVERSE;
-    } else if (motor == MOTOR_CHASSIS_RIGHT) {
-        reverse = CAR_CHASSIS_RIGHT_REVERSE;
-    }
-
-    if (reverse == 0U) {
-        return dir;
-    }
-
-    return (dir == MOTOR_REVERSE) ? MOTOR_FORWARD : MOTOR_REVERSE;
+    return ((motor == MOTOR_CHASSIS_LEFT) ||
+        (motor == MOTOR_CHASSIS_RIGHT)) ? 1U : 0U;
 }
 
-/* 作用：把逻辑方向转换成 STEP 计数使用的符号。 */
-static int8_t Motor_GetDirectionSign(MotorDir dir)
+static uint16_t Motor_ClampStepperSpeed(uint16_t speedSps)
 {
-    return (dir == MOTOR_REVERSE) ? -1 : 1;
+    return (speedSps > CAR_STEPPER_SPEED_MAX_SPS) ?
+        CAR_STEPPER_SPEED_MAX_SPS : speedSps;
 }
 
-/*
- * 作用：写实际 DIR 管脚。
- * 说明：默认 DIR 低为正转，高为反转；是否需要反相由 Motor_ApplyDirectionReverse 先处理。
- */
-static void Motor_WriteDirectionPin(MotorStepper *motor, MotorDir physicalDir)
+static int16_t Motor_SignedCommand(MotorDir dir, uint16_t speed)
 {
-    if (physicalDir == MOTOR_REVERSE) {
-        DL_GPIO_setPins(motor->dirPort, motor->dirPin);
-    } else {
-        DL_GPIO_clearPins(motor->dirPort, motor->dirPin);
-    }
+    int32_t value = (speed > 32767U) ? 32767 : (int32_t)speed;
+    return (dir == MOTOR_REVERSE) ? (int16_t)-value : (int16_t)value;
 }
 
-void Motor_Init(void)
+static GimbalStepper *Motor_GetGimbal(MotorId motor)
 {
-    MotorEnable_Init();
-    Motor_SetAllStop();
-    StepperPulse_Init();
+    return &g_gimbalMotors[(uint32_t)motor - (uint32_t)MOTOR_GIMBAL_1];
 }
 
-void Motor_Task(void)
+static void Motor_SetGimbal(MotorId motor, MotorDir dir, uint16_t speedSps)
 {
-    /* ccs1.2 起 STEP 由 TIMG0 中断输出，主循环保留该接口便于后续扩展。 */
-}
+    GimbalStepper *stepper = Motor_GetGimbal(motor);
+    int8_t directionSign;
 
-void Motor_Set(MotorId motor, MotorDir dir, uint16_t speedSps)
-{
-    MotorStepper *stepper;
-    MotorDir physicalDir;
-    int8_t logicalDirectionSign;
-
-    if (!Motor_IsValid(motor)) {
-        return;
-    }
-
-    stepper = &g_motors[motor];
     if ((dir == MOTOR_COAST) || (dir == MOTOR_BRAKE) || (speedSps == 0U)) {
         stepper->speedSps = 0U;
         StepperPulse_SetTarget(motor, stepper->directionSign, 0U);
         return;
     }
 
-    logicalDirectionSign = Motor_GetDirectionSign(dir);
-    if (logicalDirectionSign != stepper->directionSign) {
+    directionSign = (dir == MOTOR_REVERSE) ? -1 : 1;
+    if (directionSign != stepper->directionSign) {
         StepperPulse_SetTarget(motor, stepper->directionSign, 0U);
     }
-    physicalDir = Motor_ApplyDirectionReverse(motor, dir);
-    Motor_WriteDirectionPin(stepper, physicalDir);
-    stepper->directionSign = logicalDirectionSign;
-    stepper->speedSps = Motor_ClampSpeed(speedSps);
-    StepperPulse_SetTarget(motor, stepper->directionSign,
-        stepper->speedSps);
+    if (dir == MOTOR_REVERSE) {
+        DL_GPIO_setPins(stepper->dirPort, stepper->dirPin);
+    } else {
+        DL_GPIO_clearPins(stepper->dirPort, stepper->dirPin);
+    }
+    stepper->directionSign = directionSign;
+    stepper->speedSps = Motor_ClampStepperSpeed(speedSps);
+    StepperPulse_SetTarget(motor, stepper->directionSign, stepper->speedSps);
 }
 
-void Motor_SetChassisCommand(int16_t leftSpeedSps, int16_t rightSpeedSps)
+void Motor_Init(void)
 {
-    Motor_Set(MOTOR_CHASSIS_LEFT,
-        (leftSpeedSps >= 0) ? MOTOR_FORWARD : MOTOR_REVERSE,
-        Motor_SpeedFromSigned(leftSpeedSps));
-    Motor_Set(MOTOR_CHASSIS_RIGHT,
-        (rightSpeedSps >= 0) ? MOTOR_FORWARD : MOTOR_REVERSE,
-        Motor_SpeedFromSigned(rightSpeedSps));
+    MotorEnable_Init();
+    EncoderMotor_Init();
+    StepperPulse_Init();
+    Motor_SetAllStop();
+}
+
+void Motor_Task(void)
+{
+}
+
+void Motor_RunChassisControl(void)
+{
+    EncoderMotor_RunControlPeriod();
+}
+
+void Motor_Set(MotorId motor, MotorDir dir, uint16_t speedSps)
+{
+    if (Motor_IsValid(motor) == 0U) {
+        return;
+    }
+    if (Motor_IsChassis(motor) != 0U) {
+        EncoderMotor_SetTarget((uint8_t)motor,
+            ((dir == MOTOR_COAST) || (dir == MOTOR_BRAKE)) ? 0 :
+                Motor_SignedCommand(dir, speedSps));
+        return;
+    }
+    Motor_SetGimbal(motor, dir, speedSps);
+}
+
+void Motor_SetRampStep(MotorId motor, uint16_t accelStepSps,
+    uint16_t decelStepSps)
+{
+    if ((motor == MOTOR_GIMBAL_1) || (motor == MOTOR_GIMBAL_2)) {
+        StepperPulse_SetRampStep(motor, accelStepSps, decelStepSps);
+    }
+}
+
+void Motor_ResetRampStep(MotorId motor)
+{
+    Motor_SetRampStep(motor, (uint16_t)CAR_STEPPER_ACCEL_STEP_SPS,
+        (uint16_t)CAR_STEPPER_DECEL_STEP_SPS);
+}
+
+void Motor_SetChassisCommand(int16_t leftCps, int16_t rightCps)
+{
+    EncoderMotor_SetTargets(leftCps, rightCps);
+}
+
+void Motor_SetChassisPeriodCommand(int16_t leftCounts, int16_t rightCounts)
+{
+    EncoderMotor_SetPeriodTargets(leftCounts, rightCounts);
 }
 
 void Motor_SetAllStop(void)
 {
-    uint32_t i;
+    uint8_t index;
 
-    for (i = 0U; i < (uint32_t)MOTOR_COUNT; ++i) {
-        g_motors[i].speedSps = 0U;
-        g_motors[i].directionSign = 1;
-        DL_GPIO_clearPins(g_motors[i].dirPort, g_motors[i].dirPin);
+    EncoderMotor_Stop();
+    for (index = 0U; index < 2U; ++index) {
+        g_gimbalMotors[index].speedSps = 0U;
+        g_gimbalMotors[index].directionSign = 1;
+        DL_GPIO_clearPins(g_gimbalMotors[index].dirPort,
+            g_gimbalMotors[index].dirPin);
     }
     StepperPulse_StopAll();
 }
@@ -178,33 +148,44 @@ void Motor_Stop(void)
 
 int16_t Motor_GetCommand(MotorId motor)
 {
-    MotorStepper *stepper;
+    GimbalStepper *stepper;
 
-    if (!Motor_IsValid(motor)) {
+    if (Motor_IsValid(motor) == 0U) {
         return 0;
     }
-    stepper = &g_motors[motor];
-    return (int16_t)((stepper->directionSign >= 0) ?
-        (int16_t)stepper->speedSps : -(int16_t)stepper->speedSps);
+    if (Motor_IsChassis(motor) != 0U) {
+        return EncoderMotor_GetTarget((uint8_t)motor);
+    }
+    stepper = Motor_GetGimbal(motor);
+    return (stepper->directionSign >= 0) ? (int16_t)stepper->speedSps :
+        (int16_t)(-(int32_t)stepper->speedSps);
 }
 
 int32_t Motor_GetStepCount(MotorId motor)
 {
-    if (!Motor_IsValid(motor)) {
+    if (Motor_IsValid(motor) == 0U) {
         return 0;
+    }
+    if (Motor_IsChassis(motor) != 0U) {
+        return EncoderMotor_GetTotalCount((uint8_t)motor);
     }
     return StepperPulse_GetStepCount(motor);
 }
 
 void Motor_ResetStepCount(MotorId motor)
 {
-    if (!Motor_IsValid(motor)) {
+    if (Motor_IsValid(motor) == 0U) {
         return;
     }
-    StepperPulse_ResetStepCount(motor);
+    if (Motor_IsChassis(motor) != 0U) {
+        EncoderMotor_ResetTotalCount((uint8_t)motor);
+    } else {
+        StepperPulse_ResetStepCount(motor);
+    }
 }
 
 void Motor_ResetAllStepCounts(void)
 {
+    EncoderMotor_ResetAllCounts();
     StepperPulse_ResetAllStepCounts();
 }

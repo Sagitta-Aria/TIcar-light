@@ -4,8 +4,6 @@
 #include "board_config.h"
 #include "delay.h"
 #include "gimbal.h"
-#include "gimbal_motor_test.h"
-#include "gimbal_test.h"
 #include "jy61p.h"
 #include "key.h"
 #include "link.h"
@@ -13,171 +11,311 @@
 #include "menu.h"
 #include "motor.h"
 #include "motor_no_yaw.h"
-#include "motor_track.h"
-#include "motor_enable_test.h"
 #include "oled.h"
-#include "pose_solver.h"
-#include "route.h"
 #include "state_machine.h"
 #include "staticconfig.h"
-#include "stepper_pin_test.h"
-#include "track_step_test.h"
-#include "tracking.h"
+#include "tuning_console.h"
+#include "vision.h"
+
+#define APP_TASK2_OLED_FONT_SIZE        (12U)
+#define APP_TASK2_OLED_START_X          (6U)
+#define APP_TASK2_OLED_START_Y          (16U)
+#define APP_TASK2_OLED_LINE_STEP        (12U)
+#define APP_TASK2_OLED_MAX_CHARS        (18U)
+#define APP_CAMERA_LASER_DELAY_MS       (500U)
+#define APP_COMM_SERVICE_PERIOD_MS           (5U)
+#define APP_CAMERA_LASER_DELAY_TICKS \
+    ((APP_CAMERA_LASER_DELAY_MS + APP_COMM_SERVICE_PERIOD_MS - 1U) / \
+        APP_COMM_SERVICE_PERIOD_MS)
+
+typedef enum {
+    APP_TASK2_OLED_NONE = 0,
+    APP_TASK2_OLED_WAITING,
+    APP_TASK2_OLED_TRACKING,
+    APP_TASK2_OLED_LINE
+} AppTask2OledStatus;
+
+typedef enum {
+    APP_CAMERA_LASER_IDLE = 0,
+    APP_CAMERA_LASER_WAIT_FRAME,
+    APP_CAMERA_LASER_TRACKING_DELAY,
+    APP_CAMERA_LASER_SENT
+} AppCameraLaserStage;
 
 /*
- * 作用：把两个实体按键翻译成菜单/状态机事件。
- * 使用场景：App_Task 每轮取到按键事件后调用。
- * 说明：菜单内 K1 切换、K2 确认；测试页 K2 长按退出。
+ * 作用：把两个实体按键翻译成比赛菜单事件。
+ * 说明：K1 在菜单里切换任务/参数；K2 确认；长按 K2 停止或返回上一级。
  */
-static void App_HandleKeyEvent(KeyEvent event)
+static CarEvent App_HandleKeyEvent(KeyEvent event)
 {
     CarState state;
 
     if (event == KEY_EVENT_NONE) {
-        return;
-    }
-
-    /* 按键测试日志：如果一按出现多行，说明硬件抖动或消抖还要继续加强。 */
-    if (event == KEY_EVENT_1) {
-        LOG_LINE("key: K1 PB9");
-    } else if (event == KEY_EVENT_2) {
-        LOG_LINE("key: K2 PB8");
-    } else if (event == KEY_EVENT_1_LONG) {
-        LOG_LINE("key: K1 long");
-    } else if (event == KEY_EVENT_2_LONG) {
-        LOG_LINE("key: K2 long");
+        return CAR_EVENT_NONE;
     }
 
     state = StateMachine_GetState();
-    if (event == KEY_EVENT_1_LONG) {
-        return;
-    }
 
     if (event == KEY_EVENT_2_LONG) {
         if (state == CAR_STATE_MENU) {
             (void)Menu_Back();
-            return;
+            return CAR_EVENT_NONE;
+        } else if (state == CAR_STATE_MISSION) {
+            return CAR_EVENT_STOP;
+        } else {
+            return CAR_EVENT_MENU;
         }
-        if ((state == CAR_STATE_TRACKING_TEST) ||
-            (state == CAR_STATE_MOTOR_TRACK) ||
-            (state == CAR_STATE_MOTOR_NO_YAW) ||
-            (state == CAR_STATE_MOTOR_GRAY_TEST) ||
-            (state == CAR_STATE_GIMBAL_MOTOR_TEST) ||
-            (state == CAR_STATE_GIMBAL_TEST) ||
-            (state == CAR_STATE_MOTOR_ENABLE_TEST) ||
-            (state == CAR_STATE_MISSION)) {
-            StateMachine_Dispatch(CAR_EVENT_BACK);
-        }
-        return;
     }
 
     if (state == CAR_STATE_MENU) {
         if (event == KEY_EVENT_1) {
             Menu_Next();
         } else if (event == KEY_EVENT_2) {
-            StateMachine_Dispatch(Menu_Confirm());
+            return Menu_Confirm();
         }
+        return CAR_EVENT_NONE;
+    }
+
+    if (((state == CAR_STATE_STOP) || (state == CAR_STATE_FINISHED) ||
+        (state == CAR_STATE_ERROR)) && (event == KEY_EVENT_2)) {
+        return CAR_EVENT_MENU;
+    }
+    return CAR_EVENT_NONE;
+}
+
+/* 作用：Task1 跑 NO YAW 时走快路径，避免 OLED/视觉/云台任务拖慢 240ms 等待。 */
+static uint8_t App_IsTask1NoYawRunning(void)
+{
+    return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
+        (StateMachine_GetMissionId() == 1U) &&
+        (MotorNoYaw_IsRunning() != 0U));
+}
+
+/* 作用：Task2 打靶时走快路径，只保留视觉解析、云台闭环和电机输出。 */
+static uint8_t App_IsTask2GimbalRunning(void)
+{
+    return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
+        (StateMachine_GetMissionId() == 2U) &&
+        (Vision_IsRunning() != 0U));
+}
+
+static uint8_t g_appFastMissionId;
+static AppTask2OledStatus g_appTask2OledStatus;
+static uint8_t g_appTask2RectCommandSent;
+static uint8_t g_appInputHadEvent;
+static uint8_t g_appLaserMissionId;
+static uint16_t g_appLaserDelayTicks;
+static AppCameraLaserStage g_appLaserStage;
+
+/* 作用：进入快路径时只刷一次 OLED，避免任务已经启动但屏幕还停在菜单。 */
+static void App_ShowFastMissionOnce(uint8_t missionId)
+{
+    if (g_appFastMissionId == missionId) {
         return;
     }
 
-    if (state == CAR_STATE_GRAY_CALIBRATION) {
-        if (event == KEY_EVENT_1) {
-            Menu_GrayCalibrationNext();
-        } else if (event == KEY_EVENT_2) {
-            StateMachine_Dispatch(Menu_GrayCalibrationConfirm());
-        }
+    g_appFastMissionId = missionId;
+    Menu_RequestRefresh();
+    Menu_Task(StateMachine_GetState());
+}
+
+static void App_ResetCameraLaserCommand(void)
+{
+    g_appLaserMissionId = 0U;
+    g_appLaserDelayTicks = 0U;
+    g_appLaserStage = APP_CAMERA_LASER_IDLE;
+}
+
+/* 作用：Task2 收到第一帧有效矩形中心误差后，只向 K230 发一次 F。 */
+static void App_UpdateTask2RectangleCommand(void)
+{
+    if (g_appTask2RectCommandSent != 0U) {
+        return;
+    }
+    if (Vision_HasFrame() == 0U) {
         return;
     }
 
-    if (state == CAR_STATE_TRACKING_TEST) {
-        if (event == KEY_EVENT_1) {
-            TrackStepTest_IncreaseSpeed();
-            Menu_RequestRefresh();
-        } else if (event == KEY_EVENT_2) {
-            TrackStepTest_DecreaseSpeed();
-            Menu_RequestRefresh();
-        }
+    Link_SendByte((uint8_t)'F');
+    g_appTask2RectCommandSent = 1U;
+}
+
+/* 作用：Task3/Task4 进入追踪后延时 500ms，向 K230 发送 F 打开激光。 */
+static void App_UpdateCameraLaserCommand(uint8_t missionId)
+{
+    if ((missionId != 3U) && (missionId != 4U)) {
         return;
     }
 
-    if (state == CAR_STATE_GIMBAL_MOTOR_TEST) {
-        if (event == KEY_EVENT_1) {
-            GimbalMotorTest_IncreaseSpeed();
-            Menu_RequestRefresh();
-        } else if (event == KEY_EVENT_2) {
-            GimbalMotorTest_DecreaseSpeed();
-            Menu_RequestRefresh();
-        }
+    if ((StateMachine_GetState() != CAR_STATE_MISSION) ||
+        (StateMachine_GetMissionId() != missionId)) {
+        App_ResetCameraLaserCommand();
         return;
     }
 
-    if (state == CAR_STATE_ERROR) {
-        if (event == KEY_EVENT_1) {
-            StateMachine_Dispatch(CAR_EVENT_CLEAR_ERROR);
-        } else if (event == KEY_EVENT_2) {
-            StateMachine_Dispatch(CAR_EVENT_BACK);
-        }
+    if (StateMachine_IsMissionGimbalPrepDone() == 0U) {
         return;
     }
 
-    if ((state == CAR_STATE_STOP) || (state == CAR_STATE_FINISHED) ||
-        (state == CAR_STATE_IDLE)) {
-        if (event == KEY_EVENT_1) {
-            StateMachine_Dispatch(CAR_EVENT_MENU);
-        } else if (event == KEY_EVENT_2) {
-            StateMachine_Dispatch(CAR_EVENT_BACK);
-        }
+    if (g_appLaserMissionId != missionId) {
+        App_ResetCameraLaserCommand();
+        g_appLaserMissionId = missionId;
+        g_appLaserStage = APP_CAMERA_LASER_WAIT_FRAME;
+    }
+
+    if (g_appLaserStage == APP_CAMERA_LASER_SENT) {
         return;
     }
 
-    if (event == KEY_EVENT_2) {
-        StateMachine_Dispatch(CAR_EVENT_BACK);
+    if (g_appLaserStage == APP_CAMERA_LASER_IDLE) {
+        g_appLaserStage = APP_CAMERA_LASER_WAIT_FRAME;
+        return;
     }
+
+    if (g_appLaserStage == APP_CAMERA_LASER_WAIT_FRAME) {
+        if (Vision_HasFrame() == 0U) {
+            return;
+        }
+        g_appLaserDelayTicks = 0U;
+        g_appLaserStage = APP_CAMERA_LASER_TRACKING_DELAY;
+        return;
+    }
+
+    if (g_appLaserStage != APP_CAMERA_LASER_TRACKING_DELAY) {
+        return;
+    }
+
+    if (g_appLaserDelayTicks < (uint16_t)APP_CAMERA_LASER_DELAY_TICKS) {
+        ++g_appLaserDelayTicks;
+        if (g_appLaserDelayTicks < (uint16_t)APP_CAMERA_LASER_DELAY_TICKS) {
+            return;
+        }
+    }
+
+    Link_SendByte((uint8_t)'F');
+    g_appLaserStage = APP_CAMERA_LASER_SENT;
+}
+
+static void App_ShowTask2OledLine(uint8_t index, const char *text)
+{
+    char padded[APP_TASK2_OLED_MAX_CHARS + 1U];
+    uint8_t i;
+    uint8_t y;
+
+    for (i = 0U; i < APP_TASK2_OLED_MAX_CHARS; ++i) {
+        padded[i] = ' ';
+    }
+    padded[APP_TASK2_OLED_MAX_CHARS] = '\0';
+
+    i = 0U;
+    while ((text != 0) && (text[i] != '\0') &&
+        (i < APP_TASK2_OLED_MAX_CHARS)) {
+        padded[i] = text[i];
+        ++i;
+    }
+
+    y = (uint8_t)(APP_TASK2_OLED_START_Y +
+        (index * APP_TASK2_OLED_LINE_STEP));
+    OLED_ShowString(APP_TASK2_OLED_START_X, y, (u8 *)padded,
+        APP_TASK2_OLED_FONT_SIZE);
+}
+
+/* 作用：云台任务只在等待视觉和进入追踪时各刷一次 OLED。 */
+static void App_ShowGimbalOledStatus(uint8_t missionId,
+    AppTask2OledStatus status)
+{
+    char title[8];
+    const char *statusText;
+
+    if (g_appTask2OledStatus == status) {
+        return;
+    }
+    g_appTask2OledStatus = status;
+
+    if (Board_IsOledAvailable() == 0U) {
+        return;
+    }
+
+    if (status == APP_TASK2_OLED_LINE) {
+        statusText = "Line Follow";
+    } else if (status == APP_TASK2_OLED_TRACKING) {
+        statusText = "Tracking";
+    } else {
+        statusText = "Waiting K230";
+    }
+    title[0] = 'T';
+    title[1] = 'a';
+    title[2] = 's';
+    title[3] = 'k';
+    title[4] = ' ';
+    title[5] = (char)('0' + missionId);
+    title[6] = '\0';
+    App_ShowTask2OledLine(0U, title);
+    App_ShowTask2OledLine(1U, statusText);
+    App_ShowTask2OledLine(2U, "");
+    App_ShowTask2OledLine(3U, "");
+    OLED_Refresh();
+}
+
+static void App_ShowTask2OledStatus(AppTask2OledStatus status)
+{
+    App_ShowGimbalOledStatus(2U, status);
+}
+
+static void App_ShowTask3OledStatus(AppTask2OledStatus status)
+{
+    App_ShowGimbalOledStatus(3U, status);
+}
+
+static void App_ShowTask4OledStatus(AppTask2OledStatus status)
+{
+    App_ShowGimbalOledStatus(4U, status);
+}
+
+/* 作用：Task3 打靶时走快路径，三档距离都直接追中心点。 */
+static uint8_t App_IsTask3GimbalRunning(void)
+{
+    return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
+        (StateMachine_GetMissionId() == 3U) &&
+        (Vision_IsRunning() != 0U));
+}
+
+/* 作用：Task4 同时跑视觉云台和 NO YAW，必须走快路径。 */
+static uint8_t App_IsTask4Running(void)
+{
+    return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
+        (StateMachine_GetMissionId() == 4U) &&
+        ((Vision_IsRunning() != 0U) ||
+            (StateMachine_GetMission4Stage() != CAR_MISSION4_STAGE_IDLE)));
+}
+
+static void App_ClearFastMission(void)
+{
+    g_appFastMissionId = 0U;
+    g_appTask2OledStatus = APP_TASK2_OLED_NONE;
+    g_appTask2RectCommandSent = 0U;
+    App_ResetCameraLaserCommand();
 }
 
 /*
- * 作用：初始化所有 app 层模块。
- * 使用场景：Board_Init 完成且没有致命错误后调用一次。
- * 说明：这里允许按顺序初始化模块，但不要放底层引脚配置；硬件初始化属于 system/hardware。
+ * 作用：初始化比赛正式版需要的 app 层模块。
+ * 说明：这里只保留 NO YAW、云台闭环、视觉输入、菜单和状态机。
  */
 void App_Init(void)
 {
-#if CAR_GIMBAL_PIN_TEST_BUILD
-    StepperPinTest_Start();
-    return;
-#endif
-
     Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP...", "");
     LOG_LINE("app: init begin");
     delay_ms(100U);
 
-    Tracking_Init();
-    LOG_LINE("app: tracking init ok");
-    TrackStepTest_Init();
-    LOG_LINE("app: track step test init ok");
-    MotorTrack_Init();
-    LOG_LINE("app: motor track init ok");
     MotorNoYaw_Init();
-    LOG_LINE("app: motor no yaw init ok");
-    Route_Init();
-    LOG_LINE("app: route init ok");
     StaticConfig_Init();
-    LOG_LINE("app: static config init ok");
     Gimbal_Init();
-    LOG_LINE("app: gimbal init ok");
-    GimbalTest_Init();
-    LOG_LINE("app: gimbal test init ok");
-    GimbalMotorTest_Init();
-    LOG_LINE("app: gimbal motor test init ok");
-    MotorEnableTest_Init();
-    LOG_LINE("app: motor enable test init ok");
-    PoseSolver_Init();
-    LOG_LINE("app: pose solver init ok");
+    Vision_Init();
+    JY61P_Init();
     Menu_Init();
-    LOG_LINE("app: menu init ok");
-    LOG_LINE("light-car ccs1.2 init ok");
     StateMachine_Init();
 
+    LOG_LINE("m0-light-rtos competition init ok");
     Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP OK", "");
     delay_ms(200U);
 
@@ -189,41 +327,106 @@ void App_Init(void)
 
 /*
  * 作用：应用层周期调度。
- * 使用场景：main while(1) 中反复调用。
- * 说明：中断只做轻量收发，耗时解析和状态更新都放在这里，最后用固定 delay 控制循环节拍。
+ * 说明：这些入口由不同FreeRTOS任务调用，不再由单一主循环串行调度。
  */
-void App_Task(void)
+CarEvent App_InputStep(void)
 {
-    CarState state;
-
-#if CAR_GIMBAL_PIN_TEST_BUILD
-    StepperPinTest_Task();
-    return;
-#endif
+    KeyEvent keyEvent;
 
     Key_Task();
-    App_HandleKeyEvent(Key_PopEvent());
+    keyEvent = Key_PopEvent();
+    g_appInputHadEvent = (keyEvent != KEY_EVENT_NONE) ? 1U : 0U;
+    return App_HandleKeyEvent(keyEvent);
+}
 
-    state = StateMachine_GetState();
-    if ((state == CAR_STATE_MOTOR_NO_YAW) &&
-        (MotorNoYaw_IsRunning() != 0U)) {
-        MotorNoYaw_Task();
-        Motor_Task();
-        delay_ms(CAR_APP_LOOP_DELAY_MS);
-        return;
+uint8_t App_InputHadEvent(void)
+{
+    return g_appInputHadEvent;
+}
+
+uint8_t App_InputIsActive(void)
+{
+    return (uint8_t)(((Key_IsPressed(KEY_ID_1) != 0U) ||
+        (Key_IsPressed(KEY_ID_2) != 0U) ||
+        (Key_HasPendingEvent() != 0U)) ? 1U : 0U);
+}
+
+void App_MissionDispatch(CarEvent event)
+{
+    if (event != CAR_EVENT_NONE) {
+        StateMachine_Dispatch(event);
     }
+}
 
+void App_MissionStep(void)
+{
     StateMachine_Task();
-    state = StateMachine_GetState();
+}
 
-    Menu_Task(state);
-    LogUart_Task();
+void App_CommStep(void)
+{
+    uint8_t missionId = StateMachine_GetMissionId();
+
     Link_Task();
-    JY61P_Task();
-    PoseSolver_Task();
+    if ((StateMachine_GetState() == CAR_STATE_MISSION) &&
+        (missionId == 2U)) {
+        App_UpdateTask2RectangleCommand();
+    } else {
+        g_appTask2RectCommandSent = 0U;
+    }
+    if ((missionId == 3U) || (missionId == 4U)) {
+        App_UpdateCameraLaserCommand(missionId);
+    } else {
+        App_ResetCameraLaserCommand();
+    }
+    LogUart_Task();
+    TuningConsole_Task();
+}
+
+void App_GimbalStep(void)
+{
+    Vision_Task();
     Gimbal_Task();
     Motor_Task();
-    MotorNoYaw_LogStopReason();
+}
 
+void App_UiStep(void)
+{
+    if (App_IsTask1NoYawRunning() != 0U) {
+        App_ShowFastMissionOnce(1U);
+    } else if (App_IsTask2GimbalRunning() != 0U) {
+        App_ShowTask2OledStatus((Vision_GetFrameCount() == 0U) ?
+            APP_TASK2_OLED_WAITING : APP_TASK2_OLED_TRACKING);
+    } else if (App_IsTask3GimbalRunning() != 0U) {
+        App_ShowTask3OledStatus((Vision_GetFrameCount() == 0U) ?
+            APP_TASK2_OLED_WAITING : APP_TASK2_OLED_TRACKING);
+    } else if (App_IsTask4Running() != 0U) {
+        if (StateMachine_GetMission4Stage() == CAR_MISSION4_STAGE_LINE) {
+            App_ShowTask4OledStatus(APP_TASK2_OLED_LINE);
+        } else {
+            App_ShowTask4OledStatus((Vision_GetFrameCount() == 0U) ?
+                APP_TASK2_OLED_WAITING : APP_TASK2_OLED_TRACKING);
+        }
+    } else {
+        App_ClearFastMission();
+        Menu_Task(StateMachine_GetState());
+    }
+}
+
+void App_HousekeepingStep(void)
+{
+    Board_Task();
+}
+
+void App_Task(void)
+{
+    CarEvent event = App_InputStep();
+
+    App_MissionDispatch(event);
+    App_MissionStep();
+    App_GimbalStep();
+    App_CommStep();
+    App_UiStep();
+    App_HousekeepingStep();
     delay_ms(CAR_APP_LOOP_DELAY_MS);
 }

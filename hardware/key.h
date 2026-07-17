@@ -20,7 +20,8 @@ typedef enum {
 void Key_Init(void);
 void Key_Task(void);
 uint8_t Key_IsPressed(KeyId key);
+uint8_t Key_HasPendingEvent(void);
 KeyEvent Key_PopEvent(void);
-void Key_HandleGPIOInterrupt(void);
+uint8_t Key_HandleGPIOInterrupt(void);
 
 #endif

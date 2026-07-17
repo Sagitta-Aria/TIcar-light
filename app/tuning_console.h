@@ -1,0 +1,64 @@
+#ifndef TUNING_CONSOLE_H
+#define TUNING_CONSOLE_H
+
+#include <stdint.h>
+
+typedef enum {
+    TUNING_CONSOLE_SET_STAGE_IDLE = 0,
+    TUNING_CONSOLE_SET_STAGE_SETTLING,
+    TUNING_CONSOLE_SET_STAGE_SAMPLING
+} TuningConsoleSetStage;
+
+typedef enum {
+    TUNING_CONSOLE_SET_RESULT_NONE = 0,
+    TUNING_CONSOLE_SET_RESULT_RUNNING,
+    TUNING_CONSOLE_SET_RESULT_POINT_STORED,
+    TUNING_CONSOLE_SET_RESULT_FF_APPLIED,
+    TUNING_CONSOLE_SET_RESULT_ERROR
+} TuningConsoleSetResult;
+
+typedef enum {
+    TUNING_CONSOLE_OLED_FF = 0,
+    TUNING_CONSOLE_OLED_START,
+    TUNING_CONSOLE_OLED_SPEED,
+    TUNING_CONSOLE_OLED_PID,
+    TUNING_CONSOLE_OLED_GRAY
+} TuningConsoleOledPage;
+
+typedef struct {
+    TuningConsoleOledPage oledPage;
+    TuningConsoleSetStage setStage;
+    TuningConsoleSetResult leftResult;
+    TuningConsoleSetResult rightResult;
+    uint32_t sampleCount;
+    uint32_t sampleTarget;
+    int32_t leftFfQ1024;
+    int32_t rightFfQ1024;
+    int32_t leftStartPercent;
+    int32_t rightStartPercent;
+    int32_t leftRunStartPercent;
+    int32_t rightRunStartPercent;
+    int32_t leftPwmPercent;
+    int32_t rightPwmPercent;
+    int32_t leftTargetCounts;
+    int32_t rightTargetCounts;
+    int32_t leftFeedbackCounts;
+    int32_t rightFeedbackCounts;
+    int32_t leftAverageCounts;
+    int32_t rightAverageCounts;
+    uint8_t grayMask;
+} TuningConsoleDisplayStatus;
+
+/* Start and stop the Task5 UART calibration session. */
+void TuningConsole_Start(void);
+void TuningConsole_Stop(void);
+
+/* Run from the 5 ms communication task while Task5 is selected. */
+void TuningConsole_Task(void);
+void TuningConsole_ChassisControlPeriod(void);
+uint8_t TuningConsole_IsActive(void);
+
+/* Read the current set progress and FF results for the Task5 OLED page. */
+void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status);
+
+#endif

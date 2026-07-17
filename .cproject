@@ -41,6 +41,8 @@
                                     <listOptionValue value="${PROJECT_ROOT}/system"/>
                                     <listOptionValue value="${PROJECT_ROOT}/config"/>
                                     <listOptionValue value="${PROJECT_ROOT}/generated"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/Middlewares/FreeRTOS-Kernel/include"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/Middlewares/FreeRTOS-Kernel/portable/GCC/ARM_CM0"/>
                                     <listOptionValue value="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/third_party/CMSIS/Core/Include"/>
                                     <listOptionValue value="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source"/>
                                 </option>
@@ -56,9 +58,9 @@
                                 <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.compilerID.SELECT_PROCESSOR_MODE__ARM_THUMB.1306750516" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.compilerID.SELECT_PROCESSOR_MODE__ARM_THUMB" value="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.compilerID.SELECT_PROCESSOR_MODE__ARM_THUMB.MTHUMB" valueType="enumerated"/>
                             </tool>
                             <tool id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.exe.linkerDebug.1534721924" name="Arm Linker" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.exe.linkerDebug">
-                                <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.OUTPUT_FILE.1407509674" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.OUTPUT_FILE" value="codex-build/light-car-ccs1.2.out" valueType="string"/>
-                                <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.MAP_FILE.216172085" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.MAP_FILE" value="codex-build/light-car-ccs1.2.map" valueType="string"/>
-                                <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.XML_LINK_INFO.640326516" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.XML_LINK_INFO" value="codex-build/light-car-ccs1.2_linkInfo.xml" valueType="string"/>
+                                <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.OUTPUT_FILE.1407509674" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.OUTPUT_FILE" value="${ProjName}.out" valueType="string"/>
+                                <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.MAP_FILE.216172085" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.MAP_FILE" value="codex-build/m0-light-rtos.map" valueType="string"/>
+                                <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.XML_LINK_INFO.640326516" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.XML_LINK_INFO" value="codex-build/m0-light-rtos_linkInfo.xml" valueType="string"/>
                                 <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.DISPLAY_ERROR_NUMBER.2114575394" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.DISPLAY_ERROR_NUMBER" value="true" valueType="boolean"/>
                                 <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.DIAG_WRAP.1168420573" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.DIAG_WRAP" value="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.DIAG_WRAP.off" valueType="enumerated"/>
                                 <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.REREAD_LIBS.1213193874" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.REREAD_LIBS" value="false" valueType="boolean"/>
@@ -83,6 +85,6 @@
         </cconfiguration>
     </storageModule>
     <storageModule moduleId="cdtBuildSystem" version="4.0.0">
-        <project id="light-car-ccs1.2.com.ti.ccstudio.buildDefinitions.TMS470.ProjectType.1180233139" name="TMS470" projectType="com.ti.ccstudio.buildDefinitions.TMS470.ProjectType"/>
+        <project id="m0-light-rtos.com.ti.ccstudio.buildDefinitions.TMS470.ProjectType.1180233139" name="TMS470" projectType="com.ti.ccstudio.buildDefinitions.TMS470.ProjectType"/>
     </storageModule>
 </cproject>

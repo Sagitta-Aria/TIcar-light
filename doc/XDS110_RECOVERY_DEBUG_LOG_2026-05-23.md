@@ -1,5 +1,7 @@
 # XDS110 解锁与安全下载记录
 
+> 这是从 `light-car1.0ccs` 保留的历史记录，正文中的旧工程路径仅用于追溯。`m0-light-rtos` 正常构建请使用本工程 `tools\build_ccs.ps1`；未获得明确授权不要执行文中的 Factory Reset、mass erase 或 NONMAIN 操作。
+
 日期：2026-05-23
 
 本文记录 MSPM0G3507 地猛星最小系统板从“下载后无法再次连接”恢复到可下载、可运行的完整过程。后续遇到类似现象时，先按本文的低风险步骤排查，不要一上来擦 NONMAIN。
@@ -170,7 +172,7 @@ Success
 - 串口监听 COM17/COM18 没收到文本不代表程序没跑；XDS110 虚拟串口未必接到当前固件打印的 TX 引脚。
 - 当前安全版 UART 打印引脚是：
   - UART0：PA10 TX / PA11 RX，Type-C CH340 日志/BSL 数据线
-  - UART1：PB6 TX / PB7 RX，JY61P 姿态模块
+  - UART1：PB6 TX / PB7 RX，当前正式固件预留；SysConfig 里仍保留 JY61P 旧命名
   - UART3：PB2 TX / PB3 RX，Link/Exchange 视觉模块
 - 最可靠的恢复成功标志是 PA14 慢闪，以及 XDS110 能再次下载 MAIN 程序。
 

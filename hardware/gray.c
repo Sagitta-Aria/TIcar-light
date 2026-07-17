@@ -1,6 +1,6 @@
 #include "gray.h"
 
-#include "log_uart.h"
+#include "board_config.h"
 #include "pin_map.h"
 
 #define GRAY_CALIBRATION_MIN_SPAN   (64U)
@@ -52,7 +52,7 @@ static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
 
 /* g_grayWeight：线路位置权重，当前实车左右反接，S5~S7 在车体右侧。 */
 static const int16_t g_grayWeight[GRAY_SENSOR_COUNT] = {
-    -3, -2, -1, 0, 1, 2, 3
+    -1, -1, -1, 0, 1, 1, 1
 };
 
 /* g_grayRaw：最新原始采样值；数字模式下只会是 0 或 4095。 */
@@ -667,7 +667,6 @@ void Gray_CalibrationApply(void)
     if (g_grayValid) {
         Gray_UpdateDigitalFromRaw();
     }
-    LOG_LINE("gray digital check: apply");
 #else
     uint32_t i;
 
@@ -680,6 +679,5 @@ void Gray_CalibrationApply(void)
     if (g_grayValid) {
         Gray_UpdateDigitalFromRaw();
     }
-    LOG_LINE("gray calibration: apply");
 #endif
 }

@@ -4,30 +4,27 @@
 #include <stdint.h>
 
 /*
- * MotorEnable_Init：初始化四路步进驱动器 EN 输出的默认状态。
- * 说明：GPIO 方向在 generated/ti_msp_dl_config.c 中配置，这里只写默认电平。
+ * MotorEnable_Init：保留原状态机接口；新板云台EN由硬件固定有效。
  */
 void MotorEnable_Init(void);
 
 /*
- * MotorEnable_SetAll：同时设置四个步进驱动器 EN。
- * enabled 非 0 表示使能，0 表示释放/禁用；实际高低电平由 board_config.h 决定。
+ * MotorEnable_SetAll：保留云台EN请求状态；当前硬件EN必须固定有效。
+ * enabled非0表示状态机请求使能，本接口不直接驱动GPIO。
  */
 void MotorEnable_SetAll(uint8_t enabled);
 
 /*
- * MotorEnable_SetChassis：只设置底盘左右两路 EN。
- * 使用场景：菜单 Motor 固定脉冲测试，避免误使能云台驱动器。
+ * MotorEnable_SetChassis：编码底盘无独立EN，保留为空操作兼容接口。
  */
 void MotorEnable_SetChassis(uint8_t enabled);
 
 /*
- * MotorEnable_SetGimbal：只设置云台两路 EN。
- * 使用场景：视觉闭环或云台单独测试，避免误使能底盘驱动器。
+ * MotorEnable_SetGimbal：记录云台使能请求，实际EN由硬件固定。
  */
 void MotorEnable_SetGimbal(uint8_t enabled);
 
-/* MotorEnable_IsAllEnabled：读取四路 EN 是否都处于使能状态。 */
+/* MotorEnable_IsAllEnabled：读取最近一次云台EN请求状态。 */
 uint8_t MotorEnable_IsAllEnabled(void);
 
 /* MotorEnable_GetActiveLevelName：返回当前配置的 EN 有效电平文本，供 OLED 显示。 */

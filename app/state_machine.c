@@ -1,80 +1,97 @@
 #include "state_machine.h"
 
-#include "gimbal_motor_test.h"
-#include "gimbal_test.h"
-#include "gray.h"
-#include "log_uart.h"
+#include "board_config.h"
+#include "control_config.h"
+#include "encoder_motor.h"
+#include "gimbal.h"
 #include "motion.h"
+#include "motor.h"
+#include "motor_enable.h"
 #include "motor_no_yaw.h"
-#include "motor_track.h"
-#include "motor_enable_test.h"
-#include "route.h"
-#include "track_step_test.h"
-#include "tracking.h"
-#include "tracking_exception.h"
+#include "rtos_app.h"
+#include "staticconfig.h"
+#include "tuning_console.h"
+#include "vision.h"
 
 static CarState g_carState = CAR_STATE_INIT;
 static uint8_t g_missionId;
+static uint8_t g_mission1LapCount = 1U;
+static uint8_t g_mission3Distance;
+static CarChassisDriveMode g_mission6DriveMode;
+static uint16_t g_mission6DriveSpeed;
+static CarChassisDriveMode g_mission7DriveMode;
+static uint16_t g_mission7DriveSpeed;
+static int32_t g_mission7RightEncoderBase;
+static CarMission4Stage g_mission4Stage = CAR_MISSION4_STAGE_IDLE;
+static uint32_t g_mission4Flag;
+static uint32_t g_mission4LastVisionFrame;
+static int32_t g_mission4ExtraLeftBase;
+static int32_t g_mission4ExtraRightBase;
+static int32_t g_mission4YawTurnBase;
+static uint8_t g_mission4StableFrames;
+static uint8_t g_mission4ExtraActive;
+static uint8_t g_mission4YawTurnActive;
+static uint8_t g_missionGimbalPrepId;
+static uint16_t g_missionGimbalPrepWaitTicks;
+static int32_t g_missionGimbalPrepYawBase;
+static MotorNoYawState g_mission4LastNoYawState = MOTOR_NO_YAW_STATE_IDLE;
 
-/*
- * 作用：把事件枚举转成日志字符串。
- * 使用场景：StateMachine_Dispatch 收到事件时打印。
- */
-static const char *StateMachine_GetEventName(CarEvent event)
-{
-    switch (event) {
-    case CAR_EVENT_START:
-        return "start";
-    case CAR_EVENT_STOP:
-        return "stop";
-    case CAR_EVENT_MENU:
-        return "menu";
-    case CAR_EVENT_BACK:
-        return "back";
-    case CAR_EVENT_GRAY_CALIBRATION_START:
-        return "gray_calibration_start";
-    case CAR_EVENT_GRAY_CALIBRATION_SAMPLE:
-        return "gray_calibration_sample";
-    case CAR_EVENT_GRAY_CALIBRATION_APPLY:
-        return "gray_calibration_apply";
-    case CAR_EVENT_TRACKING_TEST_START:
-        return "tracking_test_start";
-    case CAR_EVENT_MOTOR_TRACK_START:
-        return "motor_track_start";
-    case CAR_EVENT_MOTOR_NO_YAW_START:
-        return "motor_no_yaw_start";
-    case CAR_EVENT_MOTOR_GRAY_TEST_START:
-        return "motor_gray_test_start";
-    case CAR_EVENT_GIMBAL_TEST_START:
-        return "gimbal_test_start";
-    case CAR_EVENT_GIMBAL_MOTOR_TEST_START:
-        return "gimbal_motor_test_start";
-    case CAR_EVENT_MOTOR_ENABLE_TEST_START:
-        return "motor_enable_test_start";
-    case CAR_EVENT_MISSION_1_START:
-        return "mission_1_start";
-    case CAR_EVENT_MISSION_2_START:
-        return "mission_2_start";
-    case CAR_EVENT_MISSION_3_START:
-        return "mission_3_start";
-    case CAR_EVENT_MISSION_4_START:
-        return "mission_4_start";
-    case CAR_EVENT_TRACKING_DONE:
-        return "tracking_done";
-    case CAR_EVENT_ERROR:
-        return "error";
-    case CAR_EVENT_CLEAR_ERROR:
-        return "clear_error";
-    case CAR_EVENT_NONE:
-    default:
-        return "none";
+typedef enum {
+    MISSION_GIMBAL_PREP_IDLE = 0,
+    MISSION_GIMBAL_PREP_YAW,
+    MISSION_GIMBAL_PREP_WAIT,
+    MISSION_GIMBAL_PREP_DONE
+} MissionGimbalPrepStage;
+
+static MissionGimbalPrepStage g_missionGimbalPrepStage;
+
+#define MISSION4_LOCK_STABLE_FRAMES     (5U)
+#define MISSION4_LOCK_EXTRA_DEADBAND    (20U)
+#define MISSION4_LAP_TURNS              (4U)
+#define MISSION4_EXTRA_ENCODER_COUNTS   (12000U)
+#define MISSION_GIMBAL_PREP_YAW_STEPS   (2000U)
+#define MISSION_GIMBAL_PREP_YAW_SPEED_SPS (5000U)
+#define MISSION_GIMBAL_PREP_WAIT_MS     (500U)
+#define MISSION4_GIMBAL_YAW_RATIO_SCALE (1000L)
+#define MISSION_GIMBAL_PREP_WAIT_TICKS \
+    ((MISSION_GIMBAL_PREP_WAIT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
+        CAR_APP_LOOP_DELAY_MS)
+
+typedef struct {
+    uint32_t yawSteps;
+    int16_t yawRatioX1000;
+    uint16_t yawSpeedSps;
+    uint16_t yawAccelStepSps;
+    uint16_t yawDecelStepSps;
+} Mission4YawConfig;
+
+static const Mission4YawConfig g_mission4YawConfigs[3] = {
+    {
+        (uint32_t)CAR_MISSION4_GIMBAL_NEAR_YAW_STEPS,
+        (int16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_RATIO_X1000,
+        (uint16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_SPEED_SPS,
+        (uint16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_ACCEL_STEP_SPS,
+        (uint16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_DECEL_STEP_SPS
+    },
+    {
+        (uint32_t)CAR_MISSION4_GIMBAL_MID_YAW_STEPS,
+        (int16_t)CAR_MISSION4_GIMBAL_MID_YAW_RATIO_X1000,
+        (uint16_t)CAR_MISSION4_GIMBAL_MID_YAW_SPEED_SPS,
+        (uint16_t)CAR_MISSION4_GIMBAL_MID_YAW_ACCEL_STEP_SPS,
+        (uint16_t)CAR_MISSION4_GIMBAL_MID_YAW_DECEL_STEP_SPS
+    },
+    {
+        (uint32_t)CAR_MISSION4_GIMBAL_FAR_YAW_STEPS,
+        (int16_t)CAR_MISSION4_GIMBAL_FAR_YAW_RATIO_X1000,
+        (uint16_t)CAR_MISSION4_GIMBAL_FAR_YAW_SPEED_SPS,
+        (uint16_t)CAR_MISSION4_GIMBAL_FAR_YAW_ACCEL_STEP_SPS,
+        (uint16_t)CAR_MISSION4_GIMBAL_FAR_YAW_DECEL_STEP_SPS
     }
-}
+};
 
-/*
- * 作用：把任务菜单事件转换成任务编号。
- * 使用场景：主菜单选择任务 1~4 后，状态机进入同一个任务状态。
- */
+static void StateMachine_Enter(CarState nextState);
+
+/* 作用：把菜单任务事件转换成 1~7 的任务编号。 */
 static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
 {
     switch (event) {
@@ -86,610 +103,648 @@ static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
         return 3U;
     case CAR_EVENT_MISSION_4_START:
         return 4U;
+    case CAR_EVENT_MISSION_5_START:
+        return 5U;
+    case CAR_EVENT_MISSION_6_START:
+        return 6U;
+    case CAR_EVENT_MISSION_7_START:
+        return 7U;
     default:
         return 0U;
     }
 }
 
-static uint8_t StateMachine_IsTaskStartEvent(CarEvent event)
+static uint16_t StateMachine_Abs16(int16_t value)
 {
-    switch (event) {
-    case CAR_EVENT_START:
-    case CAR_EVENT_GRAY_CALIBRATION_START:
-    case CAR_EVENT_TRACKING_TEST_START:
-    case CAR_EVENT_MOTOR_TRACK_START:
-    case CAR_EVENT_MOTOR_NO_YAW_START:
-    case CAR_EVENT_MOTOR_GRAY_TEST_START:
-    case CAR_EVENT_GIMBAL_TEST_START:
-    case CAR_EVENT_GIMBAL_MOTOR_TEST_START:
-    case CAR_EVENT_MOTOR_ENABLE_TEST_START:
-    case CAR_EVENT_MISSION_1_START:
-    case CAR_EVENT_MISSION_2_START:
-    case CAR_EVENT_MISSION_3_START:
-    case CAR_EVENT_MISSION_4_START:
+    return (value < 0) ? (uint16_t)(-(int32_t)value) : (uint16_t)value;
+}
+
+static uint32_t StateMachine_AbsStepDelta(int32_t now, int32_t base)
+{
+    return (now >= base) ? (uint32_t)(now - base) :
+        (uint32_t)(base - now);
+}
+
+/* 作用：Task4 一圈后的延长段，用左右编码器count绝对增量平均值计距离。 */
+static uint32_t StateMachine_GetMission4ExtraEncoderCounts(void)
+{
+    uint32_t leftCounts = StateMachine_AbsStepDelta(
+        Motor_GetStepCount(MOTOR_CHASSIS_LEFT), g_mission4ExtraLeftBase);
+    uint32_t rightCounts = StateMachine_AbsStepDelta(
+        Motor_GetStepCount(MOTOR_CHASSIS_RIGHT), g_mission4ExtraRightBase);
+
+    return (leftCounts + rightCounts) / 2U;
+}
+
+/* 作用：Task4 用 flag 判断当前位置，四个边循环使用近/中/远/中参数。 */
+static StaticConfigDistance StateMachine_GetMission4Distance(uint32_t flag)
+{
+    static const StaticConfigDistance distanceByPhase[4] = {
+        STATICCONFIG_DISTANCE_NEAR,
+        STATICCONFIG_DISTANCE_MID,
+        STATICCONFIG_DISTANCE_FAR,
+        STATICCONFIG_DISTANCE_MID
+    };
+
+    return distanceByPhase[(uint8_t)(flag & 0x03U)];
+}
+
+static const Mission4YawConfig *StateMachine_GetMission4YawConfig(uint32_t flag)
+{
+    return &g_mission4YawConfigs[
+        (uint8_t)StateMachine_GetMission4Distance(flag)];
+}
+
+/* 作用：Task4 始终追中心点，只按当前位置切换近/中/远参数。 */
+static void StateMachine_ApplyMission4GimbalConfig(uint32_t flag)
+{
+    StaticConfig_SetActiveByDistanceMode(
+        StateMachine_GetMission4Distance(flag),
+        STATICCONFIG_MODE_CENTER);
+}
+
+static void StateMachine_ResetMission4(void)
+{
+    g_mission4Stage = CAR_MISSION4_STAGE_IDLE;
+    g_mission4Flag = 0U;
+    g_mission4LastVisionFrame = 0U;
+    g_mission4ExtraLeftBase = 0;
+    g_mission4ExtraRightBase = 0;
+    g_mission4YawTurnBase = 0;
+    g_mission4StableFrames = 0U;
+    g_mission4ExtraActive = 0U;
+    g_mission4YawTurnActive = 0U;
+    g_mission4LastNoYawState = MOTOR_NO_YAW_STATE_IDLE;
+    Gimbal_SetYawFeedForward(0);
+}
+
+static void StateMachine_ResetMissionGimbalPrep(void)
+{
+    g_missionGimbalPrepId = 0U;
+    g_missionGimbalPrepWaitTicks = 0U;
+    g_missionGimbalPrepYawBase = 0;
+    g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_IDLE;
+}
+
+/* 作用：停止所有可能输出运动命令的正式模块。 */
+static void StateMachine_StopRuntimeModules(void)
+{
+    TuningConsole_Stop();
+    MotorNoYaw_Stop();
+    Vision_Stop();
+    Gimbal_SetEnabled(0U);
+    Gimbal_SetYawFeedForward(0);
+    MotorEnable_SetGimbal(CAR_GIMBAL_ENABLE_DEFAULT_ON);
+    Motion_Stop();
+    StateMachine_ResetMission4();
+    StateMachine_ResetMissionGimbalPrep();
+}
+
+/* 作用：启动一段 5000 step yaw 搜索。 */
+static void StateMachine_StartMissionGimbalYawSegment(void)
+{
+    g_missionGimbalPrepWaitTicks = 0U;
+    g_missionGimbalPrepYawBase = Motor_GetStepCount(MOTOR_GIMBAL_1);
+    g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_YAW;
+
+    Motor_Set(MOTOR_GIMBAL_1, MOTOR_FORWARD,
+        (uint16_t)MISSION_GIMBAL_PREP_YAW_SPEED_SPS);
+}
+
+/* 作用：Task3/Task4 正式追踪前，先静止等视觉；没找到再循环 yaw 搜索目标。 */
+static void StateMachine_StartMissionGimbalPrep(uint8_t missionId)
+{
+    g_missionGimbalPrepId = missionId;
+
+    Vision_Start();
+    Gimbal_SetEnabled(0U);
+    MotorEnable_SetGimbal(1U);
+
+    if ((missionId == 3U) || (missionId == 4U)) {
+        g_missionGimbalPrepWaitTicks = 0U;
+        g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_WAIT;
+    } else {
+        StateMachine_StartMissionGimbalYawSegment();
+    }
+}
+
+static uint8_t StateMachine_ClampMission1LapCount(uint8_t lapCount)
+{
+    if (lapCount < 1U) {
         return 1U;
-    default:
+    }
+    if (lapCount > 5U) {
+        return 5U;
+    }
+    return lapCount;
+}
+
+static uint8_t StateMachine_ClampMission3Distance(uint8_t distance)
+{
+    if (distance > (uint8_t)STATICCONFIG_DISTANCE_FAR) {
+        return (uint8_t)STATICCONFIG_DISTANCE_NEAR;
+    }
+    return distance;
+}
+
+static uint16_t StateMachine_ClampMissionDriveSpeed(uint16_t speed)
+{
+    if (speed < (uint16_t)CHASSIS_DEBUG_SPEED_MIN) {
+        return (uint16_t)CHASSIS_DEBUG_SPEED_MIN;
+    }
+    if (speed > (uint16_t)CHASSIS_DEBUG_SPEED_MAX) {
+        return (uint16_t)CHASSIS_DEBUG_SPEED_MAX;
+    }
+    return speed;
+}
+
+static int16_t StateMachine_DrivePercentToPwm(uint16_t percent)
+{
+    return (int16_t)(((uint32_t)CHASSIS_PWM_LIMIT_COUNTS * percent) /
+        100U);
+}
+
+static uint8_t StateMachine_IsMission4Locked(void)
+{
+    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
+    uint32_t limitX = (uint32_t)config->deadbandX +
+        (uint32_t)MISSION4_LOCK_EXTRA_DEADBAND;
+    uint32_t limitY = (uint32_t)config->deadbandY +
+        (uint32_t)MISSION4_LOCK_EXTRA_DEADBAND;
+
+    if (Vision_HasFrame() == 0U) {
         return 0U;
+    }
+
+    return (uint8_t)(((uint32_t)StateMachine_Abs16(Gimbal_GetErrorX()) <=
+        limitX) &&
+        ((uint32_t)StateMachine_Abs16(Gimbal_GetErrorY()) <= limitY));
+}
+
+static void StateMachine_StartMission4Line(void)
+{
+    g_mission4Flag = 0U;
+    g_mission4ExtraActive = 0U;
+    g_mission4YawTurnActive = 0U;
+    StateMachine_ApplyMission4GimbalConfig(g_mission4Flag);
+    MotorNoYaw_StartMission4();
+    g_mission4LastNoYawState = MotorNoYaw_GetState();
+    g_mission4Stage = CAR_MISSION4_STAGE_LINE;
+}
+
+static uint16_t StateMachine_AbsMotorCommand(int16_t command)
+{
+    return (command < 0) ? (uint16_t)(-(int32_t)command) : (uint16_t)command;
+}
+
+static uint16_t StateMachine_GetMission4ChassisSpeed(void)
+{
+    uint32_t leftSpeed = StateMachine_AbsMotorCommand(
+        Motor_GetCommand(MOTOR_CHASSIS_LEFT));
+    uint32_t rightSpeed = StateMachine_AbsMotorCommand(
+        Motor_GetCommand(MOTOR_CHASSIS_RIGHT));
+    uint32_t avgSpeed = (leftSpeed + rightSpeed) / 2U;
+
+    if (avgSpeed > (uint32_t)CHASSIS_TARGET_LIMIT_CPS) {
+        return (uint16_t)CHASSIS_TARGET_LIMIT_CPS;
+    }
+    return (uint16_t)avgSpeed;
+}
+
+static int16_t StateMachine_ClampMission4YawCommand(int32_t command)
+{
+    if (command > (int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
+        return (int16_t)CAR_STEPPER_SPEED_MAX_SPS;
+    }
+    if (command < -(int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
+        return (int16_t)(-(int32_t)CAR_STEPPER_SPEED_MAX_SPS);
+    }
+    return (int16_t)command;
+}
+
+static int16_t StateMachine_GetMission4YawBaseCommand(void)
+{
+    const Mission4YawConfig *config =
+        StateMachine_GetMission4YawConfig(g_mission4Flag);
+    int32_t command = ((int32_t)StateMachine_GetMission4ChassisSpeed() *
+        (int32_t)config->yawRatioX1000) /
+        MISSION4_GIMBAL_YAW_RATIO_SCALE;
+
+    return StateMachine_ClampMission4YawCommand(command);
+}
+
+static int16_t StateMachine_GetMission4YawTurnCommand(int16_t baseCommand)
+{
+    const Mission4YawConfig *config =
+        StateMachine_GetMission4YawConfig(g_mission4Flag);
+    int32_t command = (int32_t)config->yawSpeedSps;
+
+    if (baseCommand < 0) {
+        command = -command;
+    }
+    return StateMachine_ClampMission4YawCommand(command);
+}
+
+static void StateMachine_SetMission4YawTurnRamp(uint8_t enabled)
+{
+    const Mission4YawConfig *config =
+        StateMachine_GetMission4YawConfig(g_mission4Flag);
+
+    if (enabled != 0U) {
+        Motor_SetRampStep(MOTOR_GIMBAL_1,
+            config->yawAccelStepSps,
+            config->yawDecelStepSps);
+    } else {
+        Gimbal_ResetRamp();
     }
 }
 
-/*
- * 作用：停止所有会让车运动的模块。
- * 使用场景：进入菜单、监视、校准、停止、错误等非运行状态时。
- */
-static void StateMachine_StopMotionModules(void)
+static uint8_t StateMachine_IsMission4TurnState(MotorNoYawState state)
 {
-    Tracking_SetEnabled(0U);
-    TrackStepTest_Stop();
-    MotorTrack_Stop();
-    MotorNoYaw_Stop();
-    GimbalTest_Stop();
-    GimbalMotorTest_Stop();
-    MotorEnableTest_Stop();
-    Route_Stop();
-    Motion_Stop();
+    return (uint8_t)((state == MOTOR_NO_YAW_STATE_TURN_RIGHT) ? 1U : 0U);
 }
 
-/*
- * 作用：进入空闲状态。
- * 使用场景：需要让车完全待机时。
- */
-static void StateMachine_EnterIdle(void)
+static void StateMachine_UpdateMission4YawFeedForward(void)
 {
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: idle");
+    MotorNoYawState noYawState = MotorNoYaw_GetState();
+    int16_t baseCommand = StateMachine_GetMission4YawBaseCommand();
+    int16_t yawCommand = baseCommand;
+
+    if ((StateMachine_IsMission4TurnState(noYawState) != 0U) &&
+        (StateMachine_IsMission4TurnState(g_mission4LastNoYawState) == 0U)) {
+        g_mission4YawTurnBase = Motor_GetStepCount(MOTOR_GIMBAL_1);
+        g_mission4YawTurnActive = 1U;
+        StateMachine_SetMission4YawTurnRamp(1U);
+    } else if (StateMachine_IsMission4TurnState(noYawState) == 0U) {
+        if (g_mission4YawTurnActive != 0U) {
+            g_mission4YawTurnActive = 0U;
+            StateMachine_SetMission4YawTurnRamp(0U);
+        }
+    }
+
+    if (g_mission4YawTurnActive != 0U) {
+        if (StateMachine_AbsStepDelta(Motor_GetStepCount(MOTOR_GIMBAL_1),
+            g_mission4YawTurnBase) < (uint32_t)
+            StateMachine_GetMission4YawConfig(g_mission4Flag)->yawSteps) {
+            yawCommand = StateMachine_GetMission4YawTurnCommand(baseCommand);
+        } else {
+            g_mission4YawTurnActive = 0U;
+            StateMachine_SetMission4YawTurnRamp(0U);
+        }
+    }
+
+    Gimbal_SetYawFeedForward(yawCommand);
+    g_mission4LastNoYawState = noYawState;
 }
 
-/*
- * 作用：进入菜单状态。
- * 使用场景：OLED 选择界面，按键确认/切换都在 menu 模块处理。
- */
-static void StateMachine_EnterMenu(void)
+/* 作用：搜到 K230 坐标后，真正进入视觉云台闭环。 */
+static void StateMachine_StartMissionGimbalTrack(void)
 {
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: menu");
+    Gimbal_SetTarget(0, 0);
+    Gimbal_SetEnabled(1U);
+
+    if (g_missionGimbalPrepId == 4U) {
+        g_mission4LastVisionFrame = Vision_GetFrameCount();
+        g_mission4StableFrames = 0U;
+        g_mission4Stage = CAR_MISSION4_STAGE_TRACK;
+    }
+
+    g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_DONE;
 }
 
-/*
- * 作用：进入灰度校准状态。
- * 使用场景：菜单选择 1.Calib 后。
- * 说明：进入时重置最小/最大值，周期任务里持续采样。
- */
-static void StateMachine_EnterGrayCalibration(void)
+/* 作用：Task3/Task4 先静止识别 500ms；之后没有坐标就继续下一段 yaw。 */
+static void StateMachine_TaskMissionGimbalPrep(void)
 {
-    StateMachine_StopMotionModules();
-    Gray_CalibrationReset();
+    uint32_t yawSteps;
+
+    if (g_missionGimbalPrepStage == MISSION_GIMBAL_PREP_YAW) {
+        yawSteps = StateMachine_AbsStepDelta(
+            Motor_GetStepCount(MOTOR_GIMBAL_1),
+            g_missionGimbalPrepYawBase);
+        if (yawSteps < (uint32_t)MISSION_GIMBAL_PREP_YAW_STEPS) {
+            return;
+        }
+
+        Motor_Set(MOTOR_GIMBAL_1, MOTOR_COAST, 0U);
+        g_missionGimbalPrepWaitTicks = 0U;
+        g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_WAIT;
+        return;
+    }
+
+    if (g_missionGimbalPrepStage == MISSION_GIMBAL_PREP_WAIT) {
+        if (Vision_HasFrame() != 0U) {
+            StateMachine_StartMissionGimbalTrack();
+            return;
+        }
+
+        if (g_missionGimbalPrepWaitTicks <
+            (uint16_t)MISSION_GIMBAL_PREP_WAIT_TICKS) {
+            ++g_missionGimbalPrepWaitTicks;
+            return;
+        }
+
+        StateMachine_StartMissionGimbalYawSegment();
+    }
 }
 
-/*
- * 作用：进入正式循迹状态。
- * 使用场景：后续赛题任务或完整路线任务需要跑路线外环时。
- */
-static void StateMachine_EnterTracking(void)
+/* 作用：Task4 先等云台连续锁住几帧，再启动 NO YAW 循迹。 */
+static void StateMachine_TaskMission4Track(void)
 {
-    Route_Start();
-    TrackingException_Reset();
-    Tracking_SetEnabled(1U);
+    uint32_t frameCount = Vision_GetFrameCount();
+
+    if (frameCount == g_mission4LastVisionFrame) {
+        return;
+    }
+    g_mission4LastVisionFrame = frameCount;
+
+    if (StateMachine_IsMission4Locked() != 0U) {
+        if (g_mission4StableFrames < MISSION4_LOCK_STABLE_FRAMES) {
+            ++g_mission4StableFrames;
+        }
+    } else {
+        g_mission4StableFrames = 0U;
+    }
+
+    if (g_mission4StableFrames >= MISSION4_LOCK_STABLE_FRAMES) {
+        StateMachine_StartMission4Line();
+    }
 }
 
-/*
- * 作用：进入底盘固定脉冲测试状态。
- * 使用场景：菜单里的 Motor。
- * 说明：当前没有灰度传感器，只让底盘前进到目标 STEP 后停车。
- */
-static void StateMachine_EnterTrackingTest(void)
+/* 作用：Task4 循迹时用已完成转向次数当 flag，按 flag 切云台参数。 */
+static void StateMachine_TaskMission4Line(void)
 {
-    Route_Stop();
-    TrackingException_Reset();
-    Tracking_SetEnabled(0U);
-    TrackStepTest_Start();
+    uint32_t flag;
+
+    MotorNoYaw_Task();
+    if (MotorNoYaw_IsRunning() == 0U) {
+        Gimbal_SetYawFeedForward(0);
+        if (MotorNoYaw_GetState() == MOTOR_NO_YAW_STATE_STOP) {
+            StateMachine_Enter(CAR_STATE_STOP);
+        }
+        return;
+    }
+    StateMachine_UpdateMission4YawFeedForward();
+
+    flag = MotorNoYaw_GetTurnCount();
+    if (flag != g_mission4Flag) {
+        g_mission4Flag = flag;
+        StateMachine_ApplyMission4GimbalConfig(g_mission4Flag);
+    }
+
+    if ((g_mission4ExtraActive == 0U) &&
+        (flag >= (uint32_t)MISSION4_LAP_TURNS)) {
+        g_mission4ExtraLeftBase = Motor_GetStepCount(MOTOR_CHASSIS_LEFT);
+        g_mission4ExtraRightBase = Motor_GetStepCount(MOTOR_CHASSIS_RIGHT);
+        g_mission4ExtraActive = 1U;
+        return;
+    }
+
+    if ((g_mission4ExtraActive != 0U) &&
+        (StateMachine_GetMission4ExtraEncoderCounts() >=
+            (uint32_t)MISSION4_EXTRA_ENCODER_COUNTS)) {
+        StateMachine_Enter(CAR_STATE_FINISHED);
+    }
 }
 
-/*
- * 作用：进入 Motor 菜单真循迹状态。
- * 使用场景：Motor / Track Run 子页。
- */
-static void StateMachine_EnterMotorTrack(void)
+static void StateMachine_TaskMission4(void)
 {
-    Route_Stop();
-    TrackingException_Reset();
-    Tracking_SetEnabled(0U);
-    TrackStepTest_Stop();
-    MotorNoYaw_Stop();
-    MotorTrack_Start();
+    if (g_missionGimbalPrepStage != MISSION_GIMBAL_PREP_DONE) {
+        StateMachine_TaskMissionGimbalPrep();
+        return;
+    }
+
+    if (g_mission4Stage == CAR_MISSION4_STAGE_TRACK) {
+        StateMachine_TaskMission4Track();
+    }
 }
 
-/*
- * 作用：进入 Motor 菜单 NO YAW 状态。
- * 使用场景：没有姿态传感器时，只靠灰度侧边触发原地转向。
- */
-static void StateMachine_EnterMotorNoYaw(void)
-{
-    Route_Stop();
-    TrackingException_Reset();
-    Tracking_SetEnabled(0U);
-    TrackStepTest_Stop();
-    MotorTrack_Stop();
-    MotorNoYaw_Start();
-}
-
-/*
- * 作用：进入 Motor 菜单灰度 mask 测试状态。
- * 使用场景：单独遮挡 S1~S7，观察灭灯后对应的 bit/mask 值。
- */
-static void StateMachine_EnterMotorGrayTest(void)
-{
-    StateMachine_StopMotionModules();
-    (void)Gray_Update();
-}
-
-/*
- * 作用：进入云台测试状态。
- * 使用场景：菜单里的 Gimbal Test，只接收视觉 Link 数据并追踪目标。
- */
-static void StateMachine_EnterGimbalTest(void)
-{
-    Tracking_SetEnabled(0U);
-    Route_Stop();
-    Motion_Stop();
-    GimbalMotorTest_Stop();
-    GimbalTest_Start();
-}
-
-/*
- * 作用：进入云台电机测试状态。
- * 使用场景：菜单里的 Gimbal Test / Motor Test，上电记零后慢速转 90 度。
- */
-static void StateMachine_EnterGimbalMotorTest(void)
-{
-    Tracking_SetEnabled(0U);
-    Route_Stop();
-    Motion_Stop();
-    GimbalTest_Stop();
-    GimbalMotorTest_Start();
-}
-
-/*
- * 作用：进入四电机使能测试状态。
- * 使用场景：菜单里的 Gimbal Test / Enable Test，只拉 EN，不发 STEP。
- */
-static void StateMachine_EnterMotorEnableTest(void)
-{
-    Tracking_SetEnabled(0U);
-    Route_Stop();
-    Motion_Stop();
-    GimbalTest_Stop();
-    GimbalMotorTest_Stop();
-    MotorEnableTest_Start();
-}
-
-/*
- * 作用：进入赛题任务状态。
- * 使用场景：主菜单里的 Mission，具体赛题流程后续再填。
- */
+/* 作用：进入任务状态时启动对应正式任务。 */
 static void StateMachine_EnterMission(void)
 {
-    StateMachine_StopMotionModules();
+    StateMachine_StopRuntimeModules();
+
+    if (g_missionId == 1U) {
+        MotorNoYaw_Start();
+    } else if (g_missionId == 2U) {
+        /* Task2：固定使用第 1 套云台参数，直接开启视觉输入和云台闭环。 */
+        StaticConfig_SetActiveTask(STATICCONFIG_TASK_NEAR_CENTER);
+        Vision_Start();
+        MotorEnable_SetGimbal(1U);
+        Gimbal_SetTarget(0, 0);
+        Gimbal_SetEnabled(1U);
+    } else if (g_missionId == 3U) {
+        /* Task3：按菜单选择近/中/远，三档都使用中心点误差追踪。 */
+        StaticConfig_SetActiveByDistanceMode(
+            (StaticConfigDistance)g_mission3Distance,
+            STATICCONFIG_MODE_CENTER);
+        StateMachine_StartMissionGimbalPrep(3U);
+    } else if (g_missionId == 4U) {
+        /* Task4：先做 yaw 前置，再按中心点模式抓点，稳定后启动 NO YAW。 */
+        StateMachine_ResetMission4();
+        StateMachine_ApplyMission4GimbalConfig(0U);
+        StateMachine_StartMissionGimbalPrep(4U);
+    } else if (g_missionId == 5U) {
+        /* Task5 owns the chassis through the UART calibration console. */
+        TuningConsole_Start();
+    } else if (g_missionId == 6U) {
+        if (g_mission6DriveMode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) {
+            Motion_SetChassisPeriodCommand((int16_t)g_mission6DriveSpeed,
+                (int16_t)g_mission6DriveSpeed);
+        } else {
+            int16_t pwm = StateMachine_DrivePercentToPwm(
+                g_mission6DriveSpeed);
+            EncoderMotor_SetOpenLoopPwm(pwm, pwm);
+        }
+    } else if (g_missionId == 7U) {
+        /* Task7 counts only the right-wheel movement made after this start. */
+        g_mission7RightEncoderBase =
+            Motor_GetStepCount(MOTOR_CHASSIS_RIGHT);
+        if (g_mission7DriveMode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) {
+            Motion_SetChassisPeriodCommand(0,
+                (int16_t)g_mission7DriveSpeed);
+        } else {
+            EncoderMotor_SetOpenLoopPwm(0,
+                StateMachine_DrivePercentToPwm(g_mission7DriveSpeed));
+        }
+    }
 }
 
-/*
- * 作用：进入任务完成状态。
- * 使用场景：以后路线跑完、视觉任务完成或比赛流程结束。
- */
-static void StateMachine_EnterFinished(void)
-{
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: finished");
-}
-
-/*
- * 作用：进入停止状态。
- * 使用场景：运行过程中主动停车或循迹异常无法恢复。
- */
-static void StateMachine_EnterStop(void)
-{
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: stop");
-}
-
-/*
- * 作用：进入错误状态。
- * 使用场景：灰度采样连续异常、后续硬件故障等。
- */
-static void StateMachine_EnterError(void)
-{
-    StateMachine_StopMotionModules();
-    LOG_LINE("state: error");
-}
-
-/*
- * 作用：统一处理状态切换入口动作。
- * 使用场景：任何事件触发状态变化时。
- */
+/* 作用：统一进入新状态，保证离开任务时先停车。 */
 static void StateMachine_Enter(CarState nextState)
 {
     if (g_carState == nextState) {
         return;
     }
 
+    if ((nextState == CAR_STATE_MENU) || (nextState == CAR_STATE_STOP) ||
+        (nextState == CAR_STATE_FINISHED) || (nextState == CAR_STATE_ERROR)) {
+        StateMachine_StopRuntimeModules();
+    }
+
     g_carState = nextState;
-
-    switch (g_carState) {
-    case CAR_STATE_IDLE:
-        StateMachine_EnterIdle();
-        break;
-    case CAR_STATE_MENU:
-        StateMachine_EnterMenu();
-        break;
-    case CAR_STATE_GRAY_CALIBRATION:
-        StateMachine_EnterGrayCalibration();
-        break;
-    case CAR_STATE_TRACKING:
-        StateMachine_EnterTracking();
-        break;
-    case CAR_STATE_TRACKING_TEST:
-        StateMachine_EnterTrackingTest();
-        break;
-    case CAR_STATE_MOTOR_TRACK:
-        StateMachine_EnterMotorTrack();
-        break;
-    case CAR_STATE_MOTOR_NO_YAW:
-        StateMachine_EnterMotorNoYaw();
-        break;
-    case CAR_STATE_MOTOR_GRAY_TEST:
-        StateMachine_EnterMotorGrayTest();
-        break;
-    case CAR_STATE_GIMBAL_TEST:
-        StateMachine_EnterGimbalTest();
-        break;
-    case CAR_STATE_GIMBAL_MOTOR_TEST:
-        StateMachine_EnterGimbalMotorTest();
-        break;
-    case CAR_STATE_MOTOR_ENABLE_TEST:
-        StateMachine_EnterMotorEnableTest();
-        break;
-    case CAR_STATE_MISSION:
+    if (g_carState == CAR_STATE_MENU) {
+        g_missionId = 0U;
+    } else if (g_carState == CAR_STATE_MISSION) {
         StateMachine_EnterMission();
-        break;
-    case CAR_STATE_FINISHED:
-        StateMachine_EnterFinished();
-        break;
-    case CAR_STATE_STOP:
-        StateMachine_EnterStop();
-        break;
-    case CAR_STATE_ERROR:
-        StateMachine_EnterError();
-        break;
-    case CAR_STATE_INIT:
-    default:
-        StateMachine_StopMotionModules();
-        break;
     }
+    RtosApp_NotifyMission();
+    RtosApp_NotifyUi();
 }
 
-/* 作用：空闲状态周期任务，目前没有后台动作。 */
-static void StateMachine_IdleTask(void)
-{
-}
-
-/* 作用：菜单状态周期任务，菜单刷新由 Menu_Task 独立完成。 */
-static void StateMachine_MenuTask(void)
-{
-}
-
-/* 作用：灰度校准状态周期采样，持续更新最大/最小值。 */
-static void StateMachine_GrayCalibrationTask(void)
-{
-    Gray_CalibrationSample();
-}
-
-/*
- * 作用：检查循迹异常状态，并把无法恢复的异常转成顶层状态。
- * 使用场景：正式循迹和单纯循迹测试共用。
- */
-static void StateMachine_CheckTrackingException(void)
-{
-    TrackingExceptionState exceptionState = TrackingException_GetState();
-
-    if (exceptionState == TRACKING_EXCEPTION_STATE_SENSOR_FAULT) {
-        StateMachine_Enter(CAR_STATE_ERROR);
-    } else if (exceptionState == TRACKING_EXCEPTION_STATE_LOST_STOP) {
-        StateMachine_Enter(CAR_STATE_STOP);
-    }
-}
-
-static void StateMachine_TrackingTask(void)
-{
-    Route_Task();
-    Tracking_Task();
-    StateMachine_CheckTrackingException();
-}
-
-/* 作用：Motor 固定脉冲测试周期任务，不启动路线外环。 */
-static void StateMachine_TrackingTestTask(void)
-{
-    TrackStepTest_Task();
-    if (TrackStepTest_IsDone() != 0U) {
-        LOG_LINE("state: motor step done back menu");
-        StateMachine_Enter(CAR_STATE_MENU);
-    }
-}
-
-/* 作用：Motor 真循迹周期任务，红外循迹 + yaw 右转确认。 */
-static void StateMachine_MotorTrackTask(void)
-{
-    MotorTrack_Task();
-}
-
-/* 作用：Motor NO YAW 周期任务，只用灰度循迹和侧边触发转向。 */
-static void StateMachine_MotorNoYawTask(void)
-{
-    MotorNoYaw_Task();
-}
-
-/* 作用：Motor 灰度测试周期采样，只刷新 mask，不输出任何运动命令。 */
-static void StateMachine_MotorGrayTestTask(void)
-{
-    (void)Gray_Update();
-}
-
-/* 作用：视觉云台测试周期任务，解析 Link 数据并更新云台目标。 */
-static void StateMachine_GimbalTestTask(void)
-{
-    GimbalTest_Task();
-}
-
-/* 作用：云台电机综合测试周期任务，负责阶段切换和测试命令更新。 */
-static void StateMachine_GimbalMotorTestTask(void)
-{
-    GimbalMotorTest_Task();
-}
-
-/* 作用：四电机 EN 使能测试周期任务，目前只保留入口。 */
-static void StateMachine_MotorEnableTestTask(void)
-{
-    MotorEnableTest_Task();
-}
-
-/* 作用：任务状态周期任务，具体赛题流程后续填入这里。 */
-static void StateMachine_MissionTask(void)
-{
-}
-
-/* 作用：完成状态周期任务，目前只保持停车状态。 */
-static void StateMachine_FinishedTask(void)
-{
-}
-
-/* 作用：停止状态周期任务，目前只保持停车状态。 */
-static void StateMachine_StopTask(void)
-{
-}
-
-/* 作用：错误状态周期任务，目前只等待按键清错/返回。 */
-static void StateMachine_ErrorTask(void)
-{
-}
-
-/*
- * 作用：初始化顶层状态机。
- * 使用场景：App_Init 最后调用。
- * 说明：初始化后默认进入菜单，所有运动模块保持停止。
- */
 void StateMachine_Init(void)
 {
     g_carState = CAR_STATE_INIT;
     g_missionId = 0U;
+    g_mission3Distance = (uint8_t)STATICCONFIG_DISTANCE_NEAR;
+    g_mission6DriveMode = (CHASSIS_TASK6_DEFAULT_CLOSED_LOOP != 0U) ?
+        CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
+    g_mission6DriveSpeed = (g_mission6DriveMode ==
+        CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
+        (uint16_t)CHASSIS_TASK6_CLOSED_SPEED_DEFAULT :
+        (uint16_t)CHASSIS_TASK6_OPEN_SPEED_DEFAULT;
+    g_mission7DriveMode = (CHASSIS_TASK7_DEFAULT_CLOSED_LOOP != 0U) ?
+        CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
+    g_mission7DriveSpeed = (g_mission7DriveMode ==
+        CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
+        (uint16_t)CHASSIS_TASK7_CLOSED_SPEED_DEFAULT :
+        (uint16_t)CHASSIS_TASK7_OPEN_SPEED_DEFAULT;
+    g_mission7RightEncoderBase = 0;
     StateMachine_Enter(CAR_STATE_MENU);
 }
 
-/*
- * 作用：处理外部事件并完成状态迁移。
- * 使用场景：按键菜单、异常处理和任务完成事件都会进入这里。
- * 说明：状态切换时统一走 StateMachine_Enter，确保离开运动状态会停车。
- */
 void StateMachine_Dispatch(CarEvent event)
 {
+    uint8_t missionId;
+
     if (event == CAR_EVENT_NONE) {
         return;
-    }
-
-    if (StateMachine_IsTaskStartEvent(event) == 0U) {
-        LOG_RAW("event: ");
-        LOG_LINE(StateMachine_GetEventName(event));
     }
 
     if (event == CAR_EVENT_ERROR) {
         StateMachine_Enter(CAR_STATE_ERROR);
         return;
     }
-
     if (event == CAR_EVENT_STOP) {
         StateMachine_Enter(CAR_STATE_STOP);
         return;
     }
-
-    switch (g_carState) {
-    case CAR_STATE_IDLE:
-    case CAR_STATE_MENU:
-        {
-            uint8_t missionId = StateMachine_GetMissionIdFromEvent(event);
-
-            if (missionId != 0U) {
-                g_missionId = missionId;
-                StateMachine_Enter(CAR_STATE_MISSION);
-                break;
-            }
-        }
-
-        if (event == CAR_EVENT_START) {
-            StateMachine_Enter(CAR_STATE_TRACKING);
-        } else if (event == CAR_EVENT_GRAY_CALIBRATION_START) {
-            StateMachine_Enter(CAR_STATE_GRAY_CALIBRATION);
-        } else if (event == CAR_EVENT_TRACKING_TEST_START) {
-            StateMachine_Enter(CAR_STATE_TRACKING_TEST);
-        } else if (event == CAR_EVENT_MOTOR_TRACK_START) {
-            StateMachine_Enter(CAR_STATE_MOTOR_TRACK);
-        } else if (event == CAR_EVENT_MOTOR_NO_YAW_START) {
-            StateMachine_Enter(CAR_STATE_MOTOR_NO_YAW);
-        } else if (event == CAR_EVENT_MOTOR_GRAY_TEST_START) {
-            StateMachine_Enter(CAR_STATE_MOTOR_GRAY_TEST);
-        } else if (event == CAR_EVENT_GIMBAL_TEST_START) {
-            StateMachine_Enter(CAR_STATE_GIMBAL_TEST);
-        } else if (event == CAR_EVENT_GIMBAL_MOTOR_TEST_START) {
-            StateMachine_Enter(CAR_STATE_GIMBAL_MOTOR_TEST);
-        } else if (event == CAR_EVENT_MOTOR_ENABLE_TEST_START) {
-            StateMachine_Enter(CAR_STATE_MOTOR_ENABLE_TEST);
-        } else if (event == CAR_EVENT_MENU) {
-            StateMachine_Enter(CAR_STATE_MENU);
-        }
-        break;
-
-    case CAR_STATE_GRAY_CALIBRATION:
-        if (event == CAR_EVENT_GRAY_CALIBRATION_SAMPLE) {
-            Gray_CalibrationSample();
-        } else if (event == CAR_EVENT_GRAY_CALIBRATION_APPLY) {
-            Gray_CalibrationApply();
-            StateMachine_Enter(CAR_STATE_MENU);
-        } else if (event == CAR_EVENT_BACK) {
-            StateMachine_Enter(CAR_STATE_MENU);
-        }
-        break;
-
-    case CAR_STATE_TRACKING:
-    case CAR_STATE_TRACKING_TEST:
-    case CAR_STATE_MOTOR_TRACK:
-    case CAR_STATE_MOTOR_NO_YAW:
-    case CAR_STATE_MOTOR_GRAY_TEST:
-    case CAR_STATE_GIMBAL_TEST:
-    case CAR_STATE_GIMBAL_MOTOR_TEST:
-    case CAR_STATE_MOTOR_ENABLE_TEST:
-    case CAR_STATE_MISSION:
-        if (event == CAR_EVENT_BACK) {
-            StateMachine_Enter(CAR_STATE_MENU);
-        } else if (event == CAR_EVENT_TRACKING_DONE) {
-            StateMachine_Enter(CAR_STATE_FINISHED);
-        }
-        break;
-
-    case CAR_STATE_FINISHED:
-    case CAR_STATE_STOP:
-        if (event == CAR_EVENT_START) {
-            StateMachine_Enter(CAR_STATE_TRACKING);
-        } else if ((event == CAR_EVENT_BACK) ||
-            (event == CAR_EVENT_CLEAR_ERROR) ||
-            (event == CAR_EVENT_MENU)) {
-            StateMachine_Enter(CAR_STATE_MENU);
-        }
-        break;
-
-    case CAR_STATE_ERROR:
-        if ((event == CAR_EVENT_CLEAR_ERROR) ||
-            (event == CAR_EVENT_BACK)) {
-            StateMachine_Enter(CAR_STATE_MENU);
-        }
-        break;
-
-    case CAR_STATE_INIT:
-    default:
+    if ((event == CAR_EVENT_MENU) || (event == CAR_EVENT_CLEAR_ERROR)) {
         StateMachine_Enter(CAR_STATE_MENU);
-        break;
+        return;
+    }
+    if (event == CAR_EVENT_FINISHED) {
+        StateMachine_Enter(CAR_STATE_FINISHED);
+        return;
+    }
+
+    if (g_carState == CAR_STATE_MENU) {
+        missionId = StateMachine_GetMissionIdFromEvent(event);
+        if (missionId != 0U) {
+            g_missionId = missionId;
+            StateMachine_Enter(CAR_STATE_MISSION);
+        }
     }
 }
 
-/*
- * 作用：执行当前状态下的周期业务。
- * 使用场景：App_Task 每轮调用。
- * 说明：只调度业务模块，不直接处理按键和 OLED。
- */
 void StateMachine_Task(void)
 {
     switch (g_carState) {
-    case CAR_STATE_IDLE:
-        StateMachine_IdleTask();
-        break;
-    case CAR_STATE_MENU:
-        StateMachine_MenuTask();
-        break;
-    case CAR_STATE_GRAY_CALIBRATION:
-        StateMachine_GrayCalibrationTask();
-        break;
-    case CAR_STATE_TRACKING:
-        StateMachine_TrackingTask();
-        break;
-    case CAR_STATE_TRACKING_TEST:
-        StateMachine_TrackingTestTask();
-        break;
-    case CAR_STATE_MOTOR_TRACK:
-        StateMachine_MotorTrackTask();
-        break;
-    case CAR_STATE_MOTOR_NO_YAW:
-        StateMachine_MotorNoYawTask();
-        break;
-    case CAR_STATE_MOTOR_GRAY_TEST:
-        StateMachine_MotorGrayTestTask();
-        break;
-    case CAR_STATE_GIMBAL_TEST:
-        StateMachine_GimbalTestTask();
-        break;
-    case CAR_STATE_GIMBAL_MOTOR_TEST:
-        StateMachine_GimbalMotorTestTask();
-        break;
-    case CAR_STATE_MOTOR_ENABLE_TEST:
-        StateMachine_MotorEnableTestTask();
-        break;
     case CAR_STATE_MISSION:
-        StateMachine_MissionTask();
-        break;
-    case CAR_STATE_FINISHED:
-        StateMachine_FinishedTask();
-        break;
-    case CAR_STATE_STOP:
-        StateMachine_StopTask();
-        break;
-    case CAR_STATE_ERROR:
-        StateMachine_ErrorTask();
+        if (g_missionId == 3U) {
+            if (g_missionGimbalPrepStage != MISSION_GIMBAL_PREP_DONE) {
+                StateMachine_TaskMissionGimbalPrep();
+            }
+            break;
+        }
+
+        if (g_missionId == 4U) {
+            StateMachine_TaskMission4();
+            break;
+        }
+
+        if (g_missionId == 7U) {
+            if (StateMachine_GetMission7EncoderCounts() >=
+                (uint32_t)CHASSIS_TASK7_ENCODER_TARGET_COUNTS) {
+                StateMachine_Enter(CAR_STATE_FINISHED);
+            }
+            break;
+        }
+
         break;
     case CAR_STATE_INIT:
+    case CAR_STATE_MENU:
+    case CAR_STATE_FINISHED:
+    case CAR_STATE_STOP:
+    case CAR_STATE_ERROR:
     default:
         break;
     }
 }
 
-/* 作用：读取当前整车顶层状态。 */
+void StateMachine_ChassisControlPeriod(void)
+{
+    uint32_t targetTurns;
+
+    if (g_carState != CAR_STATE_MISSION) {
+        return;
+    }
+
+    if ((g_missionId == 4U) &&
+        (g_mission4Stage == CAR_MISSION4_STAGE_LINE)) {
+        StateMachine_TaskMission4Line();
+        return;
+    }
+
+    if (g_missionId == 5U) {
+        TuningConsole_ChassisControlPeriod();
+        return;
+    }
+
+    if (g_missionId != 1U) {
+        return;
+    }
+
+    MotorNoYaw_Task();
+    if (MotorNoYaw_IsRunning() == 0U) {
+        if (MotorNoYaw_GetState() == MOTOR_NO_YAW_STATE_STOP) {
+            StateMachine_Enter(CAR_STATE_STOP);
+        }
+        return;
+    }
+
+    targetTurns = (uint32_t)g_mission1LapCount * 4U;
+    if (MotorNoYaw_GetTurnCount() >= targetTurns) {
+        StateMachine_Enter(CAR_STATE_FINISHED);
+    }
+}
+
+void StateMachine_HandleChassisFastEvent(void)
+{
+    if (g_carState != CAR_STATE_MISSION) {
+        return;
+    }
+
+    if (g_missionId == 1U) {
+        MotorNoYaw_HandleFastEvent();
+    } else if ((g_missionId == 4U) &&
+        (g_mission4Stage == CAR_MISSION4_STAGE_LINE)) {
+        MotorNoYaw_HandleFastEvent();
+        StateMachine_UpdateMission4YawFeedForward();
+    }
+}
+
 CarState StateMachine_GetState(void)
 {
     return g_carState;
 }
 
-/* 作用：把整车状态转成字符串，供日志和调试显示使用。 */
 const char *StateMachine_GetStateName(CarState state)
 {
     switch (state) {
     case CAR_STATE_INIT:
         return "init";
-    case CAR_STATE_IDLE:
-        return "idle";
     case CAR_STATE_MENU:
         return "menu";
-    case CAR_STATE_GRAY_CALIBRATION:
-        return "gray_calibration";
-    case CAR_STATE_TRACKING:
-        return "tracking";
-    case CAR_STATE_TRACKING_TEST:
-        return "tracking_test";
-    case CAR_STATE_MOTOR_TRACK:
-        return "motor_track";
-    case CAR_STATE_MOTOR_NO_YAW:
-        return "motor_no_yaw";
-    case CAR_STATE_MOTOR_GRAY_TEST:
-        return "motor_gray_test";
-    case CAR_STATE_GIMBAL_TEST:
-        return "gimbal_test";
-    case CAR_STATE_GIMBAL_MOTOR_TEST:
-        return "gimbal_motor_test";
-    case CAR_STATE_MOTOR_ENABLE_TEST:
-        return "motor_enable_test";
     case CAR_STATE_MISSION:
         return "mission";
     case CAR_STATE_FINISHED:
@@ -703,8 +758,87 @@ const char *StateMachine_GetStateName(CarState state)
     }
 }
 
-/* 作用：读取当前任务编号，0 表示还没有进入具体任务。 */
 uint8_t StateMachine_GetMissionId(void)
 {
     return g_missionId;
+}
+
+void StateMachine_SetMission1LapCount(uint8_t lapCount)
+{
+    g_mission1LapCount = StateMachine_ClampMission1LapCount(lapCount);
+}
+
+uint8_t StateMachine_GetMission1LapCount(void)
+{
+    return g_mission1LapCount;
+}
+
+void StateMachine_SetMission3Distance(uint8_t distance)
+{
+    g_mission3Distance = StateMachine_ClampMission3Distance(distance);
+}
+
+uint8_t StateMachine_GetMission3Distance(void)
+{
+    return g_mission3Distance;
+}
+
+void StateMachine_SetMissionDriveConfig(uint8_t missionId,
+    CarChassisDriveMode mode, uint16_t speed)
+{
+    mode = (mode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
+        CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
+    speed = StateMachine_ClampMissionDriveSpeed(speed);
+    if (missionId == 6U) {
+        g_mission6DriveMode = mode;
+        g_mission6DriveSpeed = speed;
+    } else if (missionId == 7U) {
+        g_mission7DriveMode = mode;
+        g_mission7DriveSpeed = speed;
+    }
+}
+
+CarChassisDriveMode StateMachine_GetMissionDriveMode(uint8_t missionId)
+{
+    if (missionId == 6U) {
+        return g_mission6DriveMode;
+    }
+    if (missionId == 7U) {
+        return g_mission7DriveMode;
+    }
+    return CAR_CHASSIS_DRIVE_OPEN_LOOP;
+}
+
+uint16_t StateMachine_GetMissionDriveSpeed(uint8_t missionId)
+{
+    if (missionId == 6U) {
+        return g_mission6DriveSpeed;
+    }
+    if (missionId == 7U) {
+        return g_mission7DriveSpeed;
+    }
+    return 0U;
+}
+
+uint32_t StateMachine_GetMission7EncoderCounts(void)
+{
+    return StateMachine_AbsStepDelta(
+        Motor_GetStepCount(MOTOR_CHASSIS_RIGHT),
+        g_mission7RightEncoderBase);
+}
+
+CarMission4Stage StateMachine_GetMission4Stage(void)
+{
+    return g_mission4Stage;
+}
+
+uint32_t StateMachine_GetMission4Flag(void)
+{
+    return g_mission4Flag;
+}
+
+uint8_t StateMachine_IsMissionGimbalPrepDone(void)
+{
+    return (uint8_t)(g_missionGimbalPrepStage ==
+        MISSION_GIMBAL_PREP_DONE);
 }

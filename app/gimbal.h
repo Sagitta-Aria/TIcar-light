@@ -24,6 +24,9 @@ void Gimbal_SetEnabled(uint8_t enabled);
 /* Gimbal_IsEnabled：读取云台闭环是否启用。 */
 uint8_t Gimbal_IsEnabled(void);
 
+/* Gimbal_NeedsTimeoutService：已有视觉帧时返回1，供任务设置掉线超时。 */
+uint8_t Gimbal_NeedsTimeoutService(void);
+
 /* Gimbal_SetTarget：单独设置目标位置，当前单位为 0.1 像素。 */
 void Gimbal_SetTarget(int16_t x, int16_t y);
 
@@ -33,7 +36,7 @@ void Gimbal_SetCurrent(int16_t x, int16_t y);
 /*
  * Gimbal_UpdateFromVision：用一帧视觉数据更新目标点和当前点。
  * 使用场景：视觉串口解析完成后调用。
- * 说明：本函数不阻塞、不等待串口；真正输出由 Gimbal_Task 周期执行。
+ * 说明：本函数不阻塞、不等待串口；真正输出由 Gimbal_Task 收到通知后执行。
  */
 void Gimbal_UpdateFromVision(int16_t targetX, int16_t targetY,
     int16_t currentX, int16_t currentY);
@@ -54,8 +57,17 @@ void Gimbal_UpdateFromLaserError(int16_t laserMinusTargetX,
 void Gimbal_UpdateFromCameraError(int16_t targetMinusCurrentX,
     int16_t targetMinusCurrentY);
 
-/* Gimbal_Task：云台周期控制任务。 */
+/* Gimbal_Task：处理一次待执行控制或视觉超时。 */
 void Gimbal_Task(void);
+
+/*
+ * Gimbal_SetYawFeedForward：给 yaw 轴叠加基础速度，符号为控制逻辑方向。
+ * 使用场景：Task4 行进时让云台 yaw 随底盘持续慢速跟随。
+ */
+void Gimbal_SetYawFeedForward(int16_t speedSps);
+
+/* Gimbal_ResetRamp：Task4 临时覆盖结束后恢复两个云台轴的默认斜坡。 */
+void Gimbal_ResetRamp(void);
 
 /* Gimbal_Stop：停止两个云台轴，不影响底盘。 */
 void Gimbal_Stop(void);
