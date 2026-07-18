@@ -389,8 +389,11 @@ static void Menu_RenderTask5(void)
             (void)Menu_AppendUnsigned(write, end,
                 status.gimbalCalibrationTarget);
         } else if (status.gimbalState == (uint8_t)BODY_MOTION_READY) {
-            (void)Menu_AppendText(write, end,
+            write = Menu_AppendText(write, end,
                 (status.gimbalHoldEnabled != 0U) ? "HOLD" : "OBSERVE");
+            write = Menu_AppendText(write, end, " FF");
+            (void)Menu_AppendUnsigned(write, end,
+                status.gimbalFeedForwardEnabled);
         } else if (status.gimbalState == (uint8_t)BODY_MOTION_STALE) {
             (void)Menu_AppendText(write, end, "IMU STALE");
         } else {
@@ -583,8 +586,11 @@ static void Menu_RenderMission(void)
             (void)Menu_AppendUnsigned(stateWrite, stateEnd,
                 status.motion.calibrationTarget);
         } else if (status.motion.state == BODY_MOTION_READY) {
-            (void)Menu_AppendText(stateWrite, stateEnd,
+            stateWrite = Menu_AppendText(stateWrite, stateEnd,
                 (status.holdEnabled != 0U) ? "HOLD" : "OBSERVE");
+            stateWrite = Menu_AppendText(stateWrite, stateEnd, " FF");
+            (void)Menu_AppendUnsigned(stateWrite, stateEnd,
+                status.feedForwardEnabled);
         } else if (status.motion.state == BODY_MOTION_STALE) {
             (void)Menu_AppendText(stateWrite, stateEnd, "IMU STALE");
         } else {

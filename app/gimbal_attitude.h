@@ -25,6 +25,7 @@ typedef struct {
     int16_t commandSps;
     uint8_t active;
     uint8_t holdEnabled;
+    uint8_t feedForwardEnabled;
     uint8_t hasReference;
 } GimbalAttitudeSnapshot;
 
@@ -45,6 +46,9 @@ void GimbalAttitude_StartCalibration(void);
 
 /* 在线启停姿态保持；模块保持 active 以便继续观察姿态。 */
 void GimbalAttitude_SetHoldEnabled(uint8_t enabled);
+
+/* 上层确认进入转弯后才允许角速度前馈；直线和 Task8 默认关闭。 */
+void GimbalAttitude_SetFeedForwardEnabled(uint8_t enabled);
 
 uint8_t GimbalAttitude_IsActive(void);
 void GimbalAttitude_GetSnapshot(GimbalAttitudeSnapshot *snapshot);

@@ -106,6 +106,7 @@ void GimbalAttitude_Init(void)
         (uint32_t)GIMBAL_ATTITUDE_POSITION_LIMIT_STEPS;
     g_gimbalAttitude.snapshot.active = 0U;
     g_gimbalAttitude.snapshot.holdEnabled = 0U;
+    g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
     GimbalAttitude_ClearReference();
 }
 
@@ -117,6 +118,7 @@ void GimbalAttitude_Start(void)
         g_gimbalAttitude.snapshot.config.accelStepSps,
         g_gimbalAttitude.snapshot.config.accelStepSps);
     g_gimbalAttitude.snapshot.holdEnabled = 1U;
+    g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
     GimbalAttitude_ClearReference();
     BodyMotion_StartCalibration();
     g_gimbalAttitude.snapshot.active = 1U;
@@ -127,6 +129,7 @@ void GimbalAttitude_Stop(void)
     g_gimbalAttitude.snapshot.active = 0U;
     GimbalAttitude_SetYawSpeed(0);
     g_gimbalAttitude.snapshot.holdEnabled = 0U;
+    g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
     GimbalAttitude_ClearReference();
     Motor_ResetRampStep(MOTOR_GIMBAL_1);
 }
@@ -147,6 +150,15 @@ void GimbalAttitude_SetHoldEnabled(uint8_t enabled)
     g_gimbalAttitude.snapshot.holdEnabled = (enabled != 0U) ? 1U : 0U;
     GimbalAttitude_SetYawSpeed(0);
     GimbalAttitude_ClearReference();
+}
+
+void GimbalAttitude_SetFeedForwardEnabled(uint8_t enabled)
+{
+    g_gimbalAttitude.snapshot.feedForwardEnabled =
+        (enabled != 0U) ? 1U : 0U;
+    if (enabled == 0U) {
+        g_gimbalAttitude.snapshot.feedForwardSps = 0;
+    }
 }
 
 void GimbalAttitude_Task(void)
@@ -206,15 +218,19 @@ void GimbalAttitude_Task(void)
         g_gimbalAttitude.snapshot.referenceStep -
             g_gimbalAttitude.snapshot.currentStep;
 
-    feedForward = GimbalAttitude_DivideRounded(
-        (int64_t)g_gimbalAttitude.snapshot.motion.
-            yawRateFilteredX100PerSec *
-            g_gimbalAttitude.snapshot.config.stepsPerRevolution *
-            g_gimbalAttitude.snapshot.config.directionSign,
-        GIMBAL_ATTITUDE_TURN_X100);
-    feedForward = GimbalAttitude_DivideRounded(
-        (int64_t)feedForward * g_gimbalAttitude.snapshot.config.kffQ1024,
-        GIMBAL_ATTITUDE_Q1024_SCALE);
+    feedForward = 0;
+    if (g_gimbalAttitude.snapshot.feedForwardEnabled != 0U) {
+        feedForward = GimbalAttitude_DivideRounded(
+            (int64_t)g_gimbalAttitude.snapshot.motion.
+                yawRateFilteredX100PerSec *
+                g_gimbalAttitude.snapshot.config.stepsPerRevolution *
+                g_gimbalAttitude.snapshot.config.directionSign,
+            GIMBAL_ATTITUDE_TURN_X100);
+        feedForward = GimbalAttitude_DivideRounded(
+            (int64_t)feedForward *
+                g_gimbalAttitude.snapshot.config.kffQ1024,
+            GIMBAL_ATTITUDE_Q1024_SCALE);
+    }
     proportional = GimbalAttitude_DivideRounded(
         (int64_t)g_gimbalAttitude.snapshot.stepError *
             g_gimbalAttitude.snapshot.config.kpQ1024,

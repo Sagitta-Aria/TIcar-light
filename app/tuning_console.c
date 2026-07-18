@@ -334,7 +334,7 @@ static void TuningConsole_SendHelp(void)
 {
     LogUart_SendString("# mode chassis|gimbal - select Task5 owner\r\n");
     LogUart_SendString(
-        "# gcal | ghold on|off | gshow - gimbal attitude control\r\n");
+        "# gcal | ghold on|off | gff on|off | gshow\r\n");
     LogUart_SendString(
         "# gsteps|gkff|gkp|glpf|gbeta|gpred VALUE\r\n");
     LogUart_SendString(
@@ -457,6 +457,8 @@ static void TuningConsole_SendStatus(void)
         LogUart_SendUnsigned(gimbal.motion.calibrationTarget);
         LogUart_SendString(" hold=");
         LogUart_SendUnsigned(gimbal.holdEnabled);
+        LogUart_SendString(" ff_gate=");
+        LogUart_SendUnsigned(gimbal.feedForwardEnabled);
         LogUart_SendString(" yaw_x100=");
         LogUart_SendSigned(gimbal.motion.yawEstimateX100);
         LogUart_SendString(" rate_x100_s=");
@@ -1311,6 +1313,7 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
         (TuningConsole_TextEquals(tokens[0], "gshow") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gcal") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "ghold") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gff") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gsteps") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gsign") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gkff") != 0U) ||
@@ -1363,6 +1366,22 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
         }
         g_forceStatus = 1U;
         LogUart_SendString("#OK ghold=");
+        LogUart_SendString(tokens[1]);
+        LogUart_SendString("\r\n");
+        return 1U;
+    }
+    if ((TuningConsole_TextEquals(tokens[0], "gff") != 0U) &&
+        (tokenCount == 2U)) {
+        if (TuningConsole_TextEquals(tokens[1], "on") != 0U) {
+            GimbalAttitude_SetFeedForwardEnabled(1U);
+        } else if (TuningConsole_TextEquals(tokens[1], "off") != 0U) {
+            GimbalAttitude_SetFeedForwardEnabled(0U);
+        } else {
+            LogUart_SendString("#ERR gff expects on or off\r\n");
+            return 1U;
+        }
+        g_forceStatus = 1U;
+        LogUart_SendString("#OK gff=");
         LogUart_SendString(tokens[1]);
         LogUart_SendString("\r\n");
         return 1U;
@@ -1692,6 +1711,7 @@ void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status)
     status->gimbalMode = (g_tuningMode == TUNING_MODE_GIMBAL) ? 1U : 0U;
     status->gimbalState = (uint8_t)gimbal.motion.state;
     status->gimbalHoldEnabled = gimbal.holdEnabled;
+    status->gimbalFeedForwardEnabled = gimbal.feedForwardEnabled;
     status->gimbalCalibrationCount = gimbal.motion.calibrationCount;
     status->gimbalCalibrationTarget = gimbal.motion.calibrationTarget;
     status->gimbalYawX100 = gimbal.motion.yawEstimateX100;

@@ -51,47 +51,54 @@ yawControl = yawEstimate + omegaFiltered * (frameAge + predictionTime)
 
 ```text
 stepReference = step0 + sign * (yawControl - yaw0) * stepsPerRev / 36000
-speedFF = sign * yawRateX100 * stepsPerRev / 36000 * KffQ1024 / 1024
+speedFF = turnGate * sign * yawRateX100 * stepsPerRev / 36000
+          * KffQ1024 / 1024
 speedCommand = clamp(speedFF + KpQ1024 * stepError / 1024)
 ```
 
-默认值为 `stepsPerRev=3200`、`sign=-1`、`Kff=1024`、`Kp=1024`、
-`max=1000 SPS`、`accel=3 SPS/ms`、相对启动位置限制正负 1600 step。
+`turnGate=0` 时前馈被硬置零，角度反馈仍然工作；只有上层确认检测到转弯后才设为
+1。这里的“检测到”应当使用 S5/S6/S7 直角窗口确认后形成的转弯状态，不能使用
+`grayMask != 0`，因为直线循迹时灰度同样非零。Task8 和每次姿态环启动默认
+`turnGate=0`；本版本仍未把姿态环接入 Task4。
+
+当前实际编译值以 `config/control_config.h` 和 Task5 `gshow` 为准；在线修改只保留
+在 RAM 中。无论 `Kff` 设为多少，`turnGate=0` 时都不会产生角速度前馈。
 `Motor_GetStepCount()` 统计的是已经安排输出的 STEP 脉冲，不是编码器；电机失步无法
 被这个位置项发现。因此它能修正指令斜坡造成的相位误差，但不等于机械角度全闭环。
 
-3200 step/rev 时，90 度是 800 step；若底盘匀速 1 秒转完 90 度，理想云台前馈是
-800 SPS。`3 SPS/ms` 从 0 加速到 800 SPS 约需 267 ms。从 0 在一秒内斜坡到
-3000 SPS 时，终点速度虽为 3000 SPS，但平均速度约为 1500 SPS，因此位移约
-1500 step，不是 3000 step。若要求一秒内从静止出发、再降到静止，默认上限
-1000 SPS 和 3 SPS/ms 的对称梯形速度面积约为 667 step，所以实际能否完成
-90 度补偿必须看底盘自身角速度曲线，并通过 Task5 观察 `err/cmd` 后调整。
+3200 step/rev 时，90 度是 800 step；若底盘匀速 1 秒转完 90 度，理想云台速度是
+800 SPS。斜坡值为 `A SPS/ms` 时，从 0 到 800 SPS 需要 `800/A ms`。终点速度
+不能直接当位移；若一秒内从静止加速到 `Vmax` 再降到静止，且能到达限速，理论
+位移为 `Vmax * (1 - Vmax/(1000*A)) step`。实际还要看底盘角速度曲线、负载和
+失步，并通过 Task5 观察 `err/cmd`。
 
 Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 `config/control_config.h` 默认值：
 
-| 命令 | 作用 | 默认/示例 |
+| 命令 | 作用 | 示例 |
 | --- | --- | --- |
 | `mode gimbal` | 停底盘并启动静止校准和 HOLD | `mode gimbal` |
 | `mode chassis` | 停云台并恢复底盘调参 | `mode chassis` |
 | `gcal` | 重新采集 100 个静止零偏样本 | `gcal` |
 | `ghold on\|off` | 开启保持或只观察姿态 | `ghold off` |
+| `gff on\|off` | 手动开关角速度前馈门，用于 Task5 独立标定 | `gff off` |
 | `gsteps N` | 电机每机械圈脉冲数 | `gsteps 3200` |
 | `gsign -1\|1` | 补偿方向 | `gsign -1` |
 | `gkff Q1024` | 角速度前馈增益 | `gkff 1024` |
-| `gkp Q1024` | STEP 位置误差比例增益 | `gkp 1024` |
+| `gkp Q1024` | STEP 位置误差比例增益 | `gkp 256` |
 | `glpf Q1024` | 角速度低通 alpha，范围 1..1024 | `glpf 256` |
-| `gbeta Q1024` | yaw 角度校正 beta，范围 1..1024 | `gbeta 64` |
+| `gbeta Q1024` | yaw 角度校正 beta，范围 1..1024 | `gbeta 10` |
 | `gpred MS` | 附加预测时间，范围 0..100 ms | `gpred 0` |
 | `gmax SPS` | yaw 最大命令，不能超过全局 1000 SPS | `gmax 1000` |
-| `gaccel SPS_PER_MS` | STEP 每毫秒斜坡增量 | `gaccel 3` |
-| `glimit STEP` | 相对启动位置限制，0 表示关闭 | `glimit 1600` |
+| `gaccel SPS_PER_MS` | STEP 每毫秒斜坡增量 | `gaccel 5` |
+| `glimit STEP` | 相对启动位置限制，0 表示关闭 | `glimit 1200` |
 | `gshow` | 输出姿态、零偏、误差、命令和全部参数 | `gshow` |
 
-建议先 `mode gimbal` 并保持整车静止，等 OLED 从 `CAL` 进入 `HOLD`；随后用手缓慢
-向一个方向转底盘。云台若同向运动，先改 `gsign`，不要先改增益。方向正确后先保持
-`gpred 0`，用 `gkff` 调匀速跟随误差，再用较小 `gkp` 收位置误差；最后才增加
-`gpred` 或加快 `gaccel`。调斜坡和最大速度时必须保留机械行程余量及物理断电手段。
+建议先 `mode gimbal` 并保持整车静止，等 OLED 从 `CAL` 进入 `HOLD FF0`；先在
+`gff off` 下确认角度反馈方向和 `gkp`，云台若同向运动先改 `gsign`。再用
+`gff on` 单独测试匀速转动并调整 `gkff`，测试结束恢复 `gff off`。以后接入 Task4
+时由确认后的转弯状态自动开门。最后才增加 `gpred` 或加快 `gaccel`；全过程必须
+保留机械行程余量及物理断电手段。
 
 底盘控制任务始终每 20 ms 读取并清零一次左右编码器窗口计数。串口默认每 500 ms 输出一行状态；执行命令或修改参数时立即回显并刷新。每次修改 `pwm` 或 `target` 后会丢弃第一个混合窗口，再从新的完整 20 ms 窗口累计平均值。
 
