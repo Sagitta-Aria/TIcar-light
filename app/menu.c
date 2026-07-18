@@ -378,6 +378,23 @@ static void Menu_RenderTask5(void)
     TuningConsoleDisplayStatus status;
 
     TuningConsole_GetDisplayStatus(&status);
+    if (status.visionMode != 0U) {
+        write = line1;
+        end = &line1[MENU_LINE_SIZE - 1U];
+        if (status.visionHasFrame != 0U) {
+            write = Menu_AppendText(write, end, "FRAME ");
+            (void)Menu_AppendUnsigned(write, end,
+                status.visionFrameCount);
+        } else {
+            (void)Menu_AppendText(write, end, "WAIT FRAME");
+        }
+        Menu_BuildSignedPair(line2, "E ", status.visionRawX,
+            status.visionRawY, "");
+        Menu_BuildSignedPair(line3, "S ", status.visionCommandX,
+            status.visionCommandY, "");
+        Menu_RenderLines("Task 5 VISION", line1, line2, line3);
+        return;
+    }
     if (status.gimbalMode != 0U) {
         write = line1;
         end = &line1[MENU_LINE_SIZE - 1U];

@@ -20,7 +20,7 @@ OLED 菜单包含五个比赛入口、一个联合标定入口、一个底盘测
 | Task 2 | 选择 Near/Mid/Far；不循迹，按对应中心参数直接进行 K230 视觉追踪 |
 | Task 3 | 选择 Near/Mid/Far；云台预转、等待视觉帧，然后按对应中心参数追踪 |
 | Task 4 | 云台捕获目标并完成 JY61 静止校准后启动循迹；视觉 yaw 与姿态角补偿合成输出，灰度进入转弯阶段时才开启角速度前馈 |
-| Task 5 PID | 默认标定底盘；发送 `mode gimbal` 后安全切换到 JY61 yaw 姿态环在线调参 |
+| Task 5 PID | 默认标定底盘；`mode gimbal` 调姿态环，`mode vision` 用 B 波形观察二维视觉追踪响应 |
 | Task 6 Drive | 进入后选择开环/闭环和 10～100 速度；开环单位为 PWM%，闭环单位为 count/20ms，左右轮使用相同命令 |
 | Task 7 Circle | 选择 Near/Mid/Far；不循迹，复用 Task2 的直接追踪流程，但使用对应距离的圆点参数 |
 | Task 8 IMU | 只运行 JY61 共享姿态估计和云台 yaw 保持；角速度前馈默认开启，不启动底盘、视觉或 Task4 流程 |
@@ -78,7 +78,7 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 - Task1 的 `CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS=0` 表示丢线后持续搜线，不再因灰度全 0 约 1 秒自动停车；编码间距参数只限制重复强转。
 - S5/S6/S7 确认右直角时尝试锁存 JY61P 航向；若可用，航向差按跨 ±180° 的最短角差取绝对值，只用于把强转左轮渐变到粗略参考角对应速度。没有JY61P或中途没有新帧时直接忽略角度，继续按灰度找线，绝不因此停车或出弯。S4必须先释放、再连续确认回线才进入出弯；Task1当前出弯为左 `-25`、右 `-25`，保持时间0 ms。只有持续5秒仍找不到S4时才执行最终安全停车。
 - `config/control_config.h` 分别保存低速 `START`、正常运行 `RUN_START` 和实际 PI/前馈参数。每轮实际速度绝对值小于15 count/20ms时使用 `START`，否则使用 `RUN_START`；架空轮确认方向和编码器符号后再标定并落地测试。
-- Task5 的 `pwm/set` 命令和 SerialPlot PWM 通道使用 `-100..100%`；当前 `100%=1200 PWM count`。SerialPlot 固定 9 通道，末两路持续显示左右 `FF_Q1024`；FF 始终用 raw count 计算。
+- Task5 的 `pwm/set` 命令和 SerialPlot PWM 通道使用 `-100..100%`；当前 `100%=1200 PWM count`。底盘 `P` 与姿态 `A` 各为 9 通道，视觉响应 `B` 为 10 通道；`P` 的末两路持续显示左右 `FF_Q1024`，FF 始终用 raw count 计算。
 - Task1/Task4 的 `TURN_MIN_ENCODER_GAP_COUNTS` 和 Task4 延长距离均为编码器 count，必须按实车重标。
 
 ## 云台与视觉

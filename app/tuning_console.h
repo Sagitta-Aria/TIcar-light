@@ -49,6 +49,13 @@ typedef struct {
     int32_t rightAverageCounts;
     uint8_t grayMask;
     uint8_t gimbalMode;
+    uint8_t visionMode;
+    uint8_t visionHasFrame;
+    uint32_t visionFrameCount;
+    int16_t visionRawX;
+    int16_t visionRawY;
+    int16_t visionCommandX;
+    int16_t visionCommandY;
     uint8_t gimbalState;
     uint8_t gimbalHoldEnabled;
     uint8_t gimbalFeedForwardEnabled;

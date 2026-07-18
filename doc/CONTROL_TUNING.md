@@ -1,6 +1,7 @@
 # Task5 在线标定与 Task8 云台姿态环
 
 Task5 用于左右编码电机的开环测量和速度 PI 在线测试。测试前必须架空车轮，并准备能立即断开电机动力电源的物理手段。串口命令会一直保持到下一条命令，USB 断开不会自动停车。
+视觉模式会实际驱动 yaw/pitch 两轴，测试前还必须确认机械行程内没有线缆或限位干涉。
 
 ## 串口和任务入口
 
@@ -12,8 +13,9 @@ Task5 用于左右编码电机的开环测量和速度 PI 在线测试。测试�
 
 Task5 默认处于 `mode chassis`。只有显式发送 `mode gimbal` 后才停止底盘调参、
 启动 JY61 静止校准和云台 yaw 姿态保持；切回 `mode chassis` 会先停止云台。
-`stop` 同时停止底盘和云台输出。Task8 是独立的云台姿态实验入口，不启动视觉、
-不启动底盘，也没有接入 Task4。
+发送 `mode vision` 会停止底盘和姿态环，启动 UART3 视觉解析与二维云台闭环，
+并默认输出 `B` 前缀视觉响应波形。`stop` 同时停止底盘、姿态和视觉云台输出。
+Task8 是独立的云台姿态实验入口，不启动视觉或底盘。
 
 ## 定时器与调度
 
@@ -60,7 +62,7 @@ speedCommand = clamp(speedFF + KpQ1024 * stepError / 1024)
 1。这里的“检测到”应当使用 S5/S6/S7 直角窗口确认后形成的转弯状态，不能使用
 `grayMask != 0`，因为直线循迹时灰度同样非零。通用姿态环和 Task5 启动默认
 `turnGate=0`，Task8 入口会显式改为 `turnGate=1`，用于独立测试完整姿态环；
-本版本仍未把姿态环接入 Task4。
+Task4 则由灰度确认后的转弯状态自动控制前馈门。
 
 当前实际编译值以 `config/control_config.h` 和 Task5 `gshow` 为准；在线修改只保留
 在 RAM 中。无论 `Kff` 设为多少，`turnGate=0` 时都不会产生角速度前馈。
@@ -80,6 +82,7 @@ Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 | --- | --- | --- |
 | `mode gimbal` | 停底盘并启动静止校准和 HOLD | `mode gimbal` |
 | `mode chassis` | 停云台并恢复底盘调参 | `mode chassis` |
+| `mode vision` | 停底盘和姿态环，启动二维视觉云台及 B 波形 | `mode vision` |
 | `gcal` | 重新采集 100 个静止零偏样本 | `gcal` |
 | `ghold on\|off` | 开启保持或只观察姿态 | `ghold off` |
 | `gff on\|off` | 手动开关角速度前馈门，用于 Task5 独立标定 | `gff off` |
@@ -95,11 +98,14 @@ Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 | `gaccel SPS_PER_MS` | STEP 每毫秒斜坡增量 | `gaccel 5` |
 | `glimit STEP` | 相对启动位置限制，0 表示关闭 | `glimit 1200` |
 | `gshow` | 输出姿态、零偏、误差、命令和全部参数 | `gshow` |
+| `vconfig DIST SOURCE` | 切换 Near/Mid/Far 与 Center/Circle 参数并重启追踪 | `vconfig mid center` |
+| `vplot on\|off` | 开关 20 ms 视觉十通道 B 波形 | `vplot on` |
+| `vshow` | 输出视觉帧、控制误差、两轴命令及当前参数 | `vshow` |
 
 建议先 `mode gimbal` 并保持整车静止，等 OLED 从 `CAL` 进入 `HOLD FF0`；先在
 `gff off` 下确认角度反馈方向和 `gkp`，云台若同向运动先改 `gsign`。再用
-`gff on` 单独测试匀速转动并调整 `gkff`，测试结束恢复 `gff off`。以后接入 Task4
-时由确认后的转弯状态自动开门。最后才增加 `gpred` 或加快 `gaccel`；全过程必须
+`gff on` 单独测试匀速转动并调整 `gkff`，测试结束恢复 `gff off`。Task4
+已经由确认后的转弯状态自动开门。最后才增加 `gpred` 或加快 `gaccel`；全过程必须
 保留机械行程余量及物理断电手段。
 
 Task5 云台模式每 20 ms 输出一行 `A` 前缀纯数字帧。SerialPlot 使用 ASCII、
@@ -123,6 +129,32 @@ A yaw_est_x100,yaw_control_x100,gyro_raw_x100_s,gyro_filtered_x100_s,
 | 7 | `referenceStep-currentStep`，属于脉冲指令域误差 |
 | 8 | MCU 已发出的累计有符号 STEP 数 |
 | 9 | 门控后的角速度前馈分量 `ff_sps` |
+
+Task5 视觉模式每 20 ms 输出一行 `B` 前缀纯数字帧。SerialPlot 使用 ASCII、
+10 通道、逗号分隔，`Filter by Prefix` 选择 `Include` 并填写 `B`：
+
+```text
+B raw_x,error_x,yaw_cmd_sps,yaw_step_sps,yaw_step_count,
+  raw_y,error_y,pitch_cmd_sps,pitch_step_sps,pitch_step_count
+```
+
+| 通道 | 含义 |
+| ---: | --- |
+| 1 | 视觉选择源的 X 原始误差，单位 0.1 像素 |
+| 2 | 加入 `offsetX` 后的 yaw 控制误差，单位 0.1 像素 |
+| 3 | yaw 闭环目标速度，单位 SPS |
+| 4 | yaw 斜坡后的 STEP 输出频率，单位 SPS |
+| 5 | yaw 累计有符号 STEP 数 |
+| 6 | 视觉选择源的 Y 原始误差，单位 0.1 像素 |
+| 7 | 加入 `offsetY` 后的 pitch 控制误差，单位 0.1 像素 |
+| 8 | pitch 闭环目标速度，单位 SPS |
+| 9 | pitch 斜坡后的 STEP 输出频率，单位 SPS |
+| 10 | pitch 累计有符号 STEP 数 |
+
+当前 K230 协议发送的是 `target-current` 误差，不包含目标和当前点的绝对坐标，
+所以 B 通道 1/6 表示目标误差变化。需要绝对坐标时必须先扩展视觉串口协议。
+推荐测试顺序为 `mode vision`、`vconfig near center`、`vshow`，确认参数后再打开
+SerialPlot；结束时发送 `stop`，不能用拔掉串口代替停车。
 
 `step_sps` 和 `step_count` 都来自 MCU 的 STEP 发生器，不是机械轴编码器反馈。
 闭环步进驱动器虽然用电机编码器在驱动器内部纠正位置，但当前接线只有 STEP/DIR，
@@ -154,7 +186,7 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 
 | 命令 | 作用 | 示例 |
 | --- | --- | --- |
-| `mode chassis\|gimbal` | 在底盘调参和云台调参之间安全切换 | `mode chassis` |
+| `mode chassis\|gimbal\|vision` | 在底盘、姿态和视觉云台调试之间安全切换 | `mode chassis` |
 | `set L R` | 输出 PWM 百分比，稳定 4 秒后采集 50 个窗口；第二个点自动计算并应用 FF 和 runstart | `set 30 0` |
 | `set clear` | 清除左右已保存的第一个采样点并停车 | `set clear` |
 | `pwm L R` | 左右轮开环 PWM 百分比，范围 -100..100 | `pwm 15 0` |

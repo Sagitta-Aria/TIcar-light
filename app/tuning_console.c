@@ -6,16 +6,21 @@
 #include "control_config.h"
 #include "body_motion.h"
 #include "encoder_motor.h"
+#include "gimbal.h"
 #include "gimbal_attitude.h"
 #include "gray.h"
 #include "log_uart.h"
 #include "motor.h"
+#include "motor_enable.h"
 #include "motor_no_yaw.h"
+#include "staticconfig.h"
+#include "vision.h"
 
 #define TUNING_LINE_MAX                 (80U)
 #define TUNING_TOKEN_MAX                (5U)
 #define TUNING_STATUS_PERIOD_MS         (500U)
 #define TUNING_GIMBAL_PLOT_PERIOD_MS    (20U)
+#define TUNING_VISION_PLOT_PERIOD_MS    (20U)
 #define TUNING_TARGET_COUNT_LIMIT \
     ((int32_t)CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD)
 #define TUNING_PWM_PERCENT_MAX          (100L)
@@ -34,7 +39,8 @@ typedef enum {
 
 typedef enum {
     TUNING_MODE_CHASSIS = 0,
-    TUNING_MODE_GIMBAL
+    TUNING_MODE_GIMBAL,
+    TUNING_MODE_VISION
 } TuningMode;
 
 typedef struct {
@@ -69,11 +75,35 @@ static uint8_t g_encoderMoveActive;
 static TuningMode g_tuningMode;
 static uint8_t g_gimbalPlotEnabled;
 static TickType_t g_lastGimbalPlotTime;
+static StaticConfigDistance g_visionDistance;
+static StaticConfigMode g_visionSource;
+static uint8_t g_visionPlotEnabled;
+static TickType_t g_lastVisionPlotTime;
 
 static void TuningConsole_CancelSetSampling(void);
 static void TuningConsole_CancelEncoderMove(void);
 static void TuningConsole_StopGrayTest(void);
 static void TuningConsole_ResetAverage(void);
+
+static void TuningConsole_StopVisionActivity(void)
+{
+    g_visionPlotEnabled = 0U;
+    Vision_Stop();
+    Gimbal_SetEnabled(0U);
+    Gimbal_SetYawFeedForward(0);
+    Gimbal_SetYawAttitudeCompensation(0);
+    MotorEnable_SetGimbal(0U);
+}
+
+static void TuningConsole_StartVisionActivity(void)
+{
+    StaticConfig_SetActiveByDistanceMode(g_visionDistance,
+        g_visionSource);
+    Vision_Start();
+    Gimbal_SetTarget(0, 0);
+    Gimbal_SetEnabled(1U);
+    MotorEnable_SetGimbal(1U);
+}
 
 static void TuningConsole_StopChassisActivity(void)
 {
@@ -88,15 +118,30 @@ static void TuningConsole_StopChassisActivity(void)
 static void TuningConsole_SetMode(TuningMode mode)
 {
     if (mode == TUNING_MODE_GIMBAL) {
+        TuningConsole_StopVisionActivity();
         TuningConsole_StopChassisActivity();
         GimbalAttitude_Start();
+        MotorEnable_SetGimbal(1U);
         g_tuningMode = TUNING_MODE_GIMBAL;
         g_gimbalPlotEnabled = 1U;
         g_lastGimbalPlotTime = xTaskGetTickCount();
         g_oledPage = TUNING_CONSOLE_OLED_GIMBAL;
         LogUart_SendString("#OK mode=gimbal; keep car and IMU still for calibration\r\n");
-    } else {
+    } else if (mode == TUNING_MODE_VISION) {
+        TuningConsole_StopChassisActivity();
         GimbalAttitude_Stop();
+        TuningConsole_StopVisionActivity();
+        TuningConsole_StartVisionActivity();
+        g_tuningMode = TUNING_MODE_VISION;
+        g_gimbalPlotEnabled = 0U;
+        g_visionPlotEnabled = 1U;
+        g_lastVisionPlotTime = xTaskGetTickCount();
+        LogUart_SendString(
+            "#OK mode=vision; visual tracking and B plot enabled\r\n");
+    } else {
+        TuningConsole_StopVisionActivity();
+        GimbalAttitude_Stop();
+        MotorEnable_SetGimbal(0U);
         EncoderMotor_EnterCalibration();
         g_tuningMode = TUNING_MODE_CHASSIS;
         g_gimbalPlotEnabled = 0U;
@@ -338,13 +383,16 @@ static void TuningConsole_UpdateAverage(void)
 
 static void TuningConsole_SendHelp(void)
 {
-    LogUart_SendString("# mode chassis|gimbal - select Task5 owner\r\n");
+    LogUart_SendString(
+        "# mode chassis|gimbal|vision - select Task5 owner\r\n");
     LogUart_SendString(
         "# gcal | ghold on|off | gff on|off | gplot on|off | gshow\r\n");
     LogUart_SendString(
         "# gsteps|gkff|gkp|glpf|gbeta|gpred VALUE\r\n");
     LogUart_SendString(
         "# gsign -1|1 | gmax|gaccel|glimit VALUE\r\n");
+    LogUart_SendString(
+        "# vconfig near|mid|far center|circle | vplot on|off | vshow\r\n");
     LogUart_SendString("# Task5 PWM commands use percent:\r\n");
     LogUart_SendString("# set L R       -100..100%, sample FF point\r\n");
     LogUart_SendString("# set clear     clear saved FF points\r\n");
@@ -488,6 +536,39 @@ static void TuningConsole_SendStatus(void)
         LogUart_SendString("\r\n");
         return;
     }
+    if (g_tuningMode == TUNING_MODE_VISION) {
+        const StaticConfigGimbalTask *config =
+            StaticConfig_GetActiveGimbal();
+
+        LogUart_SendString("V running=");
+        LogUart_SendUnsigned(Vision_IsRunning());
+        LogUart_SendString(" frame=");
+        LogUart_SendUnsigned(Vision_GetFrameCount());
+        LogUart_SendString(" bad=");
+        LogUart_SendUnsigned(Vision_GetBadFrameCount());
+        LogUart_SendString(" config=");
+        LogUart_SendString(config->name);
+        LogUart_SendString(" raw=");
+        LogUart_SendSigned(Vision_GetRawX());
+        LogUart_SendString(",");
+        LogUart_SendSigned(Vision_GetRawY());
+        LogUart_SendString(" error=");
+        LogUart_SendSigned(Gimbal_GetErrorX());
+        LogUart_SendString(",");
+        LogUart_SendSigned(Gimbal_GetErrorY());
+        LogUart_SendString(" cmd_sps=");
+        LogUart_SendSigned(Gimbal_GetCommandX());
+        LogUart_SendString(",");
+        LogUart_SendSigned(Gimbal_GetCommandY());
+        LogUart_SendString(" step_sps=");
+        LogUart_SendSigned(Motor_GetGimbalStepRate(MOTOR_GIMBAL_1));
+        LogUart_SendString(",");
+        LogUart_SendSigned(Motor_GetGimbalStepRate(MOTOR_GIMBAL_2));
+        LogUart_SendString(" plot=");
+        LogUart_SendUnsigned(g_visionPlotEnabled);
+        LogUart_SendString("\r\n");
+        return;
+    }
 
     EncoderMotor_GetSnapshot(&snapshot);
     LogUart_SendString("D mode=");
@@ -571,6 +652,32 @@ static void TuningConsole_SendGimbalPlotFrame(void)
     LogUart_SendString("\r\n");
 }
 
+/* B: each axis shows raw error, adjusted error, command, STEP rate/count. */
+static void TuningConsole_SendVisionPlotFrame(void)
+{
+    LogUart_SendString("B ");
+    LogUart_SendSigned(Vision_GetRawX());
+    LogUart_SendString(",");
+    LogUart_SendSigned(Gimbal_GetErrorX());
+    LogUart_SendString(",");
+    LogUart_SendSigned(Gimbal_GetCommandX());
+    LogUart_SendString(",");
+    LogUart_SendSigned(Motor_GetGimbalStepRate(MOTOR_GIMBAL_1));
+    LogUart_SendString(",");
+    LogUart_SendSigned(Motor_GetStepCount(MOTOR_GIMBAL_1));
+    LogUart_SendString(",");
+    LogUart_SendSigned(Vision_GetRawY());
+    LogUart_SendString(",");
+    LogUart_SendSigned(Gimbal_GetErrorY());
+    LogUart_SendString(",");
+    LogUart_SendSigned(Gimbal_GetCommandY());
+    LogUart_SendString(",");
+    LogUart_SendSigned(Motor_GetGimbalStepRate(MOTOR_GIMBAL_2));
+    LogUart_SendString(",");
+    LogUart_SendSigned(Motor_GetStepCount(MOTOR_GIMBAL_2));
+    LogUart_SendString("\r\n");
+}
+
 static void TuningConsole_SendDetails(void)
 {
     EncoderMotorSnapshot snapshot;
@@ -604,6 +711,42 @@ static void TuningConsole_SendDetails(void)
         LogUart_SendUnsigned(motion.predictionMs);
         LogUart_SendString(" stale_ms=");
         LogUart_SendUnsigned(motion.staleMs);
+        LogUart_SendString("\r\n");
+        return;
+    }
+    if (g_tuningMode == TUNING_MODE_VISION) {
+        const StaticConfigGimbalTask *config =
+            StaticConfig_GetActiveGimbal();
+
+        TuningConsole_SendStatus();
+        LogUart_SendString("# deadband=");
+        LogUart_SendUnsigned(config->deadbandX);
+        LogUart_SendString(",");
+        LogUart_SendUnsigned(config->deadbandY);
+        LogUart_SendString(" restart=");
+        LogUart_SendUnsigned(config->restartDeadbandX);
+        LogUart_SendString(",");
+        LogUart_SendUnsigned(config->restartDeadbandY);
+        LogUart_SendString(" kp=");
+        LogUart_SendUnsigned(config->kpX);
+        LogUart_SendString(",");
+        LogUart_SendUnsigned(config->kpY);
+        LogUart_SendString(" kd=");
+        LogUart_SendUnsigned(config->kdX);
+        LogUart_SendString(",");
+        LogUart_SendUnsigned(config->kdY);
+        LogUart_SendString(" speed_min=");
+        LogUart_SendUnsigned(config->minSpeedX);
+        LogUart_SendString(",");
+        LogUart_SendUnsigned(config->minSpeedY);
+        LogUart_SendString(" speed_max=");
+        LogUart_SendUnsigned(config->maxSpeedX);
+        LogUart_SendString(",");
+        LogUart_SendUnsigned(config->maxSpeedY);
+        LogUart_SendString(" offset=");
+        LogUart_SendSigned(config->offsetX);
+        LogUart_SendString(",");
+        LogUart_SendSigned(config->offsetY);
         LogUart_SendString("\r\n");
         return;
     }
@@ -1451,6 +1594,102 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
     return 1U;
 }
 
+static uint8_t TuningConsole_ParseVisionDistance(const char *text,
+    StaticConfigDistance *distance)
+{
+    if (TuningConsole_TextEquals(text, "near") != 0U) {
+        *distance = STATICCONFIG_DISTANCE_NEAR;
+    } else if (TuningConsole_TextEquals(text, "mid") != 0U) {
+        *distance = STATICCONFIG_DISTANCE_MID;
+    } else if (TuningConsole_TextEquals(text, "far") != 0U) {
+        *distance = STATICCONFIG_DISTANCE_FAR;
+    } else {
+        return 0U;
+    }
+    return 1U;
+}
+
+static uint8_t TuningConsole_ParseVisionSource(const char *text,
+    StaticConfigMode *source)
+{
+    if (TuningConsole_TextEquals(text, "center") != 0U) {
+        *source = STATICCONFIG_MODE_CENTER;
+    } else if (TuningConsole_TextEquals(text, "circle") != 0U) {
+        *source = STATICCONFIG_MODE_CIRCLE;
+    } else {
+        return 0U;
+    }
+    return 1U;
+}
+
+static uint8_t TuningConsole_ExecuteVisionCommand(char *tokens[],
+    uint8_t tokenCount)
+{
+    uint8_t recognized = (uint8_t)(
+        (TuningConsole_TextEquals(tokens[0], "vshow") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "vplot") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "vconfig") != 0U));
+
+    if (recognized == 0U) {
+        return 0U;
+    }
+    if (g_tuningMode != TUNING_MODE_VISION) {
+        LogUart_SendString(
+            "#ERR vision command blocked; send mode vision first\r\n");
+        return 1U;
+    }
+    if ((TuningConsole_TextEquals(tokens[0], "vshow") != 0U) &&
+        (tokenCount == 1U)) {
+        TuningConsole_SendDetails();
+        return 1U;
+    }
+    if ((TuningConsole_TextEquals(tokens[0], "vplot") != 0U) &&
+        (tokenCount == 2U)) {
+        if (TuningConsole_TextEquals(tokens[1], "on") != 0U) {
+            g_visionPlotEnabled = 1U;
+            g_lastVisionPlotTime = xTaskGetTickCount();
+        } else if (TuningConsole_TextEquals(tokens[1], "off") != 0U) {
+            g_visionPlotEnabled = 0U;
+        } else {
+            LogUart_SendString("#ERR vplot expects on or off\r\n");
+            return 1U;
+        }
+        LogUart_SendString("#OK vplot=");
+        LogUart_SendString(tokens[1]);
+        LogUart_SendString("\r\n");
+        g_forceStatus = 1U;
+        return 1U;
+    }
+    if ((TuningConsole_TextEquals(tokens[0], "vconfig") != 0U) &&
+        (tokenCount == 3U)) {
+        StaticConfigDistance distance;
+        StaticConfigMode source;
+        uint8_t plotEnabled = g_visionPlotEnabled;
+
+        if ((TuningConsole_ParseVisionDistance(tokens[1], &distance) == 0U) ||
+            (TuningConsole_ParseVisionSource(tokens[2], &source) == 0U)) {
+            LogUart_SendString(
+                "#ERR vconfig expects near|mid|far center|circle\r\n");
+            return 1U;
+        }
+        g_visionDistance = distance;
+        g_visionSource = source;
+        TuningConsole_StopVisionActivity();
+        TuningConsole_StartVisionActivity();
+        g_visionPlotEnabled = plotEnabled;
+        g_lastVisionPlotTime = xTaskGetTickCount();
+        LogUart_SendString("#OK vconfig=");
+        LogUart_SendString(tokens[1]);
+        LogUart_SendString(",");
+        LogUart_SendString(tokens[2]);
+        LogUart_SendString("\r\n");
+        g_forceStatus = 1U;
+        return 1U;
+    }
+    LogUart_SendString("#ERR bad vision command arguments\r\n");
+    return 1U;
+}
+
 static void TuningConsole_ExecuteLine(char *line)
 {
     char *tokens[TUNING_TOKEN_MAX];
@@ -1472,15 +1711,21 @@ static void TuningConsole_ExecuteLine(char *line)
             TuningConsole_SetMode(TUNING_MODE_CHASSIS);
         } else if (TuningConsole_TextEquals(tokens[1], "gimbal") != 0U) {
             TuningConsole_SetMode(TUNING_MODE_GIMBAL);
+        } else if (TuningConsole_TextEquals(tokens[1], "vision") != 0U) {
+            TuningConsole_SetMode(TUNING_MODE_VISION);
         } else {
-            LogUart_SendString("#ERR mode expects chassis or gimbal\r\n");
+            LogUart_SendString(
+                "#ERR mode expects chassis, gimbal, or vision\r\n");
         }
         return;
     }
     if (TuningConsole_ExecuteGimbalCommand(tokens, tokenCount) != 0U) {
         return;
     }
-    if ((g_tuningMode == TUNING_MODE_GIMBAL) &&
+    if (TuningConsole_ExecuteVisionCommand(tokens, tokenCount) != 0U) {
+        return;
+    }
+    if ((g_tuningMode != TUNING_MODE_CHASSIS) &&
         (TuningConsole_TextEquals(tokens[0], "help") == 0U) &&
         (TuningConsole_TextEquals(tokens[0], "show") == 0U) &&
         (TuningConsole_TextEquals(tokens[0], "oled") == 0U) &&
@@ -1520,6 +1765,7 @@ static void TuningConsole_ExecuteLine(char *line)
         TuningConsole_StopGrayTest();
         EncoderMotor_SetOpenLoopPwm(0, 0);
         GimbalAttitude_Stop();
+        TuningConsole_StopVisionActivity();
         TuningConsole_ResetAverage();
         LogUart_SendString("#OK stop\r\n");
         g_forceStatus = 1U;
@@ -1666,6 +1912,9 @@ void TuningConsole_Start(void)
     g_oledPage = TUNING_CONSOLE_OLED_FF;
     g_tuningMode = TUNING_MODE_CHASSIS;
     g_gimbalPlotEnabled = 0U;
+    g_visionDistance = STATICCONFIG_DISTANCE_NEAR;
+    g_visionSource = STATICCONFIG_MODE_CENTER;
+    g_visionPlotEnabled = 0U;
     g_grayActive = 0U;
     g_grayMask = 0U;
     TuningConsole_CancelEncoderMove();
@@ -1673,6 +1922,7 @@ void TuningConsole_Start(void)
     TuningConsole_ClearSetReferences();
     LogUart_ClearRx();
     GimbalAttitude_Stop();
+    TuningConsole_StopVisionActivity();
     EncoderMotor_EnterCalibration();
     TuningConsole_ResetAverage();
     g_lastStatusTime = xTaskGetTickCount();
@@ -1691,6 +1941,7 @@ void TuningConsole_Stop(void)
     g_grayMask = 0U;
     TuningConsole_CancelEncoderMove();
     GimbalAttitude_Stop();
+    TuningConsole_StopVisionActivity();
     EncoderMotor_ExitCalibration();
     TuningConsole_CancelSetSampling();
     TuningConsole_ClearSetReferences();
@@ -1699,6 +1950,7 @@ void TuningConsole_Stop(void)
     g_discardLine = 0U;
     g_forceStatus = 0U;
     g_gimbalPlotEnabled = 0U;
+    g_visionPlotEnabled = 0U;
     LogUart_SendString("# Task5 calibration stopped; PWM=0\r\n");
 }
 
@@ -1721,6 +1973,13 @@ void TuningConsole_Task(void)
             pdMS_TO_TICKS(TUNING_GIMBAL_PLOT_PERIOD_MS))) {
         g_lastGimbalPlotTime = now;
         TuningConsole_SendGimbalPlotFrame();
+    }
+    if ((g_tuningMode == TUNING_MODE_VISION) &&
+        (g_visionPlotEnabled != 0U) &&
+        ((now - g_lastVisionPlotTime) >=
+            pdMS_TO_TICKS(TUNING_VISION_PLOT_PERIOD_MS))) {
+        g_lastVisionPlotTime = now;
+        TuningConsole_SendVisionPlotFrame();
     }
     if (g_tuningMode == TUNING_MODE_CHASSIS) {
         TuningConsole_UpdateSetSampling(now);
@@ -1772,6 +2031,13 @@ void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status)
     GimbalAttitude_GetSnapshot(&gimbal);
     status->oledPage = g_oledPage;
     status->gimbalMode = (g_tuningMode == TUNING_MODE_GIMBAL) ? 1U : 0U;
+    status->visionMode = (g_tuningMode == TUNING_MODE_VISION) ? 1U : 0U;
+    status->visionHasFrame = Vision_HasFrame();
+    status->visionFrameCount = Vision_GetFrameCount();
+    status->visionRawX = Vision_GetRawX();
+    status->visionRawY = Vision_GetRawY();
+    status->visionCommandX = Gimbal_GetCommandX();
+    status->visionCommandY = Gimbal_GetCommandY();
     status->gimbalState = (uint8_t)gimbal.motion.state;
     status->gimbalHoldEnabled = gimbal.holdEnabled;
     status->gimbalFeedForwardEnabled = gimbal.feedForwardEnabled;
