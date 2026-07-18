@@ -15,6 +15,7 @@
 #define TUNING_LINE_MAX                 (80U)
 #define TUNING_TOKEN_MAX                (5U)
 #define TUNING_STATUS_PERIOD_MS         (500U)
+#define TUNING_GIMBAL_PLOT_PERIOD_MS    (20U)
 #define TUNING_TARGET_COUNT_LIMIT \
     ((int32_t)CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD)
 #define TUNING_PWM_PERCENT_MAX          (100L)
@@ -66,6 +67,8 @@ static int32_t g_encoderMoveStart[ENCODER_MOTOR_COUNT];
 static int32_t g_encoderMoveDistance[ENCODER_MOTOR_COUNT];
 static uint8_t g_encoderMoveActive;
 static TuningMode g_tuningMode;
+static uint8_t g_gimbalPlotEnabled;
+static TickType_t g_lastGimbalPlotTime;
 
 static void TuningConsole_CancelSetSampling(void);
 static void TuningConsole_CancelEncoderMove(void);
@@ -88,12 +91,15 @@ static void TuningConsole_SetMode(TuningMode mode)
         TuningConsole_StopChassisActivity();
         GimbalAttitude_Start();
         g_tuningMode = TUNING_MODE_GIMBAL;
+        g_gimbalPlotEnabled = 1U;
+        g_lastGimbalPlotTime = xTaskGetTickCount();
         g_oledPage = TUNING_CONSOLE_OLED_GIMBAL;
         LogUart_SendString("#OK mode=gimbal; keep car and IMU still for calibration\r\n");
     } else {
         GimbalAttitude_Stop();
         EncoderMotor_EnterCalibration();
         g_tuningMode = TUNING_MODE_CHASSIS;
+        g_gimbalPlotEnabled = 0U;
         g_oledPage = TUNING_CONSOLE_OLED_FF;
         TuningConsole_ResetAverage();
         LogUart_SendString("#OK mode=chassis; gimbal stopped\r\n");
@@ -334,7 +340,7 @@ static void TuningConsole_SendHelp(void)
 {
     LogUart_SendString("# mode chassis|gimbal - select Task5 owner\r\n");
     LogUart_SendString(
-        "# gcal | ghold on|off | gff on|off | gshow\r\n");
+        "# gcal | ghold on|off | gff on|off | gplot on|off | gshow\r\n");
     LogUart_SendString(
         "# gsteps|gkff|gkp|glpf|gbeta|gpred VALUE\r\n");
     LogUart_SendString(
@@ -475,6 +481,10 @@ static void TuningConsole_SendStatus(void)
         LogUart_SendSigned(gimbal.feedForwardSps);
         LogUart_SendString(" cmd_sps=");
         LogUart_SendSigned(gimbal.commandSps);
+        LogUart_SendString(" step_sps=");
+        LogUart_SendSigned(gimbal.stepOutputSps);
+        LogUart_SendString(" plot=");
+        LogUart_SendUnsigned(g_gimbalPlotEnabled);
         LogUart_SendString("\r\n");
         return;
     }
@@ -533,6 +543,32 @@ static void TuningConsole_SendStatus(void)
     LogUart_SendUnsigned(g_averageSampleCount);
     LogUart_SendString("\r\n");
     TuningConsole_SendPlotFrame(&snapshot);
+}
+
+static void TuningConsole_SendGimbalPlotFrame(void)
+{
+    GimbalAttitudeSnapshot gimbal;
+
+    GimbalAttitude_GetSnapshot(&gimbal);
+    LogUart_SendString("A ");
+    LogUart_SendSigned(gimbal.motion.yawEstimateX100);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.motion.yawControlX100);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.motion.yawRateRawX100PerSec);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.motion.yawRateFilteredX100PerSec);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.commandSps);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.stepOutputSps);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.stepError);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.currentStep);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.feedForwardSps);
+    LogUart_SendString("\r\n");
 }
 
 static void TuningConsole_SendDetails(void)
@@ -1314,6 +1350,7 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
         (TuningConsole_TextEquals(tokens[0], "gcal") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "ghold") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gff") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gplot") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gsteps") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gsign") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gkff") != 0U) ||
@@ -1382,6 +1419,23 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
         }
         g_forceStatus = 1U;
         LogUart_SendString("#OK gff=");
+        LogUart_SendString(tokens[1]);
+        LogUart_SendString("\r\n");
+        return 1U;
+    }
+    if ((TuningConsole_TextEquals(tokens[0], "gplot") != 0U) &&
+        (tokenCount == 2U)) {
+        if (TuningConsole_TextEquals(tokens[1], "on") != 0U) {
+            g_gimbalPlotEnabled = 1U;
+            g_lastGimbalPlotTime = xTaskGetTickCount();
+        } else if (TuningConsole_TextEquals(tokens[1], "off") != 0U) {
+            g_gimbalPlotEnabled = 0U;
+        } else {
+            LogUart_SendString("#ERR gplot expects on or off\r\n");
+            return 1U;
+        }
+        g_forceStatus = 1U;
+        LogUart_SendString("#OK gplot=");
         LogUart_SendString(tokens[1]);
         LogUart_SendString("\r\n");
         return 1U;
@@ -1611,6 +1665,7 @@ void TuningConsole_Start(void)
     g_forceStatus = 0U;
     g_oledPage = TUNING_CONSOLE_OLED_FF;
     g_tuningMode = TUNING_MODE_CHASSIS;
+    g_gimbalPlotEnabled = 0U;
     g_grayActive = 0U;
     g_grayMask = 0U;
     TuningConsole_CancelEncoderMove();
@@ -1643,6 +1698,7 @@ void TuningConsole_Stop(void)
     g_lineLength = 0U;
     g_discardLine = 0U;
     g_forceStatus = 0U;
+    g_gimbalPlotEnabled = 0U;
     LogUart_SendString("# Task5 calibration stopped; PWM=0\r\n");
 }
 
@@ -1659,6 +1715,13 @@ void TuningConsole_Task(void)
         TuningConsole_UpdateEncoderMove();
     }
     now = xTaskGetTickCount();
+    if ((g_tuningMode == TUNING_MODE_GIMBAL) &&
+        (g_gimbalPlotEnabled != 0U) &&
+        ((now - g_lastGimbalPlotTime) >=
+            pdMS_TO_TICKS(TUNING_GIMBAL_PLOT_PERIOD_MS))) {
+        g_lastGimbalPlotTime = now;
+        TuningConsole_SendGimbalPlotFrame();
+    }
     if (g_tuningMode == TUNING_MODE_CHASSIS) {
         TuningConsole_UpdateSetSampling(now);
     }

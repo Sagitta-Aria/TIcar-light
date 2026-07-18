@@ -83,6 +83,7 @@ Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 | `gcal` | 重新采集 100 个静止零偏样本 | `gcal` |
 | `ghold on\|off` | 开启保持或只观察姿态 | `ghold off` |
 | `gff on\|off` | 手动开关角速度前馈门，用于 Task5 独立标定 | `gff off` |
+| `gplot on\|off` | 开关 20 ms 云台九通道输出，进入云台模式默认开启 | `gplot on` |
 | `gsteps N` | 电机每机械圈脉冲数 | `gsteps 3200` |
 | `gsign -1\|1` | 补偿方向 | `gsign -1` |
 | `gkff Q1024` | 角速度前馈增益 | `gkff 1024` |
@@ -100,6 +101,39 @@ Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 `gff on` 单独测试匀速转动并调整 `gkff`，测试结束恢复 `gff off`。以后接入 Task4
 时由确认后的转弯状态自动开门。最后才增加 `gpred` 或加快 `gaccel`；全过程必须
 保留机械行程余量及物理断电手段。
+
+Task5 云台模式每 20 ms 输出一行 `A` 前缀纯数字帧。SerialPlot 使用 ASCII、
+9 通道、逗号分隔，`Filter by Prefix` 选择 `Include` 并填写 `A`：
+
+```text
+A yaw_est_x100,yaw_control_x100,gyro_raw_x100_s,gyro_filtered_x100_s,
+  cmd_sps,step_sps,step_error,step_count,ff_sps
+```
+
+各通道含义：
+
+| 通道 | 含义 |
+| ---: | --- |
+| 1 | 融合后的 yaw 姿态角，单位 0.01 deg |
+| 2 | 加入预测时间后的控制角，单位 0.01 deg |
+| 3 | 去零偏前的 JY61 yaw 角速度，单位 0.01 deg/s |
+| 4 | 去零偏、低通后的 yaw 角速度，单位 0.01 deg/s |
+| 5 | 姿态控制器给 STEP 模块的目标速度 `cmd_sps` |
+| 6 | STEP 斜坡后的当前输出频率 `step_sps` |
+| 7 | `referenceStep-currentStep`，属于脉冲指令域误差 |
+| 8 | MCU 已发出的累计有符号 STEP 数 |
+| 9 | 门控后的角速度前馈分量 `ff_sps` |
+
+`step_sps` 和 `step_count` 都来自 MCU 的 STEP 发生器，不是机械轴编码器反馈。
+闭环步进驱动器虽然用电机编码器在驱动器内部纠正位置，但当前接线只有 STEP/DIR，
+因此从 MCU 视角仍然只能把 STEP 当作伪反馈：正常无报警时可以近似认为机械轴跟上，
+失步、堵转或驱动器内部跟随误差则无法从这些通道直接判断。
+
+要获得真实云台反馈，按优先级可采用：驱动器若支持 UART/RS485/CAN，则读取其实际
+位置和速度；若只提供 `ALM/IN_POSITION`，至少把报警/到位脚接回 MCU，但它不能给出
+连续角度；最直接的是在 yaw 输出轴增加 AS5600、MT6701 等绝对磁编码器，由 MCU
+计算实际角度和角速度。只有驱动器通信返回实际位置，或外部绝对编码器连续回传
+位置并接入控制器后，`step_error` 才能升级为真正的机械角度误差。
 
 底盘控制任务始终每 20 ms 读取并清零一次左右编码器窗口计数。串口默认每 500 ms 输出一行状态；执行命令或修改参数时立即回显并刷新。每次修改 `pwm` 或 `target` 后会丢弃第一个混合窗口，再从新的完整 20 ms 窗口累计平均值。
 

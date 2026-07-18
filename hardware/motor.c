@@ -172,6 +172,14 @@ int32_t Motor_GetStepCount(MotorId motor)
     return StepperPulse_GetStepCount(motor);
 }
 
+int16_t Motor_GetGimbalStepRate(MotorId motor)
+{
+    if ((motor != MOTOR_GIMBAL_1) && (motor != MOTOR_GIMBAL_2)) {
+        return 0;
+    }
+    return StepperPulse_GetCurrentRate(motor);
+}
+
 void Motor_ResetStepCount(MotorId motor)
 {
     if (Motor_IsValid(motor) == 0U) {

@@ -328,6 +328,30 @@ int32_t StepperPulse_GetStepCount(MotorId motor)
     return count;
 }
 
+int16_t StepperPulse_GetCurrentRate(MotorId motor)
+{
+    StepperPulseChannel *channel;
+    int32_t rate;
+    uint32_t primask;
+
+    if (!StepperPulse_IsValid(motor)) {
+        return 0;
+    }
+
+    primask = StepperPulse_EnterCritical();
+    channel = &g_stepperPulse[StepperPulse_GetIndex(motor)];
+    rate = (channel->directionSign < 0) ?
+        -(int32_t)channel->stepRateHz : (int32_t)channel->stepRateHz;
+    StepperPulse_ExitCritical(primask);
+    if (rate > 32767) {
+        return 32767;
+    }
+    if (rate < -32768) {
+        return -32768;
+    }
+    return (int16_t)rate;
+}
+
 void StepperPulse_ResetStepCount(MotorId motor)
 {
     uint32_t primask;

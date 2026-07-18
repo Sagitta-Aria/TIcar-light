@@ -40,6 +40,9 @@ void StepperPulse_StopAll(void);
  */
 int32_t StepperPulse_GetStepCount(MotorId motor);
 
+/* 读取斜坡后的当前有符号 STEP 输出频率；它不是机械轴编码器反馈。 */
+int16_t StepperPulse_GetCurrentRate(MotorId motor);
+
 /*
  * StepperPulse_ResetStepCount：清零单路 STEP 计数。
  * 使用场景：测试开始、路线重新标定起点。

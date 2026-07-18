@@ -80,6 +80,9 @@ int16_t Motor_GetCommand(MotorId motor);
  */
 int32_t Motor_GetStepCount(MotorId motor);
 
+/* 读取云台斜坡后的有符号 STEP 输出频率；底盘或非法编号返回 0。 */
+int16_t Motor_GetGimbalStepRate(MotorId motor);
+
 /* Motor_ResetStepCount：底盘清编码器count，云台清STEP计数。 */
 void Motor_ResetStepCount(MotorId motor);
 

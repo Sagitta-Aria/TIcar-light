@@ -63,6 +63,7 @@ static void GimbalAttitude_SetYawSpeed(int16_t speedSps)
             (uint16_t)(-(int32_t)speedSps));
     } else {
         Motor_Set(MOTOR_GIMBAL_1, MOTOR_COAST, 0U);
+        g_gimbalAttitude.snapshot.stepOutputSps = 0;
     }
 }
 
@@ -107,6 +108,7 @@ void GimbalAttitude_Init(void)
     g_gimbalAttitude.snapshot.active = 0U;
     g_gimbalAttitude.snapshot.holdEnabled = 0U;
     g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
+    g_gimbalAttitude.snapshot.stepOutputSps = 0;
     GimbalAttitude_ClearReference();
 }
 
@@ -119,6 +121,7 @@ void GimbalAttitude_Start(void)
         g_gimbalAttitude.snapshot.config.accelStepSps);
     g_gimbalAttitude.snapshot.holdEnabled = 1U;
     g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
+    g_gimbalAttitude.snapshot.stepOutputSps = 0;
     GimbalAttitude_ClearReference();
     BodyMotion_StartCalibration();
     g_gimbalAttitude.snapshot.active = 1U;
@@ -130,6 +133,7 @@ void GimbalAttitude_Stop(void)
     GimbalAttitude_SetYawSpeed(0);
     g_gimbalAttitude.snapshot.holdEnabled = 0U;
     g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
+    g_gimbalAttitude.snapshot.stepOutputSps = 0;
     GimbalAttitude_ClearReference();
     Motor_ResetRampStep(MOTOR_GIMBAL_1);
 }
@@ -174,6 +178,10 @@ void GimbalAttitude_Task(void)
     if (g_gimbalAttitude.snapshot.active == 0U) {
         return;
     }
+    g_gimbalAttitude.snapshot.currentStep =
+        Motor_GetStepCount(MOTOR_GIMBAL_1);
+    g_gimbalAttitude.snapshot.stepOutputSps =
+        Motor_GetGimbalStepRate(MOTOR_GIMBAL_1);
     BodyMotion_GetSnapshot(&g_gimbalAttitude.snapshot.motion);
     if (g_gimbalAttitude.snapshot.motion.state != BODY_MOTION_READY) {
         GimbalAttitude_SetYawSpeed(0);
@@ -212,8 +220,6 @@ void GimbalAttitude_Task(void)
     g_gimbalAttitude.snapshot.referenceStep =
         GimbalAttitude_ClampInt32((int64_t)g_gimbalAttitude.baseStep +
             referenceDelta);
-    g_gimbalAttitude.snapshot.currentStep =
-        Motor_GetStepCount(MOTOR_GIMBAL_1);
     g_gimbalAttitude.snapshot.stepError =
         g_gimbalAttitude.snapshot.referenceStep -
             g_gimbalAttitude.snapshot.currentStep;
