@@ -56,6 +56,9 @@ static int16_t GimbalAttitude_ClampSpeed(int32_t speed)
 static void GimbalAttitude_SetYawSpeed(int16_t speedSps)
 {
     g_gimbalAttitude.snapshot.commandSps = speedSps;
+    if (g_gimbalAttitude.snapshot.directOutput == 0U) {
+        return;
+    }
     if (speedSps > 0) {
         Motor_Set(MOTOR_GIMBAL_1, MOTOR_FORWARD, (uint16_t)speedSps);
     } else if (speedSps < 0) {
@@ -109,33 +112,64 @@ void GimbalAttitude_Init(void)
     g_gimbalAttitude.snapshot.holdEnabled = 0U;
     g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
     g_gimbalAttitude.snapshot.stepOutputSps = 0;
+    g_gimbalAttitude.snapshot.referenceTracking = 0U;
+    g_gimbalAttitude.snapshot.directOutput = 0U;
     GimbalAttitude_ClearReference();
 }
 
-void GimbalAttitude_Start(void)
+static void GimbalAttitude_StartInternal(uint8_t directOutput)
 {
+    uint8_t wasDirect = g_gimbalAttitude.snapshot.directOutput;
+
     g_gimbalAttitude.snapshot.active = 0U;
-    Motor_Set(MOTOR_GIMBAL_1, MOTOR_COAST, 0U);
-    Motor_SetRampStep(MOTOR_GIMBAL_1,
-        g_gimbalAttitude.snapshot.config.accelStepSps,
-        g_gimbalAttitude.snapshot.config.accelStepSps);
+    if (wasDirect != 0U) {
+        Motor_Set(MOTOR_GIMBAL_1, MOTOR_COAST, 0U);
+        Motor_ResetRampStep(MOTOR_GIMBAL_1);
+    }
+    g_gimbalAttitude.snapshot.directOutput =
+        (directOutput != 0U) ? 1U : 0U;
+    if (g_gimbalAttitude.snapshot.directOutput != 0U) {
+        Motor_Set(MOTOR_GIMBAL_1, MOTOR_COAST, 0U);
+        Motor_SetRampStep(MOTOR_GIMBAL_1,
+            g_gimbalAttitude.snapshot.config.accelStepSps,
+            g_gimbalAttitude.snapshot.config.accelStepSps);
+    }
     g_gimbalAttitude.snapshot.holdEnabled = 1U;
     g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
+    g_gimbalAttitude.snapshot.feedForwardSps = 0;
+    g_gimbalAttitude.snapshot.commandSps = 0;
     g_gimbalAttitude.snapshot.stepOutputSps = 0;
+    g_gimbalAttitude.snapshot.referenceTracking = 0U;
     GimbalAttitude_ClearReference();
     BodyMotion_StartCalibration();
     g_gimbalAttitude.snapshot.active = 1U;
 }
 
+void GimbalAttitude_Start(void)
+{
+    GimbalAttitude_StartInternal(1U);
+}
+
+void GimbalAttitude_StartAssist(void)
+{
+    GimbalAttitude_StartInternal(0U);
+}
+
 void GimbalAttitude_Stop(void)
 {
+    uint8_t wasDirect = g_gimbalAttitude.snapshot.directOutput;
+
     g_gimbalAttitude.snapshot.active = 0U;
     GimbalAttitude_SetYawSpeed(0);
     g_gimbalAttitude.snapshot.holdEnabled = 0U;
     g_gimbalAttitude.snapshot.feedForwardEnabled = 0U;
     g_gimbalAttitude.snapshot.stepOutputSps = 0;
+    g_gimbalAttitude.snapshot.referenceTracking = 0U;
     GimbalAttitude_ClearReference();
-    Motor_ResetRampStep(MOTOR_GIMBAL_1);
+    if (wasDirect != 0U) {
+        Motor_ResetRampStep(MOTOR_GIMBAL_1);
+    }
+    g_gimbalAttitude.snapshot.directOutput = 0U;
 }
 
 void GimbalAttitude_StartCalibration(void)
@@ -162,6 +196,19 @@ void GimbalAttitude_SetFeedForwardEnabled(uint8_t enabled)
         (enabled != 0U) ? 1U : 0U;
     if (enabled == 0U) {
         g_gimbalAttitude.snapshot.feedForwardSps = 0;
+    }
+}
+
+void GimbalAttitude_SetReferenceTracking(uint8_t enabled)
+{
+    uint8_t nextEnabled = (enabled != 0U) ? 1U : 0U;
+
+    if (nextEnabled == g_gimbalAttitude.snapshot.referenceTracking) {
+        return;
+    }
+    g_gimbalAttitude.snapshot.referenceTracking = nextEnabled;
+    if (nextEnabled != 0U) {
+        GimbalAttitude_ClearReference();
     }
 }
 
@@ -192,7 +239,9 @@ void GimbalAttitude_Task(void)
         GimbalAttitude_SetYawSpeed(0);
         return;
     }
-    if (g_gimbalAttitude.snapshot.hasReference == 0U) {
+    if (g_gimbalAttitude.snapshot.referenceTracking != 0U) {
+        GimbalAttitude_CaptureReference();
+    } else if (g_gimbalAttitude.snapshot.hasReference == 0U) {
         GimbalAttitude_CaptureReference();
         GimbalAttitude_SetYawSpeed(0);
         return;
@@ -265,6 +314,16 @@ uint8_t GimbalAttitude_IsActive(void)
     return g_gimbalAttitude.snapshot.active;
 }
 
+uint8_t GimbalAttitude_DrivesMotorDirectly(void)
+{
+    return g_gimbalAttitude.snapshot.directOutput;
+}
+
+int16_t GimbalAttitude_GetCommandSps(void)
+{
+    return g_gimbalAttitude.snapshot.commandSps;
+}
+
 void GimbalAttitude_GetSnapshot(GimbalAttitudeSnapshot *snapshot)
 {
     if (snapshot == 0) {
@@ -303,8 +362,10 @@ uint8_t GimbalAttitude_SetConfig(const GimbalAttitudeConfig *config)
     g_gimbalAttitude.snapshot.active = 0U;
     g_gimbalAttitude.snapshot.config = *config;
     taskEXIT_CRITICAL();
-    Motor_SetRampStep(MOTOR_GIMBAL_1, config->accelStepSps,
-        config->accelStepSps);
+    if (g_gimbalAttitude.snapshot.directOutput != 0U) {
+        Motor_SetRampStep(MOTOR_GIMBAL_1, config->accelStepSps,
+            config->accelStepSps);
+    }
     GimbalAttitude_SetYawSpeed(0);
     GimbalAttitude_ClearReference();
     g_gimbalAttitude.snapshot.active = wasActive;

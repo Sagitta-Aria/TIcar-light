@@ -19,7 +19,7 @@ OLED 菜单包含五个比赛入口、一个联合标定入口、一个底盘测
 | Task 1 | 选择 1～5 圈后启动数字灰度循迹；S4 回线确认每个右转完成，JY61P 仅作可选角度辅助，4 次右转记 1 圈 |
 | Task 2 | 选择 Near/Mid/Far；不循迹，按对应中心参数直接进行 K230 视觉追踪 |
 | Task 3 | 选择 Near/Mid/Far；云台预转、等待视觉帧，然后按对应中心参数追踪 |
-| Task 4 | 云台捕获并稳定目标后启动循迹；灰度确认右转完成，JY61P 仅作可选角度辅助，并切换近/中/远/中云台参数做 yaw 随动 |
+| Task 4 | 云台捕获目标并完成 JY61 静止校准后启动循迹；视觉 yaw 与姿态角补偿合成输出，灰度进入转弯阶段时才开启角速度前馈 |
 | Task 5 PID | 默认标定底盘；发送 `mode gimbal` 后安全切换到 JY61 yaw 姿态环在线调参 |
 | Task 6 Drive | 进入后选择开环/闭环和 10～100 速度；开环单位为 PWM%，闭环单位为 count/20ms，左右轮使用相同命令 |
 | Task 7 Circle | 选择 Near/Mid/Far；不循迹，复用 Task2 的直接追踪流程，但使用对应距离的圆点参数 |
@@ -39,7 +39,7 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 | RTOS任务 | 优先级 | 唤醒方式 | 职责 |
 | --- | ---: | --- | --- |
 | CarControl | 6 | 严格 20 ms；灰度语义事件可提前唤醒 | Task1/Task4-LINE 依次采灰度、计算目标，再读取清零编码器窗口、执行速度 PI、更新底盘 PWM |
-| Gimbal | 6 | 严格 10 ms `xTaskDelayUntil` | JY61共享姿态估计、视觉解析，以及视觉云台或Task8姿态环二选一控制 |
+| Gimbal | 6 | 严格 10 ms `xTaskDelayUntil` | JY61共享姿态估计、视觉解析，以及视觉云台与Task4姿态补偿合成或Task8独占姿态控制 |
 | Watchdog | 可配置 | 周期可配置 | 检查UI任务心跳；超时后停止喂WWDT0，由硬件复位整机 |
 | Input | 4 | GPIO按键边沿；按住期间 1 ms | 按键消抖、长按计时并向静态事件队列投递事件 |
 | Mission | 3 | 任务/视觉通知；Task3前置搜索和Task4非循迹阶段 1 ms | 处理比赛状态切换及非底盘周期流程；Task1/Task4-LINE 交给 CarControl |
@@ -55,7 +55,7 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 - OLED整屏刷新按8字节I2C FIFO分包，不再逐像素字节启动事务；I2C恢复会保留软件显存，恢复成功后让UI缓存失效并立即重绘。
 - Watchdog参数集中在`config/board_config.h`的`CAR_WATCHDOG_*`宏；默认UI约2秒无心跳后停止喂狗，WWDT0再经过约1秒复位整机，调试器暂停内核时同步暂停。
 - WWDT0违规在MSPM0G3507上产生SYSRST，不会给外部OLED断电。启动日志会输出`reset cause raw=`及WWDT0、CPU LOCKUP、BOR等原因，用于区分MCU复位和单纯OLED黑屏。
-- Gimbal任务始终以10 ms运行并维护共享姿态；Task1/Task6没有云台命令时STEP定时器保持停止。Task2/Task3/Task7/Task8进入后停车并挂起CarControl；Task8不启动视觉。Task6保留CarControl以刷新编码器反馈或运行20ms速度环。
+- Gimbal任务始终以10 ms运行并维护共享姿态；Task4复用同一份估计结果，不重复解析或滤波JY61。Task4直线阶段关闭角速度前馈但保留角度闭环修正，灰度确认进入转弯流程后才开启前馈；视觉主动纠偏时姿态参考同步跟随，避免两个闭环互相抵消。Task1/Task6没有云台命令时STEP定时器保持停止。Task2/Task3/Task7/Task8进入后停车并挂起CarControl；Task8不启动视觉。Task6保留CarControl以刷新编码器反馈或运行20ms速度环。
 - TIMG6按需承担20 kHz云台STEP；TIMG0只在Task1/Task4循迹时承担10 kHz灰度采样。TIMA0底盘20 kHz PWM不产生周期中断。
 - UART3 ISR只在收到完整视觉行后记录通知；Gimbal在下一次固定10 ms边界消费最新帧，不累积过期控制帧。
 - 普通循迹灰度只在20 ms控制周期边界生成一次左右目标。TIMG0仍每100 us做语义快采样，不把原始采样逐条入队；确认右直角或S4回线时提前唤醒CarControl。入弯时若有JY61P帧就锁存航向供粗略减速参考，编码器读清、角度更新和PI仍留在固定20 ms边界。

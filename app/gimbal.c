@@ -30,6 +30,7 @@ typedef struct {
     int16_t commandX;
     int16_t commandY;
     int16_t yawFeedForwardSps;
+    int16_t yawAttitudeCompensationSps;
     /* lastVisionTick 用绝对RTOS时间做掉线保护，不依赖任务调用频率。 */
     TickType_t lastVisionTick;
     /* pitchBaseStep 是进入视觉闭环时的上下轴 STEP 计数，作为相对 0 度。 */
@@ -163,6 +164,18 @@ static int16_t Gimbal_ClampCommand(int32_t command)
     return Gimbal_ClampInt16(command);
 }
 
+/* 视觉/任务命令使用逻辑方向，姿态补偿已经是电机方向，统一在这里合成。 */
+static int16_t Gimbal_CombineYawCommand(int16_t visionCommand)
+{
+    int16_t logicalCommand = Gimbal_ClampCommand((int32_t)visionCommand +
+        (int32_t)g_gimbal.yawFeedForwardSps);
+    int16_t motorCommand = Gimbal_ApplyReverse(logicalCommand,
+        CAR_GIMBAL_YAW_REVERSE);
+
+    return Gimbal_ClampCommand((int32_t)motorCommand +
+        (int32_t)g_gimbal.yawAttitudeCompensationSps);
+}
+
 /*
  * 作用：按 pitch 相对 STEP 限幅裁剪上下轴命令。
  * 说明：没有编码器/回零开关时，只能用进入闭环时的 STEP 计数作为相对零点。
@@ -204,10 +217,9 @@ void Gimbal_ResetRamp(void)
     Motor_ResetRampStep(MOTOR_GIMBAL_2);
 }
 
-static void Gimbal_ApplyYawFeedForwardOnly(void)
+static void Gimbal_ApplyYawSupplementsOnly(void)
 {
-    int16_t commandX = Gimbal_ApplyReverse(g_gimbal.yawFeedForwardSps,
-        CAR_GIMBAL_YAW_REVERSE);
+    int16_t commandX = Gimbal_CombineYawCommand(0);
 
     g_gimbal.commandX = commandX;
     g_gimbal.commandY = 0;
@@ -274,9 +286,7 @@ static void Gimbal_ApplyControl(void)
         config->kpY, config->kdY, config->gainScale, config->minSpeedY,
         config->maxSpeedY, &g_gimbal.axisActiveY);
 
-    commandX = Gimbal_ClampCommand((int32_t)commandX +
-        (int32_t)g_gimbal.yawFeedForwardSps);
-    commandX = Gimbal_ApplyReverse(commandX, CAR_GIMBAL_YAW_REVERSE);
+    commandX = Gimbal_CombineYawCommand(commandX);
     commandY = Gimbal_ApplyReverse(commandY, CAR_GIMBAL_PITCH_REVERSE);
     commandY = Gimbal_LimitPitchCommand(commandY);
 
@@ -308,6 +318,7 @@ void Gimbal_Init(void)
     g_gimbal.commandX = 0;
     g_gimbal.commandY = 0;
     g_gimbal.yawFeedForwardSps = 0;
+    g_gimbal.yawAttitudeCompensationSps = 0;
     g_gimbal.lastVisionTick = 0U;
     g_gimbal.pitchBaseStep = Motor_GetStepCount(MOTOR_GIMBAL_2);
     g_gimbal.enabled = 0U;
@@ -450,17 +461,18 @@ void Gimbal_Task(void)
         return;
     }
 
-    /* 没有视觉数据时，允许 Task4 yaw 基础速度继续输出。 */
+    /* 没有视觉数据时，允许 Task4 yaw 基础速度和姿态补偿继续输出。 */
     if (!g_gimbal.hasVision) {
-        if (g_gimbal.yawFeedForwardSps != 0) {
-            Gimbal_ApplyYawFeedForwardOnly();
+        if ((g_gimbal.yawFeedForwardSps != 0) ||
+            (g_gimbal.yawAttitudeCompensationSps != 0)) {
+            Gimbal_ApplyYawSupplementsOnly();
             return;
         }
         Gimbal_Stop();
         return;
     }
 
-    /* 视觉超时后保留 Task4 yaw 基础速度，pitch 轴停止。 */
+    /* 视觉超时后保留 Task4 yaw 基础速度和姿态补偿，pitch 轴停止。 */
     if ((xTaskGetTickCount() - g_gimbal.lastVisionTick) >=
         pdMS_TO_TICKS(CAR_GIMBAL_VISION_TIMEOUT_TICKS)) {
         g_gimbal.hasVision = 0U;
@@ -470,8 +482,9 @@ void Gimbal_Task(void)
         g_gimbal.controlPending = 0U;
         g_gimbal.axisActiveX = 0U;
         g_gimbal.axisActiveY = 0U;
-        if (g_gimbal.yawFeedForwardSps != 0) {
-            Gimbal_ApplyYawFeedForwardOnly();
+        if ((g_gimbal.yawFeedForwardSps != 0) ||
+            (g_gimbal.yawAttitudeCompensationSps != 0)) {
+            Gimbal_ApplyYawSupplementsOnly();
             return;
         }
         Gimbal_Stop();
@@ -494,6 +507,33 @@ void Gimbal_SetYawFeedForward(int16_t speedSps)
     g_gimbal.yawFeedForwardSps = nextSpeedSps;
     g_gimbal.controlPending = 1U;
     RtosApp_NotifyGimbal();
+}
+
+void Gimbal_SetYawAttitudeCompensation(int16_t speedSps)
+{
+    int16_t nextSpeedSps = Gimbal_ClampCommand((int32_t)speedSps);
+
+    if (nextSpeedSps == g_gimbal.yawAttitudeCompensationSps) {
+        return;
+    }
+    g_gimbal.yawAttitudeCompensationSps = nextSpeedSps;
+    g_gimbal.controlPending = 1U;
+}
+
+uint8_t Gimbal_IsYawTrackingActive(void)
+{
+    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
+    uint16_t threshold = (g_gimbal.axisActiveX != 0U) ?
+        config->deadbandX : config->restartDeadbandX;
+
+    if ((g_gimbal.enabled == 0U) || (g_gimbal.hasVision == 0U)) {
+        return (uint8_t)((g_gimbal.yawFeedForwardSps != 0) ? 1U : 0U);
+    }
+    if (threshold < config->deadbandX) {
+        threshold = config->deadbandX;
+    }
+    return (uint8_t)(((uint32_t)Gimbal_Abs16(g_gimbal.errorX) > threshold) ||
+        (g_gimbal.yawFeedForwardSps != 0));
 }
 
 /* 作用：停止云台两个轴，不改变底盘速度。 */

@@ -173,6 +173,8 @@ static void StateMachine_ResetMission4(void)
     g_mission4YawTurnActive = 0U;
     g_mission4LastNoYawState = MOTOR_NO_YAW_STATE_IDLE;
     Gimbal_SetYawFeedForward(0);
+    Gimbal_SetYawAttitudeCompensation(0);
+    GimbalAttitude_SetFeedForwardEnabled(0U);
 }
 
 static void StateMachine_ResetMissionGimbalPrep(void)
@@ -192,6 +194,7 @@ static void StateMachine_StopRuntimeModules(void)
     Gimbal_SetEnabled(0U);
     GimbalAttitude_Stop();
     Gimbal_SetYawFeedForward(0);
+    Gimbal_SetYawAttitudeCompensation(0);
     MotorEnable_SetGimbal(CAR_GIMBAL_ENABLE_DEFAULT_ON);
     Motion_Stop();
     StateMachine_ResetMission4();
@@ -279,12 +282,23 @@ static uint8_t StateMachine_IsMission4Locked(void)
         ((uint32_t)StateMachine_Abs16(Gimbal_GetErrorY()) <= limitY));
 }
 
+static uint8_t StateMachine_IsMission4AttitudeReady(void)
+{
+    GimbalAttitudeSnapshot snapshot;
+
+    GimbalAttitude_GetSnapshot(&snapshot);
+    return (uint8_t)((snapshot.motion.state == BODY_MOTION_READY) ? 1U : 0U);
+}
+
 static void StateMachine_StartMission4Line(void)
 {
     g_mission4Flag = 0U;
     g_mission4ExtraActive = 0U;
     g_mission4YawTurnActive = 0U;
     StateMachine_ApplyMission4GimbalConfig(g_mission4Flag);
+    GimbalAttitude_SetFeedForwardEnabled(0U);
+    GimbalAttitude_SetReferenceTracking(0U);
+    GimbalAttitude_SetHoldEnabled(1U);
     MotorNoYaw_StartMission4();
     g_mission4LastNoYawState = MotorNoYaw_GetState();
     g_mission4Stage = CAR_MISSION4_STAGE_LINE;
@@ -338,11 +352,23 @@ static uint8_t StateMachine_IsMission4TurnState(MotorNoYawState state)
     return (uint8_t)((state == MOTOR_NO_YAW_STATE_TURN_RIGHT) ? 1U : 0U);
 }
 
+static uint8_t StateMachine_IsMission4AttitudeFeedForwardState(
+    MotorNoYawState state)
+{
+    return (uint8_t)(((state == MOTOR_NO_YAW_STATE_TURN_APPROACH) ||
+        (state == MOTOR_NO_YAW_STATE_TURN_RIGHT) ||
+        (state == MOTOR_NO_YAW_STATE_TURN_EXIT) ||
+        (state == MOTOR_NO_YAW_STATE_TURN_LEFT)) ? 1U : 0U);
+}
+
 static void StateMachine_UpdateMission4YawFeedForward(void)
 {
     MotorNoYawState noYawState = MotorNoYaw_GetState();
     int16_t baseCommand = StateMachine_GetMission4YawBaseCommand();
     int16_t yawCommand = baseCommand;
+
+    GimbalAttitude_SetFeedForwardEnabled(
+        StateMachine_IsMission4AttitudeFeedForwardState(noYawState));
 
     if ((StateMachine_IsMission4TurnState(noYawState) != 0U) &&
         (StateMachine_IsMission4TurnState(g_mission4LastNoYawState) == 0U)) {
@@ -439,7 +465,8 @@ static void StateMachine_TaskMission4Track(void)
         g_mission4StableFrames = 0U;
     }
 
-    if (g_mission4StableFrames >= MISSION4_LOCK_STABLE_FRAMES) {
+    if ((g_mission4StableFrames >= MISSION4_LOCK_STABLE_FRAMES) &&
+        (StateMachine_IsMission4AttitudeReady() != 0U)) {
         StateMachine_StartMission4Line();
     }
 }
@@ -452,6 +479,7 @@ static void StateMachine_TaskMission4Line(void)
     MotorNoYaw_Task();
     if (MotorNoYaw_IsRunning() == 0U) {
         Gimbal_SetYawFeedForward(0);
+        GimbalAttitude_SetFeedForwardEnabled(0U);
         if (MotorNoYaw_GetState() == MOTOR_NO_YAW_STATE_STOP) {
             StateMachine_Enter(CAR_STATE_STOP);
         }
@@ -515,9 +543,11 @@ static void StateMachine_EnterMission(void)
             STATICCONFIG_MODE_CENTER);
         StateMachine_StartMissionGimbalPrep(3U);
     } else if (g_missionId == 4U) {
-        /* Task4：先做 yaw 前置，再按中心点模式抓点，稳定后启动 NO YAW。 */
+        /* Task4：视觉锁定并完成姿态校准后，启动带 yaw 姿态补偿的 NO YAW。 */
         StateMachine_ResetMission4();
         StateMachine_ApplyMission4GimbalConfig(0U);
+        GimbalAttitude_StartAssist();
+        GimbalAttitude_SetFeedForwardEnabled(0U);
         StateMachine_StartMissionGimbalPrep(4U);
     } else if (g_missionId == 5U) {
         /* Task5 owns the chassis through the UART calibration console. */

@@ -410,8 +410,24 @@ void App_GimbalStep(void)
     BodyMotion_Task();
     Vision_Task();
     if (GimbalAttitude_IsActive() != 0U) {
-        GimbalAttitude_Task();
+        if (GimbalAttitude_DrivesMotorDirectly() != 0U) {
+            Gimbal_SetYawAttitudeCompensation(0);
+            GimbalAttitude_SetReferenceTracking(0U);
+            GimbalAttitude_Task();
+        } else {
+            GimbalAttitude_SetReferenceTracking(
+                Gimbal_IsYawTrackingActive());
+            GimbalAttitude_Task();
+            if (Gimbal_IsEnabled() != 0U) {
+                Gimbal_SetYawAttitudeCompensation(
+                    GimbalAttitude_GetCommandSps());
+            } else {
+                Gimbal_SetYawAttitudeCompensation(0);
+            }
+            Gimbal_Task();
+        }
     } else {
+        Gimbal_SetYawAttitudeCompensation(0);
         Gimbal_Task();
     }
     Motor_Task();

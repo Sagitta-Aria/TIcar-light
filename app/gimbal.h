@@ -66,6 +66,12 @@ void Gimbal_Task(void);
  */
 void Gimbal_SetYawFeedForward(int16_t speedSps);
 
+/* 写入姿态环的电机方向补偿速度；只允许 Gimbal 固定周期任务调用。 */
+void Gimbal_SetYawAttitudeCompensation(int16_t speedSps);
+
+/* 视觉或任务基础命令正在主动转动 yaw 时返回1，供姿态环跟踪参考点。 */
+uint8_t Gimbal_IsYawTrackingActive(void);
+
 /* Gimbal_ResetRamp：Task4 临时覆盖结束后恢复两个云台轴的默认斜坡。 */
 void Gimbal_ResetRamp(void);
 

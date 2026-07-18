@@ -28,6 +28,8 @@ typedef struct {
     uint8_t holdEnabled;
     uint8_t feedForwardEnabled;
     uint8_t hasReference;
+    uint8_t referenceTracking;
+    uint8_t directOutput;
 } GimbalAttitudeSnapshot;
 
 /* 初始化独立于视觉云台的 yaw 姿态保持模块，默认不输出。 */
@@ -35,6 +37,9 @@ void GimbalAttitude_Init(void);
 
 /* 启动 Task8/Task5 云台姿态保持，并先执行静止零偏校准。 */
 void GimbalAttitude_Start(void);
+
+/* 启动 Task4 姿态辅助；只计算补偿命令，由视觉云台统一输出电机速度。 */
+void GimbalAttitude_StartAssist(void);
 
 /* 停止 yaw 输出并恢复该轴的默认斜坡参数。 */
 void GimbalAttitude_Stop(void);
@@ -51,7 +56,12 @@ void GimbalAttitude_SetHoldEnabled(uint8_t enabled);
 /* 上层按任务策略控制角速度前馈；通用启动默认关闭，Task8入口会显式开启。 */
 void GimbalAttitude_SetFeedForwardEnabled(uint8_t enabled);
 
+/* 视觉主动转动 yaw 时跟随当前 STEP 重置参考，避免姿态环反向抵消视觉命令。 */
+void GimbalAttitude_SetReferenceTracking(uint8_t enabled);
+
 uint8_t GimbalAttitude_IsActive(void);
+uint8_t GimbalAttitude_DrivesMotorDirectly(void);
+int16_t GimbalAttitude_GetCommandSps(void);
 void GimbalAttitude_GetSnapshot(GimbalAttitudeSnapshot *snapshot);
 void GimbalAttitude_GetConfig(GimbalAttitudeConfig *config);
 uint8_t GimbalAttitude_SetConfig(const GimbalAttitudeConfig *config);
