@@ -3,7 +3,7 @@
 
 #include "state_machine.h"
 
-/* Menu_Init：初始化 7 任务 OLED 菜单。 */
+/* Menu_Init：初始化 8 任务 OLED 菜单。 */
 void Menu_Init(void);
 
 /* Menu_Next：菜单状态下切换任务入口或子项。 */

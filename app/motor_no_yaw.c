@@ -94,7 +94,7 @@
     ((value) / CHASSIS_CONTROL_HZ)
 
 #define MOTOR_NO_YAW_TIMER_DIV_TICKS \
-    (((STEPPER_TIMER_TICK_HZ * CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US) + \
+    (((GRAY_SAMPLE_TIMER_TICK_HZ * CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US) + \
         999999U) / 1000000U)
 
 #if (MOTOR_NO_YAW_TIMER_DIV_TICKS == 0U)
@@ -231,6 +231,19 @@ typedef struct {
 static MotorNoYawControl g_motorNoYaw;
 
 static void MotorNoYaw_StopWithReason(const char *reason);
+
+/* 灰度快采样定时器只在正式循迹期间运行，Task8 不承担这 10kHz 中断。 */
+static void MotorNoYaw_SetSampleTimerEnabled(uint8_t enabled)
+{
+    DL_TimerG_stopCounter(GRAY_SAMPLE_TIMER_INST);
+    NVIC_ClearPendingIRQ(GRAY_SAMPLE_TIMER_INST_INT_IRQN);
+    if (enabled != 0U) {
+        DL_TimerG_setTimerCount(GRAY_SAMPLE_TIMER_INST,
+            GRAY_SAMPLE_TIMER_LOAD_VALUE);
+        NVIC_EnableIRQ(GRAY_SAMPLE_TIMER_INST_INT_IRQN);
+        DL_TimerG_startCounter(GRAY_SAMPLE_TIMER_INST);
+    }
+}
 
 static const MotorNoYawConfig *MotorNoYaw_GetConfig(void)
 {
@@ -567,6 +580,7 @@ static void MotorNoYaw_StopWithReason(const char *reason)
     Motion_SetChassisPeriodCommand(0, 0);
     MotorEnable_SetChassis(0U);
     g_motorNoYaw.running = 0U;
+    MotorNoYaw_SetSampleTimerEnabled(0U);
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_STOP;
 }
 
@@ -894,6 +908,7 @@ void MotorNoYaw_Init(void)
     MotorNoYaw_ResetControl();
     g_motorNoYaw.running = 0U;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_IDLE;
+    MotorNoYaw_SetSampleTimerEnabled(0U);
 }
 
 static void MotorNoYaw_StartWithProfile(MotorNoYawProfile profile)
@@ -903,6 +918,7 @@ static void MotorNoYaw_StartWithProfile(MotorNoYawProfile profile)
     MotorNoYaw_UpdateFilteredLineMask(Gray_ReadDigitalMaskFast());
     g_motorNoYaw.running = 1U;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_LINE;
+    MotorNoYaw_SetSampleTimerEnabled(1U);
     MotorEnable_SetChassis(1U);
 }
 
@@ -923,6 +939,7 @@ void MotorNoYaw_Stop(void)
     MotorEnable_SetChassis(0U);
     }
     g_motorNoYaw.running = 0U;
+    MotorNoYaw_SetSampleTimerEnabled(0U);
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_IDLE;
 }
 

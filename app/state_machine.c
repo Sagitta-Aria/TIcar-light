@@ -4,6 +4,7 @@
 #include "control_config.h"
 #include "encoder_motor.h"
 #include "gimbal.h"
+#include "gimbal_attitude.h"
 #include "motion.h"
 #include "motor.h"
 #include "motor_enable.h"
@@ -85,7 +86,7 @@ static const Mission4YawConfig g_mission4YawConfigs[3] = {
 
 static void StateMachine_Enter(CarState nextState);
 
-/* 作用：把菜单任务事件转换成 1~7 的任务编号。 */
+/* 作用：把菜单任务事件转换成 1~8 的任务编号。 */
 static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
 {
     switch (event) {
@@ -103,6 +104,8 @@ static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
         return 6U;
     case CAR_EVENT_MISSION_7_START:
         return 7U;
+    case CAR_EVENT_MISSION_8_START:
+        return 8U;
     default:
         return 0U;
     }
@@ -187,6 +190,7 @@ static void StateMachine_StopRuntimeModules(void)
     MotorNoYaw_Stop();
     Vision_Stop();
     Gimbal_SetEnabled(0U);
+    GimbalAttitude_Stop();
     Gimbal_SetYawFeedForward(0);
     MotorEnable_SetGimbal(CAR_GIMBAL_ENABLE_DEFAULT_ON);
     Motion_Stop();
@@ -536,6 +540,10 @@ static void StateMachine_EnterMission(void)
         MotorEnable_SetGimbal(1U);
         Gimbal_SetTarget(0, 0);
         Gimbal_SetEnabled(1U);
+    } else if (g_missionId == 8U) {
+        /* Task8：只运行 JY61 yaw 姿态保持，不启动视觉和底盘。 */
+        MotorEnable_SetGimbal(1U);
+        GimbalAttitude_Start();
     }
 }
 

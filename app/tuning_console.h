@@ -22,7 +22,8 @@ typedef enum {
     TUNING_CONSOLE_OLED_START,
     TUNING_CONSOLE_OLED_SPEED,
     TUNING_CONSOLE_OLED_PID,
-    TUNING_CONSOLE_OLED_GRAY
+    TUNING_CONSOLE_OLED_GRAY,
+    TUNING_CONSOLE_OLED_GIMBAL
 } TuningConsoleOledPage;
 
 typedef struct {
@@ -47,6 +48,15 @@ typedef struct {
     int32_t leftAverageCounts;
     int32_t rightAverageCounts;
     uint8_t grayMask;
+    uint8_t gimbalMode;
+    uint8_t gimbalState;
+    uint8_t gimbalHoldEnabled;
+    uint16_t gimbalCalibrationCount;
+    uint16_t gimbalCalibrationTarget;
+    int32_t gimbalYawX100;
+    int32_t gimbalRateX100PerSec;
+    int32_t gimbalStepError;
+    int16_t gimbalCommandSps;
 } TuningConsoleDisplayStatus;
 
 /* Start and stop the Task5 UART calibration session. */

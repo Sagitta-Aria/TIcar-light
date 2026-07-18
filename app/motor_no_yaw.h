@@ -39,7 +39,7 @@ uint8_t MotorNoYaw_CalculateTask1LineCommand(uint8_t digitalMask,
 /* MotorNoYaw_HandleFastEvent：消费100us快采样形成的入弯和S4回线请求。 */
 void MotorNoYaw_HandleFastEvent(void);
 
-/* MotorNoYaw_TimerSample：TIMG0中断里采样；形成语义事件时返回1。 */
+/* MotorNoYaw_TimerSample：TIMG0 100us灰度中断里采样；形成语义事件时返回1。 */
 uint8_t MotorNoYaw_TimerSample(void);
 
 /* MotorNoYaw_IsRunning：返回无 yaw 循迹是否仍在运行。 */

@@ -1,6 +1,23 @@
 #ifndef CONTROL_CONFIG_H
 #define CONTROL_CONFIG_H
 
+/* 共享车体 yaw 估计器：Q1024 系数可在 Task5 中在线调整。 */
+#define BODY_MOTION_PERIOD_MS                    (10U)
+#define BODY_MOTION_CALIBRATION_SAMPLES          (100U)
+#define BODY_MOTION_GYRO_ALPHA_Q1024             (256U)
+#define BODY_MOTION_YAW_BETA_Q1024               (64U)
+#define BODY_MOTION_PREDICTION_MS                 (0U)
+#define BODY_MOTION_SENSOR_STALE_MS               (100U)
+
+/* Task8 云台 yaw 姿态保持默认参数。 */
+#define GIMBAL_ATTITUDE_STEPS_PER_REVOLUTION      (3200U)
+#define GIMBAL_ATTITUDE_DIRECTION_SIGN            (-1)
+#define GIMBAL_ATTITUDE_KFF_Q1024                 (1024U)
+#define GIMBAL_ATTITUDE_KP_Q1024                  (1024U)
+#define GIMBAL_ATTITUDE_MAX_SPEED_SPS             (1000U)
+#define GIMBAL_ATTITUDE_ACCEL_STEP_SPS            (3U)
+#define GIMBAL_ATTITUDE_POSITION_LIMIT_STEPS       (1600U)
+
 /* TIMA0 底盘 PWM：32 MHz / 1600 = 20 kHz，全部 PWM 数值均为定时器 count。 */
 #define CHASSIS_PWM_PERIOD_COUNTS             (1600U)
 #define CHASSIS_PWM_HARDWARE_MAX_COUNTS       (CHASSIS_PWM_PERIOD_COUNTS - 1U)

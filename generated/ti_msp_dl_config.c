@@ -8,6 +8,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_init(void)
     SYSCFG_DL_GPIO_init();
     SYSCFG_DL_SYSCTL_init();
     SYSCFG_DL_STEPPER_TIMER_init();
+    SYSCFG_DL_GRAY_SAMPLE_TIMER_init();
     SYSCFG_DL_OLED_init();
     SYSCFG_DL_LogUart_init();
     SYSCFG_DL_JY61P_init();
@@ -34,6 +35,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOB);
     DL_I2C_reset(OLED_INST);
     DL_TimerG_reset(STEPPER_TIMER_INST);
+    DL_TimerG_reset(GRAY_SAMPLE_TIMER_INST);
     DL_UART_Main_reset(LogUart_INST);
     DL_UART_Main_reset(JY61P_INST);
     DL_UART_Main_reset(Exchange_INST);
@@ -46,6 +48,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_enablePower(GPIOB);
     DL_I2C_enablePower(OLED_INST);
     DL_TimerG_enablePower(STEPPER_TIMER_INST);
+    DL_TimerG_enablePower(GRAY_SAMPLE_TIMER_INST);
     DL_UART_Main_enablePower(LogUart_INST);
     DL_UART_Main_enablePower(JY61P_INST);
     DL_UART_Main_enablePower(Exchange_INST);
@@ -133,7 +136,7 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
 
 /*
  * 当前优先保证实车稳定启动，默认不启用 HFXT/SYSPLL。
- * STEP 调度继续用 50kHz tick，但由 32MHz BUSCLK 按比例重算 LOAD。
+ * STEP 调度使用 20kHz tick，由 32MHz BUSCLK 按比例计算 LOAD。
  */
 #if SYSCFG_DL_ENABLE_HFXT_PLL
 static const DL_SYSCTL_SYSPLLConfig gSYSPLLConfig = {
@@ -354,6 +357,29 @@ SYSCONFIG_WEAK void SYSCFG_DL_STEPPER_TIMER_init(void)
     DL_TimerG_enableInterrupt(STEPPER_TIMER_INST,
         DL_TIMERG_INTERRUPT_ZERO_EVENT);
     DL_TimerG_enableClock(STEPPER_TIMER_INST);
+}
+
+static const DL_TimerG_ClockConfig gGraySampleTimerClockConfig = {
+    .clockSel = DL_TIMER_CLOCK_BUSCLK,
+    .divideRatio = DL_TIMER_CLOCK_DIVIDE_1,
+    .prescale = 0U,
+};
+
+static const DL_TimerG_TimerConfig gGraySampleTimerConfig = {
+    .period = GRAY_SAMPLE_TIMER_LOAD_VALUE,
+    .timerMode = DL_TIMER_TIMER_MODE_PERIODIC,
+    .startTimer = DL_TIMER_STOP,
+};
+
+SYSCONFIG_WEAK void SYSCFG_DL_GRAY_SAMPLE_TIMER_init(void)
+{
+    DL_TimerG_setClockConfig(GRAY_SAMPLE_TIMER_INST,
+        (DL_TimerG_ClockConfig *)&gGraySampleTimerClockConfig);
+    DL_TimerG_initTimerMode(GRAY_SAMPLE_TIMER_INST,
+        (DL_TimerG_TimerConfig *)&gGraySampleTimerConfig);
+    DL_TimerG_enableInterrupt(GRAY_SAMPLE_TIMER_INST,
+        DL_TIMERG_INTERRUPT_ZERO_EVENT);
+    DL_TimerG_enableClock(GRAY_SAMPLE_TIMER_INST);
 }
 
 static const DL_I2C_ClockConfig gOLEDClockConfig = {

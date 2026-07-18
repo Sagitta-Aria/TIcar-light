@@ -1,4 +1,4 @@
-# Task5 编码电机标定
+# Task5 在线标定与 Task8 云台姿态环
 
 Task5 用于左右编码电机的开环测量和速度 PI 在线测试。测试前必须架空车轮，并准备能立即断开电机动力电源的物理手段。串口命令会一直保持到下一条命令，USB 断开不会自动停车。
 
@@ -7,8 +7,91 @@ Task5 用于左右编码电机的开环测量和速度 PI 在线测试。测试�
 - UART0：115200，8-N-1，无流控。
 - MCU TX/RX：PA10/PA11。
 - OLED 菜单选择 `Task 5 PID`，按 K2 进入。
-- 进入 Task5 后会停止所有电机、关闭视觉并挂起 Gimbal RTOS 任务。
+- 进入 Task5 后会停止所有电机并关闭视觉。100 Hz 姿态任务保持运行，默认由底盘调参模式占用执行机构。
 - 长按 K2 退出时，左右 PWM 强制清零、积分清零，并恢复正常任务模式。
+
+Task5 默认处于 `mode chassis`。只有显式发送 `mode gimbal` 后才停止底盘调参、
+启动 JY61 静止校准和云台 yaw 姿态保持；切回 `mode chassis` 会先停止云台。
+`stop` 同时停止底盘和云台输出。Task8 是独立的云台姿态实验入口，不启动视觉、
+不启动底盘，也没有接入 Task4。
+
+## 定时器与调度
+
+| 资源 | 当前用途 | 中断负载 |
+| --- | --- | --- |
+| `TIMA0` | 左右底盘 20 kHz 硬件 PWM，CCP1/CCP3 | 不开周期中断 |
+| `TIMG6` | 两路云台 STEP，20 kHz 固定节拍 | 仅任一云台轴命令非零时开启 |
+| `TIMG0` | 数字灰度 100 us 快采样 | 仅 Task1/Task4 正式循迹时开启 |
+| `TIMG7/TIMA1/TIMG8/TIMG12` | 空闲 | 无 |
+
+云台/姿态 FreeRTOS 任务使用 `xTaskDelayUntil` 固定每 10 ms 运行，任务优先级为 6；
+底盘控制任务同为 6，输入/任务/通信/UI 依次为 4/3/2/1。`TIMG6` STEP 中断优先级
+为 0，`TIMG0` 灰度为 1，JY61 UART 为 2。STEP 与灰度不再放在同一个 ISR，
+而且两轴 0 SPS 时 `TIMG6` 会停表，不产生 20 kHz 空中断。
+
+## Task8 姿态估计与控制
+
+JY61 驱动同时解析 `0x52` 角速度帧和 `0x53` 欧拉角帧。`body_motion` 是唯一的
+姿态计算模块，底盘和云台以后都读取同一份 `BodyMotionSnapshot`，不能各算一份。
+角度单位为 `0.01 deg`，角速度单位为 `0.01 deg/s`，算法为：
+
+```text
+omegaFiltered += alpha * (omegaRaw - bias - omegaFiltered)
+yawPredict = yawEstimate + omegaFiltered * frameDt
+yawEstimate = yawPredict + beta * (yawUnwrapped - yawPredict)
+yawControl = yawEstimate + omegaFiltered * (frameAge + predictionTime)
+```
+
+`frameDt` 来自 JY61 帧的 RTOS 时间戳，不假定串口严格等间隔；yaw 在正负 180 度
+处会解包角。启动后先累计 100 个静止角速度样本求零偏，100 Hz 输出时约 1 秒。
+角度或角速度任一超过 100 ms 未更新，立即进入 `STALE`、停止 yaw，并在数据恢复后
+重新抓取保持基准，避免补偿一段不可见运动。
+
+云台控制使用角速度前馈和 STEP 位置误差比例项：
+
+```text
+stepReference = step0 + sign * (yawControl - yaw0) * stepsPerRev / 36000
+speedFF = sign * yawRateX100 * stepsPerRev / 36000 * KffQ1024 / 1024
+speedCommand = clamp(speedFF + KpQ1024 * stepError / 1024)
+```
+
+默认值为 `stepsPerRev=3200`、`sign=-1`、`Kff=1024`、`Kp=1024`、
+`max=1000 SPS`、`accel=3 SPS/ms`、相对启动位置限制正负 1600 step。
+`Motor_GetStepCount()` 统计的是已经安排输出的 STEP 脉冲，不是编码器；电机失步无法
+被这个位置项发现。因此它能修正指令斜坡造成的相位误差，但不等于机械角度全闭环。
+
+3200 step/rev 时，90 度是 800 step；若底盘匀速 1 秒转完 90 度，理想云台前馈是
+800 SPS。`3 SPS/ms` 从 0 加速到 800 SPS 约需 267 ms。从 0 在一秒内斜坡到
+3000 SPS 时，终点速度虽为 3000 SPS，但平均速度约为 1500 SPS，因此位移约
+1500 step，不是 3000 step。若要求一秒内从静止出发、再降到静止，默认上限
+1000 SPS 和 3 SPS/ms 的对称梯形速度面积约为 667 step，所以实际能否完成
+90 度补偿必须看底盘自身角速度曲线，并通过 Task5 观察 `err/cmd` 后调整。
+
+Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
+`config/control_config.h` 默认值：
+
+| 命令 | 作用 | 默认/示例 |
+| --- | --- | --- |
+| `mode gimbal` | 停底盘并启动静止校准和 HOLD | `mode gimbal` |
+| `mode chassis` | 停云台并恢复底盘调参 | `mode chassis` |
+| `gcal` | 重新采集 100 个静止零偏样本 | `gcal` |
+| `ghold on\|off` | 开启保持或只观察姿态 | `ghold off` |
+| `gsteps N` | 电机每机械圈脉冲数 | `gsteps 3200` |
+| `gsign -1\|1` | 补偿方向 | `gsign -1` |
+| `gkff Q1024` | 角速度前馈增益 | `gkff 1024` |
+| `gkp Q1024` | STEP 位置误差比例增益 | `gkp 1024` |
+| `glpf Q1024` | 角速度低通 alpha，范围 1..1024 | `glpf 256` |
+| `gbeta Q1024` | yaw 角度校正 beta，范围 1..1024 | `gbeta 64` |
+| `gpred MS` | 附加预测时间，范围 0..100 ms | `gpred 0` |
+| `gmax SPS` | yaw 最大命令，不能超过全局 1000 SPS | `gmax 1000` |
+| `gaccel SPS_PER_MS` | STEP 每毫秒斜坡增量 | `gaccel 3` |
+| `glimit STEP` | 相对启动位置限制，0 表示关闭 | `glimit 1600` |
+| `gshow` | 输出姿态、零偏、误差、命令和全部参数 | `gshow` |
+
+建议先 `mode gimbal` 并保持整车静止，等 OLED 从 `CAL` 进入 `HOLD`；随后用手缓慢
+向一个方向转底盘。云台若同向运动，先改 `gsign`，不要先改增益。方向正确后先保持
+`gpred 0`，用 `gkff` 调匀速跟随误差，再用较小 `gkp` 收位置误差；最后才增加
+`gpred` 或加快 `gaccel`。调斜坡和最大速度时必须保留机械行程余量及物理断电手段。
 
 底盘控制任务始终每 20 ms 读取并清零一次左右编码器窗口计数。串口默认每 500 ms 输出一行状态；执行命令或修改参数时立即回显并刷新。每次修改 `pwm` 或 `target` 后会丢弃第一个混合窗口，再从新的完整 20 ms 窗口累计平均值。
 
@@ -29,6 +112,7 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 
 | 命令 | 作用 | 示例 |
 | --- | --- | --- |
+| `mode chassis\|gimbal` | 在底盘调参和云台调参之间安全切换 | `mode chassis` |
 | `set L R` | 输出 PWM 百分比，稳定 4 秒后采集 50 个窗口；第二个点自动计算并应用 FF 和 runstart | `set 30 0` |
 | `set clear` | 清除左右已保存的第一个采样点并停车 | `set clear` |
 | `pwm L R` | 左右轮开环 PWM 百分比，范围 -100..100 | `pwm 15 0` |
@@ -42,10 +126,10 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 | `ki L R` | 左右 KI_Q1024 | `ki 8 8` |
 | `ilim L R` | 左右积分输出限幅百分比，范围 0..100 | `ilim 20 20` |
 | `ffcalc P1 C1 P2 C2` | 用两个 PWM 百分比/count 点计算 FF_Q1024 和 runstart | `ffcalc 30 8 50 15` |
-| `oled ff\|start\|speed\|pid` | 运行时切换 Task5 OLED 测量页面 | `oled start` |
+| `oled ff\|start\|speed\|pid\|gray\|gimbal` | 运行时切换 Task5 OLED 测量页面 | `oled start` |
 | `avg` | 清空平均值，下一完整窗口重新累计 | `avg` |
 | `clear` | 清空左右积分 | `clear` |
-| `stop` | 左右 PWM 立即清零并回到开环模式 | `stop` |
+| `stop` | 立即停止底盘和云台输出 | `stop` |
 | `show` | 显示模式、参数、反馈、平均值和串口错误 | `show` |
 | `help` | 显示命令摘要 | `help` |
 

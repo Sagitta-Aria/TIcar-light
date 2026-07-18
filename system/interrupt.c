@@ -12,7 +12,8 @@
 
 void Interrupt_Init(void)
 {
-    NVIC_SetPriority(TIMG0_INT_IRQn, 0U);
+    NVIC_SetPriority(TIMG6_INT_IRQn, 0U);
+    NVIC_SetPriority(TIMG0_INT_IRQn, 1U);
     NVIC_SetPriority(GPIOB_INT_IRQn, 0U);
     NVIC_SetPriority(UART3_INT_IRQn, 1U);
     NVIC_SetPriority(UART1_INT_IRQn, 2U);
@@ -67,10 +68,20 @@ void UART3_IRQHandler(void)
     }
 }
 
-void TIMG0_IRQHandler(void)
+void TIMG6_IRQHandler(void)
 {
     StepperPulse_HandleTimerInterrupt();
-    if (MotorNoYaw_TimerSample() != 0U) {
-        RtosApp_NotifyControlFromISR();
+}
+
+void TIMG0_IRQHandler(void)
+{
+    switch (DL_TimerG_getPendingInterrupt(GRAY_SAMPLE_TIMER_INST)) {
+    case DL_TIMER_IIDX_ZERO:
+        if (MotorNoYaw_TimerSample() != 0U) {
+            RtosApp_NotifyControlFromISR();
+        }
+        break;
+    default:
+        break;
     }
 }

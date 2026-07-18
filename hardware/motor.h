@@ -30,7 +30,7 @@ void Motor_Init(void);
 /*
  * Motor_Task：电机主循环任务。
  * 使用场景：App_Task 周期调用。
- * 说明：ccs1.2 起 STEP 脉冲由 TIMG0 中断调度，本函数暂时不阻塞、不发脉冲。
+ * 说明：STEP 脉冲由 TIMG6 按需中断调度，本函数暂时不阻塞、不发脉冲。
  */
 void Motor_Task(void);
 

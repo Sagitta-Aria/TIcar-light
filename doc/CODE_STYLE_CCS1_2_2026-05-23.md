@@ -41,10 +41,10 @@
 
 ## ccs1.2 的电机框架
 
-- 电机层只描述四个 `STEP/DIR` 闭环步进驱动器，不保留历史电机方案命名。
+- 电机层统一描述两路 PWM 编码底盘和两路 STEP/DIR 云台。
 - 单电机接口用 `Motor_Set(motor, dir, command)`；底盘左右联动接口用 `Motor_SetChassisCommand(leftCommand, rightCommand)`。
-- `command` 表示步进速度，单位 SPS，范围由 `CAR_STEPPER_SPEED_MAX_SPS` 限制。
-- `hardware/stepper_pulse.c` 在 TIMG0 中断里输出 STEP，`Motor_Task()` 只保留低优先级空任务入口。
+- 底盘闭环目标使用 count/20ms，云台命令使用 SPS，不能混用量纲。
+- `hardware/stepper_pulse.c` 在按需启动的 TIMG6 中断里输出 STEP，`Motor_Task()` 只保留空任务入口。
 - 方向反相、斜坡和速度限制放在 `hardware/motor.c`、`hardware/stepper_pulse.c`、`app/motion.c` 分层处理。
 
 ## 生成层维护

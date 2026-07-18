@@ -5,8 +5,10 @@
 
 #include "board.h"
 #include "board_config.h"
+#include "body_motion.h"
 #include "delay.h"
 #include "gimbal.h"
+#include "gimbal_attitude.h"
 #include "jy61p.h"
 #include "key.h"
 #include "link.h"
@@ -330,6 +332,8 @@ void App_Init(void)
     Gimbal_Init();
     Vision_Init();
     JY61P_Init();
+    BodyMotion_Init();
+    GimbalAttitude_Init();
     Menu_Init();
     StateMachine_Init();
 
@@ -403,8 +407,13 @@ void App_CommStep(void)
 
 void App_GimbalStep(void)
 {
+    BodyMotion_Task();
     Vision_Task();
-    Gimbal_Task();
+    if (GimbalAttitude_IsActive() != 0U) {
+        GimbalAttitude_Task();
+    } else {
+        Gimbal_Task();
+    }
     Motor_Task();
 }
 

@@ -6,9 +6,9 @@
 #include "motor.h"
 
 /*
- * StepperPulse_Init：启动 STEP 定时器调度器。
- * 使用场景：Board 完成 TIMG0 配置后，由 Motor_Init 调用。
- * 说明：本模块只产生 STEP 脉冲，DIR 方向仍由 motor.c 管理。
+ * StepperPulse_Init：初始化 STEP 调度器，首个非零命令才启动定时器。
+ * 使用场景：Board 完成 TIMG6 配置后，由 Motor_Init 调用。
+ * 说明：TIMG6 有运动命令时以 20kHz 运行，两轴为零时停止中断。
  */
 void StepperPulse_Init(void);
 
@@ -53,8 +53,8 @@ void StepperPulse_ResetStepCount(MotorId motor);
 void StepperPulse_ResetAllStepCounts(void);
 
 /*
- * StepperPulse_HandleTimerInterrupt：TIMG0 中断入口分发函数。
- * 使用场景：system/interrupt.c 的 TIMG0_IRQHandler 调用。
+ * StepperPulse_HandleTimerInterrupt：TIMG6 中断入口分发函数。
+ * 使用场景：system/interrupt.c 的 TIMG6_IRQHandler 调用。
  * 说明：中断里不打印、不刷屏、不等待，只做 GPIO 翻转。
  */
 void StepperPulse_HandleTimerInterrupt(void);

@@ -438,6 +438,7 @@ void Board_Init(void)
     LOG_U32("step timer clk hz=", STEPPER_TIMER_CLOCK_HZ);
     LOG_U32("step tick hz=", STEPPER_TIMER_TICK_HZ);
     LOG_U32("step load=", STEPPER_TIMER_LOAD_VALUE);
+    LOG_U32("gray sample tick hz=", GRAY_SAMPLE_TIMER_TICK_HZ);
     LOG_U32("step ramp ms=", CAR_STEPPER_RAMP_PERIOD_MS);
     LOG_U32("step accel sps/ramp=", CAR_STEPPER_ACCEL_STEP_SPS);
     LOG_U32("step decel sps/ramp=", CAR_STEPPER_DECEL_STEP_SPS);
@@ -477,6 +478,7 @@ void Board_Init(void)
 #endif
     Board_BootProbe("before stepper timer init");
     SYSCFG_DL_STEPPER_TIMER_init();
+    SYSCFG_DL_GRAY_SAMPLE_TIMER_init();
     Board_BootProbe("after stepper timer init");
     Board_ShowBootStep("OK Stepper TIM", "RUN Motor", "WAIT Gray",
         "WAIT Key UART");

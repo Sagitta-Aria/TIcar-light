@@ -7,7 +7,6 @@
 #include "app.h"
 #include "board_config.h"
 #include "control_config.h"
-#include "gimbal.h"
 #include "menu.h"
 #include "motor.h"
 #include "state_machine.h"
@@ -29,7 +28,7 @@
         CAR_WATCHDOG_CHECK_PERIOD_MS)
 
 #define RTOS_CONTROL_STACK_WORDS         (128U)
-#define RTOS_GIMBAL_STACK_WORDS          (192U)
+#define RTOS_GIMBAL_STACK_WORDS          (256U)
 #define RTOS_INPUT_STACK_WORDS           (128U)
 #define RTOS_MISSION_STACK_WORDS         (192U)
 #define RTOS_COMM_STACK_WORDS            (256U)
@@ -65,7 +64,6 @@ static TaskHandle_t g_inputTaskHandle;
 static TaskHandle_t g_missionTaskHandle;
 static TaskHandle_t g_uiTaskHandle;
 static uint8_t g_controlTaskSuspended;
-static uint8_t g_gimbalTaskSuspended;
 static volatile uint8_t g_controlScheduleReset;
 #if CAR_ENABLE_UI_WATCHDOG
 static volatile uint32_t g_uiHeartbeat;
@@ -173,15 +171,14 @@ static void RtosApp_ControlTask(void *parameter)
 
 static void RtosApp_GimbalTask(void *parameter)
 {
-    TickType_t waitTicks;
+    TickType_t lastWakeTime = xTaskGetTickCount();
     uint32_t frameCount;
 
     (void)parameter;
     for (;;) {
-        waitTicks = (Gimbal_NeedsTimeoutService() != 0U) ?
-            pdMS_TO_TICKS(CAR_GIMBAL_VISION_TIMEOUT_TICKS) :
-            portMAX_DELAY;
-        (void)ulTaskNotifyTake(pdTRUE, waitTicks);
+        (void)xTaskDelayUntil(&lastWakeTime,
+            pdMS_TO_TICKS(BODY_MOTION_PERIOD_MS));
+        (void)ulTaskNotifyTake(pdTRUE, 0U);
         frameCount = Vision_GetFrameCount();
         App_GimbalStep();
         if (Vision_GetFrameCount() != frameCount) {
@@ -189,14 +186,6 @@ static void RtosApp_GimbalTask(void *parameter)
             RtosApp_NotifyUi();
         }
     }
-}
-
-static uint8_t RtosApp_ShouldSuspendGimbal(void)
-{
-    return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
-        ((StateMachine_GetMissionId() == 1U) ||
-            (StateMachine_GetMissionId() == 5U) ||
-            (StateMachine_GetMissionId() == 6U)));
 }
 
 static uint8_t RtosApp_ShouldSuspendControl(void)
@@ -209,10 +198,10 @@ static uint8_t RtosApp_ShouldSuspendControl(void)
 
     missionId = StateMachine_GetMissionId();
     return (uint8_t)((missionId == 2U) || (missionId == 3U) ||
-        (missionId == 7U));
+        (missionId == 7U) || (missionId == 8U));
 }
 
-/* Task2/3/7 是纯云台任务，运行时停止底盘控制调度。 */
+/* Task2/3/7/8 是纯云台任务，运行时停止底盘控制调度。 */
 static void RtosApp_UpdateControlTaskState(void)
 {
     uint8_t shouldSuspend = RtosApp_ShouldSuspendControl();
@@ -225,22 +214,6 @@ static void RtosApp_UpdateControlTaskState(void)
         g_controlTaskSuspended = 0U;
         g_controlScheduleReset = 1U;
         vTaskResume(g_controlTaskHandle);
-    }
-}
-
-static void RtosApp_UpdateGimbalTaskState(void)
-{
-    uint8_t shouldSuspend = RtosApp_ShouldSuspendGimbal();
-
-    if ((shouldSuspend != 0U) && (g_gimbalTaskSuspended == 0U)) {
-        Gimbal_SetEnabled(0U);
-        g_gimbalTaskSuspended = 1U;
-        vTaskSuspend(g_gimbalTaskHandle);
-    } else if ((shouldSuspend == 0U) &&
-        (g_gimbalTaskSuspended != 0U)) {
-        g_gimbalTaskSuspended = 0U;
-        vTaskResume(g_gimbalTaskHandle);
-        RtosApp_NotifyGimbal();
     }
 }
 
@@ -331,7 +304,6 @@ static void RtosApp_MissionTask(void *parameter)
             lastPeriodicTime = now;
         }
         RtosApp_UpdateControlTaskState();
-        RtosApp_UpdateGimbalTaskState();
         if (handledEvent != 0U) {
             RtosApp_NotifyUi();
         }
@@ -382,7 +354,8 @@ static void RtosApp_UiTask(void *parameter)
 
         dynamicUi = (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
             ((StateMachine_GetMissionId() == 5U) ||
-                (StateMachine_GetMissionId() == 6U)));
+                (StateMachine_GetMissionId() == 6U) ||
+                (StateMachine_GetMissionId() == 8U)));
         if (dynamicUi == 0U) {
             lastDynamicUiTime = now;
         } else if ((now - lastDynamicUiTime) >=
@@ -397,7 +370,6 @@ static void RtosApp_UiTask(void *parameter)
 static void RtosApp_CreateObjects(void)
 {
     g_controlTaskSuspended = 0U;
-    g_gimbalTaskSuspended = 0U;
     g_controlScheduleReset = 0U;
 #if CAR_ENABLE_UI_WATCHDOG
     g_uiHeartbeat = 0U;

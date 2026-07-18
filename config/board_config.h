@@ -46,13 +46,13 @@
 
 /*
  * 两路云台步进轴公共参数。
- * 速度单位为 step/s；TIMG0 每 20us 调度一次 STEP，方向由 DIR 引脚单独控制。
+ * 速度单位为 step/s；TIMG6 每 50us 调度一次 STEP，方向由 DIR 引脚单独控制。
  */
 #define CAR_STEPPER_SPEED_MAX_SPS      (1000U) /* yaw/pitch 目标速度绝对值上限。 */
-#define CAR_STEPPER_PULSE_HIGH_TICKS   (1U)     /* STEP 高电平保持 1 个 TIMG0 tick，即 20us。 */
+#define CAR_STEPPER_PULSE_HIGH_TICKS   (1U)     /* STEP 高电平保持 1 个 TIMG6 tick，即 50us。 */
 #define CAR_STEPPER_RAMP_PERIOD_MS     (1U)     /* 每 1ms 更新一次当前 STEP 速度。 */
-#define CAR_STEPPER_ACCEL_STEP_SPS     (3U)   /* 每次斜坡更新最多增加 500 step/s。 */
-#define CAR_STEPPER_DECEL_STEP_SPS     (3U)   /* 每次斜坡更新最多减少 500 step/s。 */
+#define CAR_STEPPER_ACCEL_STEP_SPS     (3U)   /* 每 1ms 最多增加 3 step/s。 */
+#define CAR_STEPPER_DECEL_STEP_SPS     (3U)   /* 每 1ms 最多减少 3 step/s。 */
 
 /* 云台 EN 无可用 MCU 引脚；该值只记录状态机默认请求，硬件必须固定有效。 */
 #define CAR_GIMBAL_ENABLE_DEFAULT_ON   (0U)     /* 0：上电默认不启用云台闭环；1：默认请求启用。 */
@@ -92,7 +92,7 @@
 #define CAR_MOTOR_NO_YAW_TURN_MIN_ENCODER_GAP_COUNTS (708U) /* 两次强转之间的最小平均编码距离。 */
 #define CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD (-25) /* 无上一拍命令时的左轮搜线目标。 */
 #define CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS  (50U)   /* 直角窗口：S5/S6/S7 在该时间窗内都触发才判右直角。 */
-#define CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US       (100U)   /* 快采样周期：TIMG0 中断读取 Gray_ReadDigitalMaskFast()。 */
+#define CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US       (100U)   /* 快采样周期：TIMG0 独立读取 Gray_ReadDigitalMaskFast()。 */
 #define CAR_MOTOR_NO_YAW_LINE_CONFIRM_SAMPLES  (2U)     /* 普通循迹mask连续出现2次才更新，约200us。 */
 #define CAR_MOTOR_NO_YAW_TURN_REARM_MS         (20U)    /* 出弯后 S5/S6/S7 全部释放 20ms 才允许计下一个右转。 */
 #define CAR_MOTOR_NO_YAW_RETURN_CONFIRM_SAMPLES (2U)   /* S4回线连续有效2次，约200us。 */
@@ -103,7 +103,7 @@
 #define CAR_MOTOR_NO_YAW_TURN_HOLD_MS          (5000U)  /* 强转超时：超过该时间仍未找到S4回线则停车。 */
 #define CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS  (0U)     /* 0=不因丢线停车，继续按搜线目标运行。 */
 
-/* JY61P 只辅助右转减速，最终出弯由灰度S4回线决定；角度单位为0.01度。 */
+/* Task1 只用 JY61P 角度辅助减速；Task8 的共享姿态估计另见 control_config.h。 */
 #define CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100 (7500U)
 
 /*

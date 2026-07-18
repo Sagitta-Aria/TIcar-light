@@ -1,11 +1,15 @@
 #include "jy61p.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "board_config.h"
 #include "log_uart.h"
 #include "ti_msp_dl_config.h"
 
 #define JY61P_FRAME_SIZE              (11U)
 #define JY61P_FRAME_HEAD              (0x55U)
+#define JY61P_FRAME_GYRO              (0x52U)
 #define JY61P_FRAME_ANGLE             (0x53U)
 #define JY61P_UART_SERVICE_LIMIT      (16U)
 #define JY61P_UART_RX_DRAIN_LIMIT     (64U)
@@ -22,7 +26,13 @@ typedef struct {
     volatile int16_t rollX100;
     volatile int16_t pitchX100;
     volatile int16_t yawX100;
+    volatile int32_t rollRateX100PerSec;
+    volatile int32_t pitchRateX100PerSec;
+    volatile int32_t yawRateX100PerSec;
     volatile uint32_t angleFrameCount;
+    volatile uint32_t gyroFrameCount;
+    volatile uint32_t angleFrameTick;
+    volatile uint32_t gyroFrameTick;
     volatile uint32_t badFrameCount;
     uint8_t frame[JY61P_FRAME_SIZE];
     uint8_t frameIndex;
@@ -55,6 +65,12 @@ static int16_t JY61P_AngleRawToX100(int16_t raw)
     return (int16_t)(((int32_t)raw * 18000L) / 32768L);
 }
 
+static int32_t JY61P_GyroRawToX100PerSec(int16_t raw)
+{
+    /* JY61 0x52 满量程为正负 2000 deg/s；6250/1024 等于 200000/32768。 */
+    return ((int32_t)raw * 6250L) / 1024L;
+}
+
 static uint8_t JY61P_FrameChecksumOk(const uint8_t frame[JY61P_FRAME_SIZE])
 {
     uint8_t sum = 0U;
@@ -73,14 +89,22 @@ static void JY61P_ApplyFrame(const uint8_t frame[JY61P_FRAME_SIZE])
         return;
     }
 
-    if (frame[1] != JY61P_FRAME_ANGLE) {
-        return;
+    if (frame[1] == JY61P_FRAME_GYRO) {
+        g_jy61p.rollRateX100PerSec =
+            JY61P_GyroRawToX100PerSec(JY61P_ReadInt16(&frame[2]));
+        g_jy61p.pitchRateX100PerSec =
+            JY61P_GyroRawToX100PerSec(JY61P_ReadInt16(&frame[4]));
+        g_jy61p.yawRateX100PerSec =
+            JY61P_GyroRawToX100PerSec(JY61P_ReadInt16(&frame[6]));
+        g_jy61p.gyroFrameTick = (uint32_t)xTaskGetTickCountFromISR();
+        ++g_jy61p.gyroFrameCount;
+    } else if (frame[1] == JY61P_FRAME_ANGLE) {
+        g_jy61p.rollX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[2]));
+        g_jy61p.pitchX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[4]));
+        g_jy61p.yawX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[6]));
+        g_jy61p.angleFrameTick = (uint32_t)xTaskGetTickCountFromISR();
+        ++g_jy61p.angleFrameCount;
     }
-
-    g_jy61p.rollX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[2]));
-    g_jy61p.pitchX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[4]));
-    g_jy61p.yawX100 = JY61P_AngleRawToX100(JY61P_ReadInt16(&frame[6]));
-    ++g_jy61p.angleFrameCount;
 }
 
 static void JY61P_ParseByte(uint8_t data)
@@ -94,7 +118,8 @@ static void JY61P_ParseByte(uint8_t data)
         return;
     }
 
-    if ((g_jy61p.frameIndex == 1U) && (data != JY61P_FRAME_ANGLE)) {
+    if ((g_jy61p.frameIndex == 1U) &&
+        (data != JY61P_FRAME_GYRO) && (data != JY61P_FRAME_ANGLE)) {
         g_jy61p.frameIndex = 0U;
         if (data == JY61P_FRAME_HEAD) {
             g_jy61p.frame[0] = data;
@@ -140,7 +165,13 @@ void JY61P_Init(void)
     g_jy61p.rollX100 = 0;
     g_jy61p.pitchX100 = 0;
     g_jy61p.yawX100 = 0;
+    g_jy61p.rollRateX100PerSec = 0;
+    g_jy61p.pitchRateX100PerSec = 0;
+    g_jy61p.yawRateX100PerSec = 0;
     g_jy61p.angleFrameCount = 0U;
+    g_jy61p.gyroFrameCount = 0U;
+    g_jy61p.angleFrameTick = 0U;
+    g_jy61p.gyroFrameTick = 0U;
     g_jy61p.badFrameCount = 0U;
     for (i = 0U; i < JY61P_FRAME_SIZE; ++i) {
         g_jy61p.frame[i] = 0U;
@@ -199,11 +230,18 @@ uint8_t JY61P_GetAttitude(JY61P_Attitude *attitude)
     attitude->rollX100 = g_jy61p.rollX100;
     attitude->pitchX100 = g_jy61p.pitchX100;
     attitude->yawX100 = g_jy61p.yawX100;
+    attitude->rollRateX100PerSec = g_jy61p.rollRateX100PerSec;
+    attitude->pitchRateX100PerSec = g_jy61p.pitchRateX100PerSec;
+    attitude->yawRateX100PerSec = g_jy61p.yawRateX100PerSec;
     attitude->angleFrameCount = g_jy61p.angleFrameCount;
+    attitude->gyroFrameCount = g_jy61p.gyroFrameCount;
+    attitude->angleFrameTick = g_jy61p.angleFrameTick;
+    attitude->gyroFrameTick = g_jy61p.gyroFrameTick;
     attitude->badFrameCount = g_jy61p.badFrameCount;
     JY61P_ExitCritical(primask);
 
-    return (attitude->angleFrameCount != 0U) ? 1U : 0U;
+    return ((attitude->angleFrameCount != 0U) ||
+        (attitude->gyroFrameCount != 0U)) ? 1U : 0U;
 }
 
 void JY61P_PrintTask(void)
@@ -236,8 +274,12 @@ void JY61P_PrintTask(void)
     JY61P_PrintAngle("roll=", attitude.rollX100);
     JY61P_PrintAngle(" pitch=", attitude.pitchX100);
     JY61P_PrintAngle(" yaw=", attitude.yawX100);
+    LogUart_SendString(" yaw_rate_x100_s=");
+    LogUart_SendSigned(attitude.yawRateX100PerSec);
     LogUart_SendString(" frame=");
     LogUart_SendUnsigned(attitude.angleFrameCount);
+    LogUart_SendString(" gyro=");
+    LogUart_SendUnsigned(attitude.gyroFrameCount);
     LogUart_SendString(" bad=");
     LogUart_SendUnsigned(attitude.badFrameCount);
     LogUart_SendString("\r\n");

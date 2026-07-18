@@ -12,7 +12,7 @@ D:\Ti\m0-light-rtos
 
 ## 比赛任务
 
-OLED 菜单包含五个比赛入口、一个底盘标定入口和一个底盘测试入口：
+OLED 菜单包含五个比赛入口、一个联合标定入口、一个底盘测试入口和一个云台姿态实验入口：
 
 | 任务 | 当前流程 |
 | --- | --- |
@@ -20,9 +20,10 @@ OLED 菜单包含五个比赛入口、一个底盘标定入口和一个底盘测
 | Task 2 | 选择 Near/Mid/Far；不循迹，按对应中心参数直接进行 K230 视觉追踪 |
 | Task 3 | 选择 Near/Mid/Far；云台预转、等待视觉帧，然后按对应中心参数追踪 |
 | Task 4 | 云台捕获并稳定目标后启动循迹；灰度确认右转完成，JY61P 仅作可选角度辅助，并切换近/中/远/中云台参数做 yaw 随动 |
-| Task 5 PID | 串口控制左右轮原始 PWM，分开测低速 `start`、运行 `runstart` 和 FF，并在线测试速度 PI；`oled` 指令运行时切换 FF/start/speed/PID 页面 |
+| Task 5 PID | 默认标定底盘；发送 `mode gimbal` 后安全切换到 JY61 yaw 姿态环在线调参 |
 | Task 6 Drive | 进入后选择开环/闭环和 10～100 速度；开环单位为 PWM%，闭环单位为 count/20ms，左右轮使用相同命令 |
 | Task 7 Circle | 选择 Near/Mid/Far；不循迹，复用 Task2 的直接追踪流程，但使用对应距离的圆点参数 |
+| Task 8 IMU | 只运行 JY61 共享姿态估计和云台 yaw 保持，不启动底盘、视觉或 Task4 流程 |
 
 按键沿用 MSPM0 原板的两键逻辑：K1 切换任务或子项，K2 确认；任务中长按 K2 停止，子菜单长按 K2 返回。
 
@@ -38,7 +39,7 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 | RTOS任务 | 优先级 | 唤醒方式 | 职责 |
 | --- | ---: | --- | --- |
 | CarControl | 6 | 严格 20 ms；灰度语义事件可提前唤醒 | Task1/Task4-LINE 依次采灰度、计算目标，再读取清零编码器窗口、执行速度 PI、更新底盘 PWM |
-| Gimbal | 6 | UART完整帧/控制变化通知；视觉超时 | 视觉帧解析、云台闭环和云台步进目标更新；Task1/Task5/Task6运行时挂起 |
+| Gimbal | 6 | 严格 10 ms `xTaskDelayUntil` | JY61共享姿态估计、视觉解析，以及视觉云台或Task8姿态环二选一控制 |
 | Watchdog | 可配置 | 周期可配置 | 检查UI任务心跳；超时后停止喂WWDT0，由硬件复位整机 |
 | Input | 4 | GPIO按键边沿；按住期间 1 ms | 按键消抖、长按计时并向静态事件队列投递事件 |
 | Mission | 3 | 任务/视觉通知；Task3前置搜索和Task4非循迹阶段 1 ms | 处理比赛状态切换及非底盘周期流程；Task1/Task4-LINE 交给 CarControl |
@@ -47,16 +48,16 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 
 关键调度配置：
 
-- 抢占开启，时间片关闭：CarControl按20 ms截止时间运行；Task1/Task4-LINE 在同一拍内先生成灰度目标，再读编码器、跑PI和写PWM。Gimbal/Input/Mission/UI在没有事件时阻塞。
+- 抢占开启，时间片关闭：CarControl按20 ms截止时间运行；Gimbal固定10 ms运行，其他事件任务在没有事件时阻塞。
 - tick 为 1 kHz，tickless idle 关闭；空闲任务不让 MCU 进入睡眠。
 - 全部任务、栈和事件队列静态分配；动态内存关闭。
 - `vTaskDelete()` 关闭，任务不会在运行期被删除。
 - OLED整屏刷新按8字节I2C FIFO分包，不再逐像素字节启动事务；I2C恢复会保留软件显存，恢复成功后让UI缓存失效并立即重绘。
 - Watchdog参数集中在`config/board_config.h`的`CAR_WATCHDOG_*`宏；默认UI约2秒无心跳后停止喂狗，WWDT0再经过约1秒复位整机，调试器暂停内核时同步暂停。
 - WWDT0违规在MSPM0G3507上产生SYSRST，不会给外部OLED断电。启动日志会输出`reset cause raw=`及WWDT0、CPU LOCKUP、BOR等原因，用于区分MCU复位和单纯OLED黑屏。
-- Task1/Task5/Task6不运行视觉和云台控制，运行时挂起Gimbal。Task2/Task3/Task7进入后停车并挂起CarControl，`MotorNoYaw`停止后TIMG0不再读取灰度，只继续调度云台STEP；Task2和Task7直接进入追踪，Task3只在等待/搜索视觉的前置阶段保留Mission 1ms周期，进入追踪后改为事件阻塞。Task6保留CarControl以刷新编码器反馈或运行20ms速度环。Input平时阻塞，按键边沿后才启动消抖/长按处理；离开任务后恢复被挂起任务。
-- TIMG0 的云台 STEP/灰度快采样中断和 GPIO 编码器中断独立于任务调度。
-- UART3 ISR只在收到完整视觉行后通知Gimbal；视觉缓冲仍采用“最新帧覆盖旧帧”，不会累积过期控制帧。
+- Gimbal任务始终以10 ms运行并维护共享姿态；Task1/Task6没有云台命令时STEP定时器保持停止。Task2/Task3/Task7/Task8进入后停车并挂起CarControl；Task8不启动视觉。Task6保留CarControl以刷新编码器反馈或运行20ms速度环。
+- TIMG6按需承担20 kHz云台STEP；TIMG0只在Task1/Task4循迹时承担10 kHz灰度采样。TIMA0底盘20 kHz PWM不产生周期中断。
+- UART3 ISR只在收到完整视觉行后记录通知；Gimbal在下一次固定10 ms边界消费最新帧，不累积过期控制帧。
 - 普通循迹灰度只在20 ms控制周期边界生成一次左右目标。TIMG0仍每100 us做语义快采样，不把原始采样逐条入队；确认右直角或S4回线时提前唤醒CarControl。入弯时若有JY61P帧就锁存航向供粗略减速参考，编码器读清、角度更新和PI仍留在固定20 ms边界。
 - 普通循迹使用100 us快采样形成的确认mask；同一S1～S7完整mask连续出现2次后才更新，单次毛刺继续沿用上一确认值。
 

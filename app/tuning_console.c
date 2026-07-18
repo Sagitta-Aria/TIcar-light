@@ -4,9 +4,12 @@
 #include "task.h"
 
 #include "control_config.h"
+#include "body_motion.h"
 #include "encoder_motor.h"
+#include "gimbal_attitude.h"
 #include "gray.h"
 #include "log_uart.h"
+#include "motor.h"
 #include "motor_no_yaw.h"
 
 #define TUNING_LINE_MAX                 (80U)
@@ -27,6 +30,11 @@ typedef enum {
     TUNING_SET_SETTLING,
     TUNING_SET_SAMPLING
 } TuningSetState;
+
+typedef enum {
+    TUNING_MODE_CHASSIS = 0,
+    TUNING_MODE_GIMBAL
+} TuningMode;
 
 typedef struct {
     int16_t pwm;
@@ -57,9 +65,41 @@ static int16_t g_encoderMoveSpeed[ENCODER_MOTOR_COUNT];
 static int32_t g_encoderMoveStart[ENCODER_MOTOR_COUNT];
 static int32_t g_encoderMoveDistance[ENCODER_MOTOR_COUNT];
 static uint8_t g_encoderMoveActive;
+static TuningMode g_tuningMode;
 
 static void TuningConsole_CancelSetSampling(void);
 static void TuningConsole_CancelEncoderMove(void);
+static void TuningConsole_StopGrayTest(void);
+static void TuningConsole_ResetAverage(void);
+
+static void TuningConsole_StopChassisActivity(void)
+{
+    TuningConsole_CancelSetSampling();
+    TuningConsole_CancelEncoderMove();
+    TuningConsole_StopGrayTest();
+    EncoderMotor_SetOpenLoopPwm(0, 0);
+    EncoderMotor_ExitCalibration();
+    TuningConsole_ResetAverage();
+}
+
+static void TuningConsole_SetMode(TuningMode mode)
+{
+    if (mode == TUNING_MODE_GIMBAL) {
+        TuningConsole_StopChassisActivity();
+        GimbalAttitude_Start();
+        g_tuningMode = TUNING_MODE_GIMBAL;
+        g_oledPage = TUNING_CONSOLE_OLED_GIMBAL;
+        LogUart_SendString("#OK mode=gimbal; keep car and IMU still for calibration\r\n");
+    } else {
+        GimbalAttitude_Stop();
+        EncoderMotor_EnterCalibration();
+        g_tuningMode = TUNING_MODE_CHASSIS;
+        g_oledPage = TUNING_CONSOLE_OLED_FF;
+        TuningConsole_ResetAverage();
+        LogUart_SendString("#OK mode=chassis; gimbal stopped\r\n");
+    }
+    g_forceStatus = 1U;
+}
 
 static uint8_t TuningConsole_TextEquals(const char *left,
     const char *right)
@@ -292,6 +332,13 @@ static void TuningConsole_UpdateAverage(void)
 
 static void TuningConsole_SendHelp(void)
 {
+    LogUart_SendString("# mode chassis|gimbal - select Task5 owner\r\n");
+    LogUart_SendString(
+        "# gcal | ghold on|off | gshow - gimbal attitude control\r\n");
+    LogUart_SendString(
+        "# gsteps|gkff|gkp|glpf|gbeta|gpred VALUE\r\n");
+    LogUart_SendString(
+        "# gsign -1|1 | gmax|gaccel|glimit VALUE\r\n");
     LogUart_SendString("# Task5 PWM commands use percent:\r\n");
     LogUart_SendString("# set L R       -100..100%, sample FF point\r\n");
     LogUart_SendString("# set clear     clear saved FF points\r\n");
@@ -305,7 +352,7 @@ static void TuningConsole_SendHelp(void)
     LogUart_SendString("# ilim L R      integral limit 0..100%\r\n");
     LogUart_SendString("# ffcalc PCT1 C1 PCT2 C2\r\n");
     LogUart_SendString("# gray [on|off] Task1 gray/motor test\r\n");
-    LogUart_SendString("# oled ff|start|speed|pid|gray\r\n");
+    LogUart_SendString("# oled ff|start|speed|pid|gray|gimbal\r\n");
     LogUart_SendString("# avg | clear | stop | show | help\r\n");
 }
 
@@ -321,9 +368,11 @@ static void TuningConsole_SelectOledPage(const char *name)
         g_oledPage = TUNING_CONSOLE_OLED_PID;
     } else if (TuningConsole_TextEquals(name, "gray") != 0U) {
         g_oledPage = TUNING_CONSOLE_OLED_GRAY;
+    } else if (TuningConsole_TextEquals(name, "gimbal") != 0U) {
+        g_oledPage = TUNING_CONSOLE_OLED_GIMBAL;
     } else {
         LogUart_SendString(
-            "#ERR oled expects ff|start|speed|pid|gray\r\n");
+            "#ERR oled expects ff|start|speed|pid|gray|gimbal\r\n");
         return;
     }
     LogUart_SendString("#OK oled=");
@@ -396,6 +445,38 @@ static void TuningConsole_SendStatus(void)
 {
     EncoderMotorSnapshot snapshot;
 
+    if (g_tuningMode == TUNING_MODE_GIMBAL) {
+        GimbalAttitudeSnapshot gimbal;
+
+        GimbalAttitude_GetSnapshot(&gimbal);
+        LogUart_SendString("G state=");
+        LogUart_SendUnsigned((uint32_t)gimbal.motion.state);
+        LogUart_SendString(" cal=");
+        LogUart_SendUnsigned(gimbal.motion.calibrationCount);
+        LogUart_SendString("/");
+        LogUart_SendUnsigned(gimbal.motion.calibrationTarget);
+        LogUart_SendString(" hold=");
+        LogUart_SendUnsigned(gimbal.holdEnabled);
+        LogUart_SendString(" yaw_x100=");
+        LogUart_SendSigned(gimbal.motion.yawEstimateX100);
+        LogUart_SendString(" rate_x100_s=");
+        LogUart_SendSigned(gimbal.motion.yawRateFilteredX100PerSec);
+        LogUart_SendString(" bias_x100_s=");
+        LogUart_SendSigned(gimbal.motion.gyroBiasX100PerSec);
+        LogUart_SendString(" ref_step=");
+        LogUart_SendSigned(gimbal.referenceStep);
+        LogUart_SendString(" step=");
+        LogUart_SendSigned(gimbal.currentStep);
+        LogUart_SendString(" err=");
+        LogUart_SendSigned(gimbal.stepError);
+        LogUart_SendString(" ff_sps=");
+        LogUart_SendSigned(gimbal.feedForwardSps);
+        LogUart_SendString(" cmd_sps=");
+        LogUart_SendSigned(gimbal.commandSps);
+        LogUart_SendString("\r\n");
+        return;
+    }
+
     EncoderMotor_GetSnapshot(&snapshot);
     LogUart_SendString("D mode=");
     LogUart_SendString(TuningConsole_GetModeName(snapshot.mode));
@@ -455,6 +536,39 @@ static void TuningConsole_SendStatus(void)
 static void TuningConsole_SendDetails(void)
 {
     EncoderMotorSnapshot snapshot;
+
+    if (g_tuningMode == TUNING_MODE_GIMBAL) {
+        GimbalAttitudeConfig gimbal;
+        BodyMotionConfig motion;
+
+        GimbalAttitude_GetConfig(&gimbal);
+        BodyMotion_GetConfig(&motion);
+        TuningConsole_SendStatus();
+        LogUart_SendString("# gsteps=");
+        LogUart_SendUnsigned(gimbal.stepsPerRevolution);
+        LogUart_SendString(" gsign=");
+        LogUart_SendSigned(gimbal.directionSign);
+        LogUart_SendString(" gkff=");
+        LogUart_SendUnsigned(gimbal.kffQ1024);
+        LogUart_SendString(" gkp=");
+        LogUart_SendUnsigned(gimbal.kpQ1024);
+        LogUart_SendString(" gmax=");
+        LogUart_SendUnsigned(gimbal.maxSpeedSps);
+        LogUart_SendString(" gaccel=");
+        LogUart_SendUnsigned(gimbal.accelStepSps);
+        LogUart_SendString(" glimit=");
+        LogUart_SendUnsigned(gimbal.positionLimitSteps);
+        LogUart_SendString("\r\n# glpf=");
+        LogUart_SendUnsigned(motion.gyroAlphaQ1024);
+        LogUart_SendString(" gbeta=");
+        LogUart_SendUnsigned(motion.yawBetaQ1024);
+        LogUart_SendString(" gpred_ms=");
+        LogUart_SendUnsigned(motion.predictionMs);
+        LogUart_SendString(" stale_ms=");
+        LogUart_SendUnsigned(motion.staleMs);
+        LogUart_SendString("\r\n");
+        return;
+    }
 
     EncoderMotor_GetSnapshot(&snapshot);
     LogUart_SendString("# mode=");
@@ -1108,6 +1222,162 @@ static void TuningConsole_StartSetSampling(int32_t left, int32_t right)
     g_forceStatus = 1U;
 }
 
+static uint8_t TuningConsole_ApplyGimbalValue(const char *command,
+    int32_t value)
+{
+    GimbalAttitudeConfig gimbal;
+    BodyMotionConfig motion;
+    uint8_t motionParameter = 0U;
+
+    GimbalAttitude_GetConfig(&gimbal);
+    BodyMotion_GetConfig(&motion);
+    if (TuningConsole_TextEquals(command, "gsteps") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        gimbal.stepsPerRevolution = (uint16_t)value;
+    } else if (TuningConsole_TextEquals(command, "gsign") != 0U) {
+        if ((value != -1) && (value != 1)) {
+            return 0U;
+        }
+        gimbal.directionSign = (int8_t)value;
+    } else if (TuningConsole_TextEquals(command, "gkff") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        gimbal.kffQ1024 = (uint16_t)value;
+    } else if (TuningConsole_TextEquals(command, "gkp") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        gimbal.kpQ1024 = (uint16_t)value;
+    } else if (TuningConsole_TextEquals(command, "gmax") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        gimbal.maxSpeedSps = (uint16_t)value;
+    } else if (TuningConsole_TextEquals(command, "gaccel") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        gimbal.accelStepSps = (uint16_t)value;
+    } else if (TuningConsole_TextEquals(command, "glimit") != 0U) {
+        if (value < 0) {
+            return 0U;
+        }
+        gimbal.positionLimitSteps = (uint32_t)value;
+    } else if (TuningConsole_TextEquals(command, "glpf") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        motion.gyroAlphaQ1024 = (uint16_t)value;
+        motionParameter = 1U;
+    } else if (TuningConsole_TextEquals(command, "gbeta") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        motion.yawBetaQ1024 = (uint16_t)value;
+        motionParameter = 1U;
+    } else if (TuningConsole_TextEquals(command, "gpred") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        motion.predictionMs = (uint16_t)value;
+        motionParameter = 1U;
+    } else {
+        return 0U;
+    }
+
+    if (((motionParameter != 0U) &&
+        (BodyMotion_SetConfig(&motion) == 0U)) ||
+        ((motionParameter == 0U) &&
+        (GimbalAttitude_SetConfig(&gimbal) == 0U))) {
+        return 0U;
+    }
+    LogUart_SendString("#OK ");
+    LogUart_SendString(command);
+    LogUart_SendString("=");
+    LogUart_SendSigned(value);
+    LogUart_SendString("\r\n");
+    g_forceStatus = 1U;
+    return 1U;
+}
+
+static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
+    uint8_t tokenCount)
+{
+    int32_t value;
+    uint8_t recognized = (uint8_t)(
+        (TuningConsole_TextEquals(tokens[0], "gshow") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gcal") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "ghold") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gsteps") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gsign") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gkff") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gkp") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gmax") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gaccel") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "glimit") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "glpf") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gbeta") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gpred") != 0U));
+
+    if (recognized == 0U) {
+        return 0U;
+    }
+    if (g_tuningMode != TUNING_MODE_GIMBAL) {
+        LogUart_SendString(
+            "#ERR gimbal command blocked; send mode gimbal first\r\n");
+        return 1U;
+    }
+
+    if ((TuningConsole_TextEquals(tokens[0], "gshow") != 0U) &&
+        (tokenCount == 1U)) {
+        TuningConsole_SendDetails();
+        return 1U;
+    }
+    if ((TuningConsole_TextEquals(tokens[0], "gcal") != 0U) &&
+        (tokenCount == 1U)) {
+        if (GimbalAttitude_IsActive() == 0U) {
+            GimbalAttitude_Start();
+        } else {
+            GimbalAttitude_StartCalibration();
+        }
+        g_forceStatus = 1U;
+        LogUart_SendString("#OK gcal started; keep chassis and IMU still\r\n");
+        return 1U;
+    }
+    if ((TuningConsole_TextEquals(tokens[0], "ghold") != 0U) &&
+        (tokenCount == 2U)) {
+        if (TuningConsole_TextEquals(tokens[1], "on") != 0U) {
+            if (GimbalAttitude_IsActive() == 0U) {
+                GimbalAttitude_Start();
+            } else {
+                GimbalAttitude_SetHoldEnabled(1U);
+            }
+        } else if (TuningConsole_TextEquals(tokens[1], "off") != 0U) {
+            GimbalAttitude_SetHoldEnabled(0U);
+        } else {
+            LogUart_SendString("#ERR ghold expects on or off\r\n");
+            return 1U;
+        }
+        g_forceStatus = 1U;
+        LogUart_SendString("#OK ghold=");
+        LogUart_SendString(tokens[1]);
+        LogUart_SendString("\r\n");
+        return 1U;
+    }
+    if ((tokenCount == 2U) &&
+        (TuningConsole_ParseInt32(tokens[1], &value) != 0U)) {
+        if (TuningConsole_ApplyGimbalValue(tokens[0], value) == 0U) {
+            LogUart_SendString("#ERR invalid gimbal parameter or range\r\n");
+        }
+        return 1U;
+    }
+    LogUart_SendString("#ERR bad gimbal command arguments\r\n");
+    return 1U;
+}
+
 static void TuningConsole_ExecuteLine(char *line)
 {
     char *tokens[TUNING_TOKEN_MAX];
@@ -1120,6 +1390,30 @@ static void TuningConsole_ExecuteLine(char *line)
     TuningConsole_ToLower(line);
     tokenCount = TuningConsole_Split(line, tokens, TUNING_TOKEN_MAX);
     if (tokenCount == 0U) {
+        return;
+    }
+
+    if ((TuningConsole_TextEquals(tokens[0], "mode") != 0U) &&
+        (tokenCount == 2U)) {
+        if (TuningConsole_TextEquals(tokens[1], "chassis") != 0U) {
+            TuningConsole_SetMode(TUNING_MODE_CHASSIS);
+        } else if (TuningConsole_TextEquals(tokens[1], "gimbal") != 0U) {
+            TuningConsole_SetMode(TUNING_MODE_GIMBAL);
+        } else {
+            LogUart_SendString("#ERR mode expects chassis or gimbal\r\n");
+        }
+        return;
+    }
+    if (TuningConsole_ExecuteGimbalCommand(tokens, tokenCount) != 0U) {
+        return;
+    }
+    if ((g_tuningMode == TUNING_MODE_GIMBAL) &&
+        (TuningConsole_TextEquals(tokens[0], "help") == 0U) &&
+        (TuningConsole_TextEquals(tokens[0], "show") == 0U) &&
+        (TuningConsole_TextEquals(tokens[0], "oled") == 0U) &&
+        (TuningConsole_TextEquals(tokens[0], "stop") == 0U)) {
+        LogUart_SendString(
+            "#ERR chassis command blocked; send mode chassis first\r\n");
         return;
     }
 
@@ -1152,6 +1446,7 @@ static void TuningConsole_ExecuteLine(char *line)
         TuningConsole_CancelEncoderMove();
         TuningConsole_StopGrayTest();
         EncoderMotor_SetOpenLoopPwm(0, 0);
+        GimbalAttitude_Stop();
         TuningConsole_ResetAverage();
         LogUart_SendString("#OK stop\r\n");
         g_forceStatus = 1U;
@@ -1296,12 +1591,14 @@ void TuningConsole_Start(void)
     g_active = 1U;
     g_forceStatus = 0U;
     g_oledPage = TUNING_CONSOLE_OLED_FF;
+    g_tuningMode = TUNING_MODE_CHASSIS;
     g_grayActive = 0U;
     g_grayMask = 0U;
     TuningConsole_CancelEncoderMove();
     TuningConsole_CancelSetSampling();
     TuningConsole_ClearSetReferences();
     LogUart_ClearRx();
+    GimbalAttitude_Stop();
     EncoderMotor_EnterCalibration();
     TuningConsole_ResetAverage();
     g_lastStatusTime = xTaskGetTickCount();
@@ -1319,6 +1616,7 @@ void TuningConsole_Stop(void)
     g_grayActive = 0U;
     g_grayMask = 0U;
     TuningConsole_CancelEncoderMove();
+    GimbalAttitude_Stop();
     EncoderMotor_ExitCalibration();
     TuningConsole_CancelSetSampling();
     TuningConsole_ClearSetReferences();
@@ -1337,10 +1635,14 @@ void TuningConsole_Task(void)
         return;
     }
     TuningConsole_ProcessRx();
-    TuningConsole_UpdateAverage();
-    TuningConsole_UpdateEncoderMove();
+    if (g_tuningMode == TUNING_MODE_CHASSIS) {
+        TuningConsole_UpdateAverage();
+        TuningConsole_UpdateEncoderMove();
+    }
     now = xTaskGetTickCount();
-    TuningConsole_UpdateSetSampling(now);
+    if (g_tuningMode == TUNING_MODE_CHASSIS) {
+        TuningConsole_UpdateSetSampling(now);
+    }
     if ((g_forceStatus != 0U) ||
         ((now - g_lastStatusTime) >=
             pdMS_TO_TICKS(TUNING_STATUS_PERIOD_MS))) {
@@ -1356,7 +1658,8 @@ void TuningConsole_ChassisControlPeriod(void)
     int16_t rightTargetCounts;
     uint8_t mask;
 
-    if ((g_active == 0U) || (g_grayActive == 0U)) {
+    if ((g_active == 0U) || (g_tuningMode != TUNING_MODE_CHASSIS) ||
+        (g_grayActive == 0U)) {
         return;
     }
     mask = Gray_ReadDigitalMaskFast();
@@ -1377,13 +1680,25 @@ uint8_t TuningConsole_IsActive(void)
 void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status)
 {
     EncoderMotorSnapshot snapshot;
+    GimbalAttitudeSnapshot gimbal;
 
     if (status == 0) {
         return;
     }
 
     EncoderMotor_GetSnapshot(&snapshot);
+    GimbalAttitude_GetSnapshot(&gimbal);
     status->oledPage = g_oledPage;
+    status->gimbalMode = (g_tuningMode == TUNING_MODE_GIMBAL) ? 1U : 0U;
+    status->gimbalState = (uint8_t)gimbal.motion.state;
+    status->gimbalHoldEnabled = gimbal.holdEnabled;
+    status->gimbalCalibrationCount = gimbal.motion.calibrationCount;
+    status->gimbalCalibrationTarget = gimbal.motion.calibrationTarget;
+    status->gimbalYawX100 = gimbal.motion.yawEstimateX100;
+    status->gimbalRateX100PerSec =
+        gimbal.motion.yawRateFilteredX100PerSec;
+    status->gimbalStepError = gimbal.stepError;
+    status->gimbalCommandSps = gimbal.commandSps;
     if (g_setState == TUNING_SET_SETTLING) {
         status->setStage = TUNING_CONSOLE_SET_STAGE_SETTLING;
     } else if (g_setState == TUNING_SET_SAMPLING) {

@@ -4,11 +4,12 @@
 #include "board_config.h"
 #include "control_config.h"
 #include "encoder_motor.h"
+#include "gimbal_attitude.h"
 #include "motor_no_yaw.h"
 #include "oled.h"
 #include "tuning_console.h"
 
-#define MENU_TASK_COUNT       (7U)
+#define MENU_TASK_COUNT       (8U)
 #define MENU_GIMBAL_DISTANCE_COUNT (3U)
 #define MENU_OLED_FONT_SIZE   (12U)
 #define MENU_MONO_START_X     (6U)
@@ -25,7 +26,8 @@ static const char *const g_taskNames[MENU_TASK_COUNT] = {
     "Task 4",
     "Task 5 PID",
     "Task 6 Drive",
-    "Task 7 Circle"
+    "Task 7 Circle",
+    "Task 8 IMU"
 };
 
 static const char *const g_gimbalDistanceNames[MENU_GIMBAL_DISTANCE_COUNT] = {
@@ -376,6 +378,40 @@ static void Menu_RenderTask5(void)
     TuningConsoleDisplayStatus status;
 
     TuningConsole_GetDisplayStatus(&status);
+    if (status.gimbalMode != 0U) {
+        write = line1;
+        end = &line1[MENU_LINE_SIZE - 1U];
+        if (status.gimbalState == (uint8_t)BODY_MOTION_CALIBRATING) {
+            write = Menu_AppendText(write, end, "CAL ");
+            write = Menu_AppendUnsigned(write, end,
+                status.gimbalCalibrationCount);
+            write = Menu_AppendChar(write, end, '/');
+            (void)Menu_AppendUnsigned(write, end,
+                status.gimbalCalibrationTarget);
+        } else if (status.gimbalState == (uint8_t)BODY_MOTION_READY) {
+            (void)Menu_AppendText(write, end,
+                (status.gimbalHoldEnabled != 0U) ? "HOLD" : "OBSERVE");
+        } else if (status.gimbalState == (uint8_t)BODY_MOTION_STALE) {
+            (void)Menu_AppendText(write, end, "IMU STALE");
+        } else {
+            (void)Menu_AppendText(write, end, "WAIT IMU");
+        }
+        write = line2;
+        end = &line2[MENU_LINE_SIZE - 1U];
+        write = Menu_AppendText(write, end, "Y100 ");
+        write = Menu_AppendSigned(write, end, status.gimbalYawX100);
+        write = Menu_AppendText(write, end, " R ");
+        (void)Menu_AppendSigned(write, end,
+            status.gimbalRateX100PerSec);
+        write = line3;
+        end = &line3[MENU_LINE_SIZE - 1U];
+        write = Menu_AppendText(write, end, "E ");
+        write = Menu_AppendSigned(write, end, status.gimbalStepError);
+        write = Menu_AppendText(write, end, " S ");
+        (void)Menu_AppendSigned(write, end, status.gimbalCommandSps);
+        Menu_RenderLines("Task 5 GIMBAL", line1, line2, line3);
+        return;
+    }
     if (status.oledPage == TUNING_CONSOLE_OLED_GRAY) {
         Menu_BuildGrayMaskLine(line1, status.grayMask);
         Menu_BuildSignedPair(line2, "T ", status.leftTargetCounts,
@@ -523,6 +559,49 @@ static void Menu_RenderMission(void)
 
     if (missionId == 6U) {
         Menu_RenderTask6Mission();
+        return;
+    }
+
+    if (missionId == 8U) {
+        GimbalAttitudeSnapshot status;
+        char stateLine[MENU_LINE_SIZE];
+        char yawLine[MENU_LINE_SIZE];
+        char controlLine[MENU_LINE_SIZE];
+        char *stateWrite = stateLine;
+        char *yawWrite = yawLine;
+        char *controlWrite = controlLine;
+        char *stateEnd = &stateLine[MENU_LINE_SIZE - 1U];
+        char *yawEnd = &yawLine[MENU_LINE_SIZE - 1U];
+        char *controlEnd = &controlLine[MENU_LINE_SIZE - 1U];
+
+        GimbalAttitude_GetSnapshot(&status);
+        if (status.motion.state == BODY_MOTION_CALIBRATING) {
+            stateWrite = Menu_AppendText(stateWrite, stateEnd, "CAL ");
+            stateWrite = Menu_AppendUnsigned(stateWrite, stateEnd,
+                status.motion.calibrationCount);
+            stateWrite = Menu_AppendChar(stateWrite, stateEnd, '/');
+            (void)Menu_AppendUnsigned(stateWrite, stateEnd,
+                status.motion.calibrationTarget);
+        } else if (status.motion.state == BODY_MOTION_READY) {
+            (void)Menu_AppendText(stateWrite, stateEnd,
+                (status.holdEnabled != 0U) ? "HOLD" : "OBSERVE");
+        } else if (status.motion.state == BODY_MOTION_STALE) {
+            (void)Menu_AppendText(stateWrite, stateEnd, "IMU STALE");
+        } else {
+            (void)Menu_AppendText(stateWrite, stateEnd, "WAIT IMU");
+        }
+        yawWrite = Menu_AppendText(yawWrite, yawEnd, "Y100 ");
+        yawWrite = Menu_AppendSigned(yawWrite, yawEnd,
+            status.motion.yawEstimateX100);
+        yawWrite = Menu_AppendText(yawWrite, yawEnd, " R ");
+        (void)Menu_AppendSigned(yawWrite, yawEnd,
+            status.motion.yawRateFilteredX100PerSec);
+        controlWrite = Menu_AppendText(controlWrite, controlEnd, "E ");
+        controlWrite = Menu_AppendSigned(controlWrite, controlEnd,
+            status.stepError);
+        controlWrite = Menu_AppendText(controlWrite, controlEnd, " S ");
+        (void)Menu_AppendSigned(controlWrite, controlEnd, status.commandSps);
+        Menu_RenderLines("Task 8 IMU", stateLine, yawLine, controlLine);
         return;
     }
 
@@ -730,6 +809,8 @@ CarEvent Menu_Confirm(void)
         g_menuPage = MENU_PAGE_TASK7_DISTANCE;
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
+    case 7U:
+        return CAR_EVENT_MISSION_8_START;
     default:
         return CAR_EVENT_NONE;
     }
@@ -760,7 +841,8 @@ void Menu_Task(CarState state)
     uint16_t refreshTicks = CAR_MENU_REFRESH_TICKS;
 
     if ((state == CAR_STATE_MISSION) &&
-        (StateMachine_GetMissionId() == 5U)) {
+        ((StateMachine_GetMissionId() == 5U) ||
+            (StateMachine_GetMissionId() == 8U))) {
         refreshTicks = MENU_TASK5_REFRESH_TICKS;
     }
     if (state != g_lastState) {

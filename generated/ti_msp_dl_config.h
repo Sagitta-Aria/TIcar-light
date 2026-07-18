@@ -36,14 +36,23 @@ extern "C" {
 #define CPUCLK_FREQ                                                     32000000
 #define SYSCFG_DL_ENABLE_HFXT_PLL                                           (0U)
 
-/* 云台 STEP 调度定时器：TIMG0 每 20us 进一次中断。 */
-#define STEPPER_TIMER_INST                                                (TIMG0)
-#define STEPPER_TIMER_INST_IRQHandler                            TIMG0_IRQHandler
-#define STEPPER_TIMER_INST_INT_IRQN                              (TIMG0_INT_IRQn)
+/* 云台两轴 STEP 调度：TIMG6 每 50us 调度一次，不再承载灰度采样。 */
+#define STEPPER_TIMER_INST                                                (TIMG6)
+#define STEPPER_TIMER_INST_IRQHandler                            TIMG6_IRQHandler
+#define STEPPER_TIMER_INST_INT_IRQN                              (TIMG6_INT_IRQn)
 #define STEPPER_TIMER_CLOCK_HZ                                       (32000000U)
-#define STEPPER_TIMER_TICK_HZ                                           (50000U)
+#define STEPPER_TIMER_TICK_HZ                                           (20000U)
 #define STEPPER_TIMER_LOAD_VALUE \
     ((STEPPER_TIMER_CLOCK_HZ / STEPPER_TIMER_TICK_HZ) - 1U)
+
+/* 数字灰度快采样：TIMG0 每 100us 采样一次，仅在 Task1/Task4 循迹时启动。 */
+#define GRAY_SAMPLE_TIMER_INST                                            (TIMG0)
+#define GRAY_SAMPLE_TIMER_INST_IRQHandler                        TIMG0_IRQHandler
+#define GRAY_SAMPLE_TIMER_INST_INT_IRQN                          (TIMG0_INT_IRQn)
+#define GRAY_SAMPLE_TIMER_CLOCK_HZ                                   (32000000U)
+#define GRAY_SAMPLE_TIMER_TICK_HZ                                       (10000U)
+#define GRAY_SAMPLE_TIMER_LOAD_VALUE \
+    ((GRAY_SAMPLE_TIMER_CLOCK_HZ / GRAY_SAMPLE_TIMER_TICK_HZ) - 1U)
 
 #define GPIO_HFXT_PORT                                                     GPIOA
 #define GPIO_HFXIN_PIN                                             DL_GPIO_PIN_5
@@ -159,6 +168,7 @@ void SYSCFG_DL_SYSCTL_init(void);
 bool SYSCFG_DL_SYSCTL_SYSPLL_init(void);
 bool SYSCFG_DL_SYSCTL_isClockOk(void);
 void SYSCFG_DL_STEPPER_TIMER_init(void);
+void SYSCFG_DL_GRAY_SAMPLE_TIMER_init(void);
 void SYSCFG_DL_OLED_init(void);
 void SYSCFG_DL_LogUart_init(void);
 void SYSCFG_DL_JY61P_init(void);

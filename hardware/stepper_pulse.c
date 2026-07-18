@@ -68,6 +68,8 @@ static StepperPulseChannel g_stepperPulse[STEPPER_GIMBAL_CHANNEL_COUNT] = {
     }
 };
 
+static uint8_t g_stepperTimerEnabled;
+
 static uint8_t StepperPulse_IsValid(MotorId motor)
 {
     return ((motor == MOTOR_GIMBAL_1) || (motor == MOTOR_GIMBAL_2)) ?
@@ -79,8 +81,40 @@ static uint32_t StepperPulse_GetIndex(MotorId motor)
     return (uint32_t)motor - (uint32_t)MOTOR_GIMBAL_1;
 }
 
+static uint8_t StepperPulse_HasActiveTarget(void)
+{
+    uint32_t i;
+
+    for (i = 0U; i < STEPPER_GIMBAL_CHANNEL_COUNT; ++i) {
+        if (g_stepperPulse[i].targetRateHz != 0U) {
+            return 1U;
+        }
+    }
+    return 0U;
+}
+
+static void StepperPulse_SetTimerEnabled(uint8_t enabled)
+{
+    if (enabled != 0U) {
+        if (g_stepperTimerEnabled == 0U) {
+            DL_TimerG_stopCounter(STEPPER_TIMER_INST);
+            DL_TimerG_setTimerCount(STEPPER_TIMER_INST,
+                STEPPER_TIMER_LOAD_VALUE);
+            NVIC_ClearPendingIRQ(STEPPER_TIMER_INST_INT_IRQN);
+            NVIC_EnableIRQ(STEPPER_TIMER_INST_INT_IRQN);
+            DL_TimerG_startCounter(STEPPER_TIMER_INST);
+            g_stepperTimerEnabled = 1U;
+        }
+    } else if (g_stepperTimerEnabled != 0U) {
+        DL_TimerG_stopCounter(STEPPER_TIMER_INST);
+        NVIC_DisableIRQ(STEPPER_TIMER_INST_INT_IRQN);
+        NVIC_ClearPendingIRQ(STEPPER_TIMER_INST_INT_IRQN);
+        g_stepperTimerEnabled = 0U;
+    }
+}
+
 /*
- * 作用：极短临界区保护主循环和 TIMG0 ISR 共享的调度状态。
+ * 作用：极短临界区保护主循环和 TIMG6 ISR 共享的调度状态。
  * 使用场景：设置速度、停车、初始化。
  */
 static uint32_t StepperPulse_EnterCritical(void)
@@ -110,7 +144,7 @@ static void StepperPulse_ResetOne(StepperPulseChannel *channel)
 
 /*
  * 作用：把实际 STEP 频率按固定斜坡靠近目标频率。
- * 使用场景：TIMG0 ISR 内部调用，削弱速度突变带来的顿挫。
+ * 使用场景：TIMG6 ISR 内部调用，削弱速度突变带来的顿挫。
  * 说明：0 速命令由 SetTarget 立即停车，保留异常停车和死区停轴的响应速度。
  */
 static void StepperPulse_UpdateRampOne(StepperPulseChannel *channel)
@@ -220,9 +254,6 @@ static void StepperPulse_TickOne(StepperPulseChannel *channel,
 void StepperPulse_Init(void)
 {
     StepperPulse_StopAll();
-    NVIC_ClearPendingIRQ(STEPPER_TIMER_INST_INT_IRQN);
-    NVIC_EnableIRQ(STEPPER_TIMER_INST_INT_IRQN);
-    DL_TimerG_startCounter(STEPPER_TIMER_INST);
 }
 
 void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
@@ -248,6 +279,7 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
     } else {
         channel->targetRateHz = speedSps;
     }
+    StepperPulse_SetTimerEnabled(StepperPulse_HasActiveTarget());
     StepperPulse_ExitCritical(primask);
 }
 
@@ -277,6 +309,7 @@ void StepperPulse_StopAll(void)
     for (i = 0U; i < STEPPER_GIMBAL_CHANNEL_COUNT; ++i) {
         StepperPulse_ResetOne(&g_stepperPulse[i]);
     }
+    StepperPulse_SetTimerEnabled(0U);
     StepperPulse_ExitCritical(primask);
 }
 
