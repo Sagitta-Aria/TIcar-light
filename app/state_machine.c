@@ -541,9 +541,10 @@ static void StateMachine_EnterMission(void)
         Gimbal_SetTarget(0, 0);
         Gimbal_SetEnabled(1U);
     } else if (g_missionId == 8U) {
-        /* Task8：只运行 JY61 yaw 姿态保持，不启动视觉和底盘。 */
+        /* Task8：独立测试完整姿态环，默认打开角速度前馈。 */
         MotorEnable_SetGimbal(1U);
         GimbalAttitude_Start();
+        GimbalAttitude_SetFeedForwardEnabled(1U);
     }
 }
 

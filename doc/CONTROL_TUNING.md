@@ -58,8 +58,9 @@ speedCommand = clamp(speedFF + KpQ1024 * stepError / 1024)
 
 `turnGate=0` 时前馈被硬置零，角度反馈仍然工作；只有上层确认检测到转弯后才设为
 1。这里的“检测到”应当使用 S5/S6/S7 直角窗口确认后形成的转弯状态，不能使用
-`grayMask != 0`，因为直线循迹时灰度同样非零。Task8 和每次姿态环启动默认
-`turnGate=0`；本版本仍未把姿态环接入 Task4。
+`grayMask != 0`，因为直线循迹时灰度同样非零。通用姿态环和 Task5 启动默认
+`turnGate=0`，Task8 入口会显式改为 `turnGate=1`，用于独立测试完整姿态环；
+本版本仍未把姿态环接入 Task4。
 
 当前实际编译值以 `config/control_config.h` 和 Task5 `gshow` 为准；在线修改只保留
 在 RAM 中。无论 `Kff` 设为多少，`turnGate=0` 时都不会产生角速度前馈。
