@@ -11,6 +11,8 @@
 #define OLED_I2C_BUS_CLEAR_PULSES    (9U)
 #define OLED_I2C_BUS_CLEAR_WAIT_COUNT (10000U)
 #define OLED_I2C_BUS_CLEAR_DELAY_CYCLES (320U)
+#define OLED_I2C_PACKET_MAX_BYTES    (8U)
+#define OLED_I2C_PACKET_DATA_BYTES   (OLED_I2C_PACKET_MAX_BYTES - 1U)
 #define OLED_I2C_LINE_PINS \
     (GPIO_OLED_SDA_PIN | GPIO_OLED_SCL_PIN)
 #define OLED_I2C_ERROR_STATUS        (DL_I2C_CONTROLLER_STATUS_ERROR | \
@@ -23,7 +25,7 @@ static uint8_t g_oledInitActive;
 static uint8_t g_oledRecoverActive;
 static uint8_t g_oledAddress = OLED_I2C_PRIMARY_ADDRESS;
 
-static uint8_t OLED_InitAtAddress(uint8_t address);
+static uint8_t OLED_InitAtAddress(uint8_t address, uint8_t clearDisplay);
 
 /*
  * 作用：给 I2C bus clear 提供很短的 GPIO 时序间隔。
@@ -244,9 +246,9 @@ uint8_t OLED_TryRecover(void)
     if (recovered != 0U) {
         g_oledError = 0U;
         if (g_oledInitActive == 0U) {
-            recovered = OLED_InitAtAddress(OLED_I2C_PRIMARY_ADDRESS);
+            recovered = OLED_InitAtAddress(OLED_I2C_PRIMARY_ADDRESS, 0U);
             if (recovered == 0U) {
-                recovered = OLED_InitAtAddress(OLED_I2C_FALLBACK_ADDRESS);
+                recovered = OLED_InitAtAddress(OLED_I2C_FALLBACK_ADDRESS, 0U);
             }
         }
     }
@@ -287,57 +289,59 @@ void OLED_DisplayTurn(u8 i)
 }
 
 /*
- * 作用：只尝试发送一次 OLED 字节，不在内部递归恢复。
- * 使用场景：OLED_WR_Byte 的正常发送和恢复后的单次重试。
+ * 作用：在 8 字节硬件 FIFO 内发送一个完整 OLED I2C 数据包。
+ * 使用场景：单字节命令和 OLED_Refresh 的批量显存发送。
  */
-static uint8_t OLED_WriteByteOnce(uint8_t dat, uint8_t mode)
+static uint8_t OLED_WritePacketOnce(const uint8_t *data, uint8_t length)
 {
-    uint8_t txData[2];
-
-    if (g_oledError != 0U) {
+    if ((g_oledError != 0U) || (data == NULL) || (length == 0U) ||
+        (length > OLED_I2C_PACKET_MAX_BYTES)) {
         return 0U;
     }
-    
-    // 控制字节: 0x00为命令, 0x40为数据
-    txData[0] = mode ? 0x40 : 0x00; 
-    txData[1] = dat;
 
-    // 1. 等待 I2C 彻底空闲，带超时保护
     if (!OLED_WaitStatus(DL_I2C_CONTROLLER_STATUS_IDLE,
         DL_I2C_CONTROLLER_STATUS_IDLE)) {
         return 0U;
     }
-    
-    // 2. 将 2 个字节填入发送 FIFO
-    if (DL_I2C_fillControllerTXFIFO(OLED_INST, txData, 2) != 2U) {
+
+    if (DL_I2C_fillControllerTXFIFO(OLED_INST, data, length) != length) {
         OLED_SetError();
         return 0U;
     }
-    
-    // 3. 启动传输
-    DL_I2C_startControllerTransfer(OLED_INST, g_oledAddress, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-    
-    // 4. 等待 I2C 回到空闲状态，代表本次传输结束
+
+    DL_I2C_startControllerTransfer(OLED_INST, g_oledAddress,
+        DL_I2C_CONTROLLER_DIRECTION_TX, length);
     return OLED_WaitTransferDone();
+}
+
+/* 作用：数据包失败时有限恢复一次，并重试同一个包。 */
+static uint8_t OLED_WritePacket(const uint8_t *data, uint8_t length)
+{
+    if (g_oledError != 0U) {
+        return 0U;
+    }
+
+    if (OLED_WritePacketOnce(data, length) != 0U) {
+        return 1U;
+    }
+
+    if (g_oledRecoverActive != 0U) {
+        return 0U;
+    }
+
+    if (OLED_TryRecover() != 0U) {
+        return OLED_WritePacketOnce(data, length);
+    }
+    return 0U;
 }
 
 void OLED_WR_Byte(uint8_t dat, uint8_t mode)
 {
-    if (g_oledError != 0U) {
-        return;
-    }
+    uint8_t packet[2];
 
-    if (OLED_WriteByteOnce(dat, mode) != 0U) {
-        return;
-    }
-
-    if (g_oledRecoverActive != 0U) {
-        return;
-    }
-
-    if (OLED_TryRecover() != 0U) {
-        (void)OLED_WriteByteOnce(dat, mode);
-    }
+    packet[0] = (mode != 0U) ? 0x40U : 0x00U;
+    packet[1] = dat;
+    (void)OLED_WritePacket(packet, (uint8_t)sizeof(packet));
 }
 
 //开启OLED显示 
@@ -359,23 +363,43 @@ void OLED_DisPlay_Off(void)
 //更新显存到OLED	
 void OLED_Refresh(void)
 {
-	u8 i,n;
+    uint8_t commandPacket[4];
+    uint8_t dataPacket[OLED_I2C_PACKET_MAX_BYTES];
+    uint8_t page;
+    uint8_t column;
+    uint8_t count;
+
     if (g_oledError != 0U) {
         return;
     }
-	for(i=0;i<8;i++)
-	{
-	   OLED_WR_Byte(0xb0+i,OLED_CMD); //设置行起始地址
-	   OLED_WR_Byte(0x00,OLED_CMD);   //设置低列起始地址
-	   OLED_WR_Byte(0x10,OLED_CMD);   //设置高列起始地址
-	   for(n=0;n<128;n++)
-       {
-         if (g_oledError != 0U) {
-             return;
-         }
-		 OLED_WR_Byte(OLED_GRAM[n][i],OLED_DATA);
-       }
-	}
+
+    commandPacket[0] = 0x00U;
+    commandPacket[2] = 0x00U;
+    commandPacket[3] = 0x10U;
+    dataPacket[0] = 0x40U;
+
+    for (page = 0U; page < 8U; ++page) {
+        commandPacket[1] = (uint8_t)(0xB0U + page);
+        if (OLED_WritePacket(commandPacket,
+            (uint8_t)sizeof(commandPacket)) == 0U) {
+            return;
+        }
+
+        column = 0U;
+        while (column < OLED_WIDTH) {
+            count = (uint8_t)(OLED_WIDTH - column);
+            if (count > OLED_I2C_PACKET_DATA_BYTES) {
+                count = OLED_I2C_PACKET_DATA_BYTES;
+            }
+            for (uint8_t index = 0U; index < count; ++index) {
+                dataPacket[index + 1U] = OLED_GRAM[column + index][page];
+            }
+            if (OLED_WritePacket(dataPacket, (uint8_t)(count + 1U)) == 0U) {
+                return;
+            }
+            column = (uint8_t)(column + count);
+        }
+    }
 }
 
 //清屏函数
@@ -600,9 +624,10 @@ void OLED_ShowPicture(u8 x0,u8 y0,u8 x1,u8 y1,u8 BMP[])
 	}
 }
 
-//OLED的初始化
-void OLED_Init(void)
+/* 按指定地址初始化控制器；运行时恢复时可保留软件显存。 */
+static uint8_t OLED_InitAtAddress(uint8_t address, uint8_t clearDisplay)
 {
+    g_oledAddress = address;
     g_oledInitActive = 1U;
 	// 4针OLED没有RST引脚，直接延时等待屏幕内部RC电路上电复位完成
 	delay_ms(100);
@@ -636,17 +661,15 @@ void OLED_Init(void)
 	OLED_WR_Byte(0xA4,OLED_CMD);// Disable Entire Display On (0xa4/0xa5)
 	OLED_WR_Byte(0xA6,OLED_CMD);// Disable Inverse Display On (0xa6/a7) 
 	OLED_WR_Byte(0xAF,OLED_CMD);
-	OLED_Clear();
+    if ((clearDisplay != 0U) && (g_oledError == 0U)) {
+        OLED_Clear();
+    }
     g_oledInitActive = 0U;
+    return (g_oledError == 0U) ? 1U : 0U;
 }
 
-/*
- * 作用：指定一个 I2C 地址重新跑 OLED 初始化。
- * 使用场景：恢复流程先试常见 0x3C，失败再试部分模块使用的 0x3D。
- */
-static uint8_t OLED_InitAtAddress(uint8_t address)
+//OLED的初始化
+void OLED_Init(void)
 {
-    g_oledAddress = address;
-    OLED_Init();
-    return (g_oledError == 0U) ? 1U : 0U;
+    (void)OLED_InitAtAddress(g_oledAddress, 1U);
 }

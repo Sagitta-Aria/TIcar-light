@@ -33,11 +33,40 @@
 #define BOARD_BOOT_LINE_STEP        (12U)
 
 static uint32_t g_boardErrors;
+static uint32_t g_boardResetCause;
 
 #if CAR_RECOVERY_SAFE_BUILD
 static void Board_RecoveryUartInit(void);
 static void Board_RecoveryUartSendAll(const char *text);
 static uint8_t Board_RecoveryUartSendByte(UART_Regs *uart, uint8_t data);
+#endif
+
+#if CAR_ENABLE_LOG_UART
+/* 作用：输出上一次复位原因，区分WWDT、CPU锁死、掉电和普通复位。 */
+static void Board_LogResetCause(void)
+{
+    LOG_HEX32("reset cause raw=", g_boardResetCause);
+    switch ((DL_SYSCTL_RESET_CAUSE)g_boardResetCause) {
+    case DL_SYSCTL_RESET_CAUSE_SYSRST_WWDT0_VIOLATION:
+        LOG_LINE("reset cause: WWDT0 SYSRST");
+        break;
+    case DL_SYSCTL_RESET_CAUSE_SYSRST_CPU_LOCKUP_VIOLATION:
+        LOG_LINE("reset cause: CPU LOCKUP");
+        break;
+    case DL_SYSCTL_RESET_CAUSE_BOR_SUPPLY_FAILURE:
+        LOG_LINE("reset cause: BOR SUPPLY");
+        break;
+    case DL_SYSCTL_RESET_CAUSE_POR_EXTERNAL_NRST:
+        LOG_LINE("reset cause: POR NRST");
+        break;
+    case DL_SYSCTL_RESET_CAUSE_BOOTRST_EXTERNAL_NRST:
+        LOG_LINE("reset cause: BOOT NRST");
+        break;
+    default:
+        LOG_LINE("reset cause: other");
+        break;
+    }
+}
 #endif
 
 /* 作用：清除已经恢复的板级错误位。 */
@@ -305,6 +334,11 @@ uint32_t Board_GetErrors(void)
     return g_boardErrors;
 }
 
+uint32_t Board_GetResetCause(void)
+{
+    return g_boardResetCause;
+}
+
 uint8_t Board_HasFatalError(void)  //有致命错误返回 1，没有返回 0
 {
     return ((g_boardErrors & BOARD_FATAL_ERROR_MASK) != 0U) ? 1U : 0U;
@@ -320,6 +354,8 @@ uint8_t Board_IsOledAvailable(void)
 
 void Board_Init(void)
 {
+    /* RSTCAUSE可能被后续启动代码读取，必须在任何外设初始化前先锁存。 */
+    g_boardResetCause = (uint32_t)DL_SYSCTL_getResetCause();
     g_boardErrors = BOARD_ERROR_NONE;
 
 #if CAR_RECOVERY_SAFE_BUILD
@@ -394,6 +430,7 @@ void Board_Init(void)
 #if CAR_ENABLE_LOG_UART
     SYSCFG_DL_LogUart_init();
     LogUart_Init();
+    Board_LogResetCause();
     Board_BootProbe("after log uart init");
     LOG_LINE("board uart: log/exchange ok");
     LOG_U32("clock mclk hz=", CPUCLK_FREQ);
@@ -473,7 +510,7 @@ void Board_Init(void)
  * 显示规则：PA14 慢闪表示主循环存活；PA14 快闪表示普通错误；PA14 常亮表示致命错误。
  * 说明：只有 CAR_ENABLE_PA14_DEBUG_LED 为 1 时才真正驱动 PA14。
  */
-void Board_Task(void)
+uint8_t Board_Task(void)
 {
     static uint32_t signalCounter;
     static uint32_t errorCounter;
@@ -485,7 +522,7 @@ void Board_Task(void)
     DL_GPIO_togglePins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
     Board_RecoveryUartSendAll(BOARD_RECOVERY_UART_TEXT);
-    return;
+    return 0U;
 #endif
 
     /* 运行时 I2C 错误先同步为板级状态；这里只读取一个错误标志。 */
@@ -495,7 +532,7 @@ void Board_Task(void)
 #if CAR_ENABLE_PA14_DEBUG_LED
         DL_GPIO_setPins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
-        return;
+        return 0U;
     }
 
     if (g_boardErrors != BOARD_ERROR_NONE) {
@@ -503,7 +540,9 @@ void Board_Task(void)
             ++oledRecoverTicks;
             if (oledRecoverTicks >= BOARD_OLED_RECOVER_PERIOD_TICKS) {
                 oledRecoverTicks = 0U;
-                (void)Board_TryRecoverOled();
+                if (Board_TryRecoverOled() != 0U) {
+                    return 1U;
+                }
             }
         } else {
             oledRecoverTicks = 0U;
@@ -526,4 +565,5 @@ void Board_Task(void)
 #endif
         }
     }
+    return 0U;
 }

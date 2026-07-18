@@ -16,12 +16,11 @@
 static CarState g_carState = CAR_STATE_INIT;
 static uint8_t g_missionId;
 static uint8_t g_mission1LapCount = 1U;
+static uint8_t g_mission2Distance;
 static uint8_t g_mission3Distance;
+static uint8_t g_mission7Distance;
 static CarChassisDriveMode g_mission6DriveMode;
 static uint16_t g_mission6DriveSpeed;
-static CarChassisDriveMode g_mission7DriveMode;
-static uint16_t g_mission7DriveSpeed;
-static int32_t g_mission7RightEncoderBase;
 static CarMission4Stage g_mission4Stage = CAR_MISSION4_STAGE_IDLE;
 static uint32_t g_mission4Flag;
 static uint32_t g_mission4LastVisionFrame;
@@ -52,14 +51,12 @@ static MissionGimbalPrepStage g_missionGimbalPrepStage;
 #define MISSION_GIMBAL_PREP_YAW_STEPS   (2000U)
 #define MISSION_GIMBAL_PREP_YAW_SPEED_SPS (5000U)
 #define MISSION_GIMBAL_PREP_WAIT_MS     (500U)
-#define MISSION4_GIMBAL_YAW_RATIO_SCALE (1000L)
 #define MISSION_GIMBAL_PREP_WAIT_TICKS \
     ((MISSION_GIMBAL_PREP_WAIT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
         CAR_APP_LOOP_DELAY_MS)
 
 typedef struct {
     uint32_t yawSteps;
-    int16_t yawRatioX1000;
     uint16_t yawSpeedSps;
     uint16_t yawAccelStepSps;
     uint16_t yawDecelStepSps;
@@ -68,21 +65,18 @@ typedef struct {
 static const Mission4YawConfig g_mission4YawConfigs[3] = {
     {
         (uint32_t)CAR_MISSION4_GIMBAL_NEAR_YAW_STEPS,
-        (int16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_RATIO_X1000,
         (uint16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_SPEED_SPS,
         (uint16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_ACCEL_STEP_SPS,
         (uint16_t)CAR_MISSION4_GIMBAL_NEAR_YAW_DECEL_STEP_SPS
     },
     {
         (uint32_t)CAR_MISSION4_GIMBAL_MID_YAW_STEPS,
-        (int16_t)CAR_MISSION4_GIMBAL_MID_YAW_RATIO_X1000,
         (uint16_t)CAR_MISSION4_GIMBAL_MID_YAW_SPEED_SPS,
         (uint16_t)CAR_MISSION4_GIMBAL_MID_YAW_ACCEL_STEP_SPS,
         (uint16_t)CAR_MISSION4_GIMBAL_MID_YAW_DECEL_STEP_SPS
     },
     {
         (uint32_t)CAR_MISSION4_GIMBAL_FAR_YAW_STEPS,
-        (int16_t)CAR_MISSION4_GIMBAL_FAR_YAW_RATIO_X1000,
         (uint16_t)CAR_MISSION4_GIMBAL_FAR_YAW_SPEED_SPS,
         (uint16_t)CAR_MISSION4_GIMBAL_FAR_YAW_ACCEL_STEP_SPS,
         (uint16_t)CAR_MISSION4_GIMBAL_FAR_YAW_DECEL_STEP_SPS
@@ -239,7 +233,7 @@ static uint8_t StateMachine_ClampMission1LapCount(uint8_t lapCount)
     return lapCount;
 }
 
-static uint8_t StateMachine_ClampMission3Distance(uint8_t distance)
+static uint8_t StateMachine_ClampGimbalDistance(uint8_t distance)
 {
     if (distance > (uint8_t)STATICCONFIG_DISTANCE_FAR) {
         return (uint8_t)STATICCONFIG_DISTANCE_NEAR;
@@ -292,25 +286,6 @@ static void StateMachine_StartMission4Line(void)
     g_mission4Stage = CAR_MISSION4_STAGE_LINE;
 }
 
-static uint16_t StateMachine_AbsMotorCommand(int16_t command)
-{
-    return (command < 0) ? (uint16_t)(-(int32_t)command) : (uint16_t)command;
-}
-
-static uint16_t StateMachine_GetMission4ChassisSpeed(void)
-{
-    uint32_t leftSpeed = StateMachine_AbsMotorCommand(
-        Motor_GetCommand(MOTOR_CHASSIS_LEFT));
-    uint32_t rightSpeed = StateMachine_AbsMotorCommand(
-        Motor_GetCommand(MOTOR_CHASSIS_RIGHT));
-    uint32_t avgSpeed = (leftSpeed + rightSpeed) / 2U;
-
-    if (avgSpeed > (uint32_t)CHASSIS_TARGET_LIMIT_CPS) {
-        return (uint16_t)CHASSIS_TARGET_LIMIT_CPS;
-    }
-    return (uint16_t)avgSpeed;
-}
-
 static int16_t StateMachine_ClampMission4YawCommand(int32_t command)
 {
     if (command > (int32_t)CAR_STEPPER_SPEED_MAX_SPS) {
@@ -324,13 +299,8 @@ static int16_t StateMachine_ClampMission4YawCommand(int32_t command)
 
 static int16_t StateMachine_GetMission4YawBaseCommand(void)
 {
-    const Mission4YawConfig *config =
-        StateMachine_GetMission4YawConfig(g_mission4Flag);
-    int32_t command = ((int32_t)StateMachine_GetMission4ChassisSpeed() *
-        (int32_t)config->yawRatioX1000) /
-        MISSION4_GIMBAL_YAW_RATIO_SCALE;
-
-    return StateMachine_ClampMission4YawCommand(command);
+    return StateMachine_ClampMission4YawCommand(
+        (int32_t)CAR_MISSION4_GIMBAL_YAW_BASE_SPEED_SPS);
 }
 
 static int16_t StateMachine_GetMission4YawTurnCommand(int16_t baseCommand)
@@ -526,8 +496,10 @@ static void StateMachine_EnterMission(void)
     if (g_missionId == 1U) {
         MotorNoYaw_Start();
     } else if (g_missionId == 2U) {
-        /* Task2：固定使用第 1 套云台参数，直接开启视觉输入和云台闭环。 */
-        StaticConfig_SetActiveTask(STATICCONFIG_TASK_NEAR_CENTER);
+        /* Task2：按菜单选择近/中/远，直接开启中心点视觉闭环。 */
+        StaticConfig_SetActiveByDistanceMode(
+            (StaticConfigDistance)g_mission2Distance,
+            STATICCONFIG_MODE_CENTER);
         Vision_Start();
         MotorEnable_SetGimbal(1U);
         Gimbal_SetTarget(0, 0);
@@ -556,16 +528,14 @@ static void StateMachine_EnterMission(void)
             EncoderMotor_SetOpenLoopPwm(pwm, pwm);
         }
     } else if (g_missionId == 7U) {
-        /* Task7 counts only the right-wheel movement made after this start. */
-        g_mission7RightEncoderBase =
-            Motor_GetStepCount(MOTOR_CHASSIS_RIGHT);
-        if (g_mission7DriveMode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) {
-            Motion_SetChassisPeriodCommand(0,
-                (int16_t)g_mission7DriveSpeed);
-        } else {
-            EncoderMotor_SetOpenLoopPwm(0,
-                StateMachine_DrivePercentToPwm(g_mission7DriveSpeed));
-        }
+        /* Task7：按菜单选择近/中/远，直接追踪视觉帧中的圆点误差。 */
+        StaticConfig_SetActiveByDistanceMode(
+            (StaticConfigDistance)g_mission7Distance,
+            STATICCONFIG_MODE_CIRCLE);
+        Vision_Start();
+        MotorEnable_SetGimbal(1U);
+        Gimbal_SetTarget(0, 0);
+        Gimbal_SetEnabled(1U);
     }
 }
 
@@ -595,20 +565,15 @@ void StateMachine_Init(void)
 {
     g_carState = CAR_STATE_INIT;
     g_missionId = 0U;
+    g_mission2Distance = (uint8_t)STATICCONFIG_DISTANCE_NEAR;
     g_mission3Distance = (uint8_t)STATICCONFIG_DISTANCE_NEAR;
+    g_mission7Distance = (uint8_t)STATICCONFIG_DISTANCE_NEAR;
     g_mission6DriveMode = (CHASSIS_TASK6_DEFAULT_CLOSED_LOOP != 0U) ?
         CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
     g_mission6DriveSpeed = (g_mission6DriveMode ==
         CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
         (uint16_t)CHASSIS_TASK6_CLOSED_SPEED_DEFAULT :
         (uint16_t)CHASSIS_TASK6_OPEN_SPEED_DEFAULT;
-    g_mission7DriveMode = (CHASSIS_TASK7_DEFAULT_CLOSED_LOOP != 0U) ?
-        CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
-    g_mission7DriveSpeed = (g_mission7DriveMode ==
-        CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
-        (uint16_t)CHASSIS_TASK7_CLOSED_SPEED_DEFAULT :
-        (uint16_t)CHASSIS_TASK7_OPEN_SPEED_DEFAULT;
-    g_mission7RightEncoderBase = 0;
     StateMachine_Enter(CAR_STATE_MENU);
 }
 
@@ -659,14 +624,6 @@ void StateMachine_Task(void)
 
         if (g_missionId == 4U) {
             StateMachine_TaskMission4();
-            break;
-        }
-
-        if (g_missionId == 7U) {
-            if (StateMachine_GetMission7EncoderCounts() >=
-                (uint32_t)CHASSIS_TASK7_ENCODER_TARGET_COUNTS) {
-                StateMachine_Enter(CAR_STATE_FINISHED);
-            }
             break;
         }
 
@@ -773,14 +730,34 @@ uint8_t StateMachine_GetMission1LapCount(void)
     return g_mission1LapCount;
 }
 
+void StateMachine_SetMission2Distance(uint8_t distance)
+{
+    g_mission2Distance = StateMachine_ClampGimbalDistance(distance);
+}
+
+uint8_t StateMachine_GetMission2Distance(void)
+{
+    return g_mission2Distance;
+}
+
 void StateMachine_SetMission3Distance(uint8_t distance)
 {
-    g_mission3Distance = StateMachine_ClampMission3Distance(distance);
+    g_mission3Distance = StateMachine_ClampGimbalDistance(distance);
 }
 
 uint8_t StateMachine_GetMission3Distance(void)
 {
     return g_mission3Distance;
+}
+
+void StateMachine_SetMission7Distance(uint8_t distance)
+{
+    g_mission7Distance = StateMachine_ClampGimbalDistance(distance);
+}
+
+uint8_t StateMachine_GetMission7Distance(void)
+{
+    return g_mission7Distance;
 }
 
 void StateMachine_SetMissionDriveConfig(uint8_t missionId,
@@ -792,9 +769,6 @@ void StateMachine_SetMissionDriveConfig(uint8_t missionId,
     if (missionId == 6U) {
         g_mission6DriveMode = mode;
         g_mission6DriveSpeed = speed;
-    } else if (missionId == 7U) {
-        g_mission7DriveMode = mode;
-        g_mission7DriveSpeed = speed;
     }
 }
 
@@ -802,9 +776,6 @@ CarChassisDriveMode StateMachine_GetMissionDriveMode(uint8_t missionId)
 {
     if (missionId == 6U) {
         return g_mission6DriveMode;
-    }
-    if (missionId == 7U) {
-        return g_mission7DriveMode;
     }
     return CAR_CHASSIS_DRIVE_OPEN_LOOP;
 }
@@ -814,17 +785,7 @@ uint16_t StateMachine_GetMissionDriveSpeed(uint8_t missionId)
     if (missionId == 6U) {
         return g_mission6DriveSpeed;
     }
-    if (missionId == 7U) {
-        return g_mission7DriveSpeed;
-    }
     return 0U;
-}
-
-uint32_t StateMachine_GetMission7EncoderCounts(void)
-{
-    return StateMachine_AbsStepDelta(
-        Motor_GetStepCount(MOTOR_CHASSIS_RIGHT),
-        g_mission7RightEncoderBase);
 }
 
 CarMission4Stage StateMachine_GetMission4Stage(void)

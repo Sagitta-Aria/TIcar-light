@@ -10,9 +10,10 @@ typedef enum {
 } BoardErrorCode;
 
 void Board_Init(void);
-void Board_Task(void);
+uint8_t Board_Task(void);
 void Board_ReportError(BoardErrorCode error);
 uint32_t Board_GetErrors(void);
+uint32_t Board_GetResetCause(void);
 uint8_t Board_HasFatalError(void);
 uint8_t Board_IsOledAvailable(void);
 void Board_DebugLedInit(void);

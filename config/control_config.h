@@ -48,7 +48,7 @@
 #endif
 
 /*
- * Task6/Task7 调试页速度范围。闭环单位为 count/20ms，开环单位为 PWM%。
+ * Task6 调试页速度范围。闭环单位为 count/20ms，开环单位为 PWM%。
  * 两种模式共用 10~100 的菜单刻度，K1 每次增加 10，到上限后回到 10。
  */
 #define CHASSIS_DEBUG_SPEED_MIN                (10U)
@@ -58,11 +58,6 @@
 #define CHASSIS_TASK6_DEFAULT_CLOSED_LOOP      (1U)
 #define CHASSIS_TASK6_CLOSED_SPEED_DEFAULT     (40U)
 #define CHASSIS_TASK6_OPEN_SPEED_DEFAULT       (40U)
-
-#define CHASSIS_TASK7_DEFAULT_CLOSED_LOOP      (0U)
-#define CHASSIS_TASK7_CLOSED_SPEED_DEFAULT     (40U)
-#define CHASSIS_TASK7_OPEN_SPEED_DEFAULT       (40U)
-#define CHASSIS_TASK7_ENCODER_TARGET_COUNTS    (2000U)
 
 #if ((CHASSIS_DEBUG_SPEED_MIN == 0U) || \
     (CHASSIS_DEBUG_SPEED_MIN > CHASSIS_DEBUG_SPEED_MAX) || \
@@ -77,24 +72,15 @@
 #error "CHASSIS_DEBUG_SPEED_MAX exceeds open/closed-loop limit"
 #endif
 
-#if ((CHASSIS_TASK6_DEFAULT_CLOSED_LOOP > 1U) || \
-    (CHASSIS_TASK7_DEFAULT_CLOSED_LOOP > 1U))
-#error "Task6/Task7 default mode must be 0(open) or 1(closed)"
+#if (CHASSIS_TASK6_DEFAULT_CLOSED_LOOP > 1U)
+#error "Task6 default mode must be 0(open) or 1(closed)"
 #endif
 
 #if ((CHASSIS_TASK6_CLOSED_SPEED_DEFAULT < CHASSIS_DEBUG_SPEED_MIN) || \
     (CHASSIS_TASK6_CLOSED_SPEED_DEFAULT > CHASSIS_DEBUG_SPEED_MAX) || \
     (CHASSIS_TASK6_OPEN_SPEED_DEFAULT < CHASSIS_DEBUG_SPEED_MIN) || \
-    (CHASSIS_TASK6_OPEN_SPEED_DEFAULT > CHASSIS_DEBUG_SPEED_MAX) || \
-    (CHASSIS_TASK7_CLOSED_SPEED_DEFAULT < CHASSIS_DEBUG_SPEED_MIN) || \
-    (CHASSIS_TASK7_CLOSED_SPEED_DEFAULT > CHASSIS_DEBUG_SPEED_MAX) || \
-    (CHASSIS_TASK7_OPEN_SPEED_DEFAULT < CHASSIS_DEBUG_SPEED_MIN) || \
-    (CHASSIS_TASK7_OPEN_SPEED_DEFAULT > CHASSIS_DEBUG_SPEED_MAX))
-#error "Task6/Task7 default speed is outside debug menu range"
-#endif
-
-#if (CHASSIS_TASK7_ENCODER_TARGET_COUNTS == 0U)
-#error "CHASSIS_TASK7_ENCODER_TARGET_COUNTS must be greater than 0"
+    (CHASSIS_TASK6_OPEN_SPEED_DEFAULT > CHASSIS_DEBUG_SPEED_MAX))
+#error "Task6 default speed is outside debug menu range"
 #endif
 
 /*

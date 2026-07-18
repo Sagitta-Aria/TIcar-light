@@ -17,6 +17,6 @@ void App_MissionStep(void);
 void App_CommStep(void);
 void App_GimbalStep(void);
 void App_UiStep(void);
-void App_HousekeepingStep(void);
+uint8_t App_HousekeepingStep(void);
 
 #endif

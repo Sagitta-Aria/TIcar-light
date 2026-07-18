@@ -9,7 +9,7 @@
 #include "tuning_console.h"
 
 #define MENU_TASK_COUNT       (7U)
-#define MENU_TASK3_DISTANCE_COUNT (3U)
+#define MENU_GIMBAL_DISTANCE_COUNT (3U)
 #define MENU_OLED_FONT_SIZE   (12U)
 #define MENU_MONO_START_X     (6U)
 #define MENU_MONO_START_Y     (16U)
@@ -25,10 +25,10 @@ static const char *const g_taskNames[MENU_TASK_COUNT] = {
     "Task 4",
     "Task 5 PID",
     "Task 6 Drive",
-    "Task 7 R 2000"
+    "Task 7 Circle"
 };
 
-static const char *const g_task3DistanceNames[MENU_TASK3_DISTANCE_COUNT] = {
+static const char *const g_gimbalDistanceNames[MENU_GIMBAL_DISTANCE_COUNT] = {
     "Near",
     "Mid",
     "Far"
@@ -37,23 +37,22 @@ static const char *const g_task3DistanceNames[MENU_TASK3_DISTANCE_COUNT] = {
 typedef enum {
     MENU_PAGE_MAIN = 0,
     MENU_PAGE_TASK1_LAPS,
+    MENU_PAGE_TASK2_DISTANCE,
     MENU_PAGE_TASK3_DISTANCE,
+    MENU_PAGE_TASK7_DISTANCE,
     MENU_PAGE_TASK6_MODE,
-    MENU_PAGE_TASK6_SPEED,
-    MENU_PAGE_TASK7_MODE,
-    MENU_PAGE_TASK7_SPEED
+    MENU_PAGE_TASK6_SPEED
 } MenuPage;
 
 static MenuPage g_menuPage;
 static uint8_t g_taskIndex;
 static uint8_t g_task1LapCount;
+static uint8_t g_task2Distance;
 static uint8_t g_task3Distance;
+static uint8_t g_task7Distance;
 static CarChassisDriveMode g_task6DriveMode;
 static uint16_t g_task6ClosedSpeed;
 static uint16_t g_task6OpenSpeed;
-static CarChassisDriveMode g_task7DriveMode;
-static uint16_t g_task7ClosedSpeed;
-static uint16_t g_task7OpenSpeed;
 static uint8_t g_forceRefresh;
 static uint16_t g_refreshTicks;
 static CarState g_lastState;
@@ -268,7 +267,8 @@ static void Menu_RenderTask1LapMenu(void)
     Menu_RenderLines("Task 1", optionLine, lapLine, "K2 Start");
 }
 
-static void Menu_RenderTask3DistanceMenu(void)
+static void Menu_RenderGimbalDistanceMenu(const char *title,
+    uint8_t distance)
 {
     char optionLine[MENU_LINE_SIZE];
     char distanceLine[MENU_LINE_SIZE];
@@ -278,15 +278,15 @@ static void Menu_RenderTask3DistanceMenu(void)
 
     write = optionLine;
     end = &optionLine[MENU_LINE_SIZE - 1U];
-    for (i = 0U; i < MENU_TASK3_DISTANCE_COUNT; ++i) {
-        if (i == g_task3Distance) {
+    for (i = 0U; i < MENU_GIMBAL_DISTANCE_COUNT; ++i) {
+        if (i == distance) {
             write = Menu_AppendChar(write, end, '[');
-            write = Menu_AppendText(write, end, g_task3DistanceNames[i]);
+            write = Menu_AppendText(write, end, g_gimbalDistanceNames[i]);
             write = Menu_AppendChar(write, end, ']');
         } else {
-            write = Menu_AppendText(write, end, g_task3DistanceNames[i]);
+            write = Menu_AppendText(write, end, g_gimbalDistanceNames[i]);
         }
-        if (i < (MENU_TASK3_DISTANCE_COUNT - 1U)) {
+        if (i < (MENU_GIMBAL_DISTANCE_COUNT - 1U)) {
             write = Menu_AppendChar(write, end, ' ');
         }
     }
@@ -294,26 +294,23 @@ static void Menu_RenderTask3DistanceMenu(void)
     write = distanceLine;
     end = &distanceLine[MENU_LINE_SIZE - 1U];
     write = Menu_AppendText(write, end, "Distance ");
-    (void)Menu_AppendText(write, end, g_task3DistanceNames[g_task3Distance]);
+    (void)Menu_AppendText(write, end, g_gimbalDistanceNames[distance]);
 
-    Menu_RenderLines("Task 3", optionLine, distanceLine, "K2 Start");
+    Menu_RenderLines(title, optionLine, distanceLine, "K2 Start");
 }
 
 static CarChassisDriveMode Menu_GetDriveMode(uint8_t missionId)
 {
-    return (missionId == 6U) ? g_task6DriveMode : g_task7DriveMode;
+    (void)missionId;
+    return g_task6DriveMode;
 }
 
 static uint16_t Menu_GetDriveSpeed(uint8_t missionId)
 {
     CarChassisDriveMode mode = Menu_GetDriveMode(missionId);
 
-    if (missionId == 6U) {
-        return (mode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
-            g_task6ClosedSpeed : g_task6OpenSpeed;
-    }
     return (mode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
-        g_task7ClosedSpeed : g_task7OpenSpeed;
+        g_task6ClosedSpeed : g_task6OpenSpeed;
 }
 
 static uint16_t Menu_NextDriveSpeed(uint16_t speed)
@@ -504,40 +501,6 @@ static void Menu_RenderTask6Mission(void)
     Menu_RenderLines(line0, line1, line2, line3);
 }
 
-static void Menu_RenderTask7Mission(void)
-{
-    char line0[MENU_LINE_SIZE];
-    char line1[MENU_LINE_SIZE];
-    char countLine[MENU_LINE_SIZE];
-    char remainLine[MENU_LINE_SIZE];
-    char *write;
-    char *end;
-    uint32_t encoderCounts = StateMachine_GetMission7EncoderCounts();
-    CarChassisDriveMode mode = StateMachine_GetMissionDriveMode(7U);
-
-    if (encoderCounts > (uint32_t)CHASSIS_TASK7_ENCODER_TARGET_COUNTS) {
-        encoderCounts = (uint32_t)CHASSIS_TASK7_ENCODER_TARGET_COUNTS;
-    }
-    Menu_BuildDriveTitle(line0, 7U, mode);
-    Menu_BuildDriveSetLine(line1, mode,
-        StateMachine_GetMissionDriveSpeed(7U), 1U);
-
-    write = countLine;
-    end = &countLine[MENU_LINE_SIZE - 1U];
-    write = Menu_AppendText(write, end, "Count ");
-    write = Menu_AppendUnsigned(write, end, encoderCounts);
-    write = Menu_AppendChar(write, end, '/');
-    (void)Menu_AppendUnsigned(write, end,
-        (uint32_t)CHASSIS_TASK7_ENCODER_TARGET_COUNTS);
-
-    write = remainLine;
-    end = &remainLine[MENU_LINE_SIZE - 1U];
-    write = Menu_AppendText(write, end, "Remain ");
-    (void)Menu_AppendUnsigned(write, end,
-        (uint32_t)CHASSIS_TASK7_ENCODER_TARGET_COUNTS - encoderCounts);
-    Menu_RenderLines(line0, line1, countLine, remainLine);
-}
-
 static void Menu_RenderMission(void)
 {
     char line[MENU_LINE_SIZE];
@@ -560,11 +523,6 @@ static void Menu_RenderMission(void)
 
     if (missionId == 6U) {
         Menu_RenderTask6Mission();
-        return;
-    }
-
-    if (missionId == 7U) {
-        Menu_RenderTask7Mission();
         return;
     }
 
@@ -633,16 +591,16 @@ static void Menu_RenderByState(CarState state)
     case CAR_STATE_MENU:
         if (g_menuPage == MENU_PAGE_TASK1_LAPS) {
             Menu_RenderTask1LapMenu();
+        } else if (g_menuPage == MENU_PAGE_TASK2_DISTANCE) {
+            Menu_RenderGimbalDistanceMenu("Task 2", g_task2Distance);
         } else if (g_menuPage == MENU_PAGE_TASK3_DISTANCE) {
-            Menu_RenderTask3DistanceMenu();
+            Menu_RenderGimbalDistanceMenu("Task 3", g_task3Distance);
+        } else if (g_menuPage == MENU_PAGE_TASK7_DISTANCE) {
+            Menu_RenderGimbalDistanceMenu("Task 7 Circle", g_task7Distance);
         } else if (g_menuPage == MENU_PAGE_TASK6_MODE) {
             Menu_RenderDriveModeMenu(6U);
         } else if (g_menuPage == MENU_PAGE_TASK6_SPEED) {
             Menu_RenderDriveSpeedMenu(6U);
-        } else if (g_menuPage == MENU_PAGE_TASK7_MODE) {
-            Menu_RenderDriveModeMenu(7U);
-        } else if (g_menuPage == MENU_PAGE_TASK7_SPEED) {
-            Menu_RenderDriveSpeedMenu(7U);
         } else {
             Menu_RenderTaskMenu();
         }
@@ -675,15 +633,13 @@ void Menu_Init(void)
     g_menuPage = MENU_PAGE_MAIN;
     g_taskIndex = 0U;
     g_task1LapCount = 1U;
+    g_task2Distance = 0U;
     g_task3Distance = 0U;
+    g_task7Distance = 0U;
     g_task6DriveMode = (CHASSIS_TASK6_DEFAULT_CLOSED_LOOP != 0U) ?
         CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
     g_task6ClosedSpeed = (uint16_t)CHASSIS_TASK6_CLOSED_SPEED_DEFAULT;
     g_task6OpenSpeed = (uint16_t)CHASSIS_TASK6_OPEN_SPEED_DEFAULT;
-    g_task7DriveMode = (CHASSIS_TASK7_DEFAULT_CLOSED_LOOP != 0U) ?
-        CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
-    g_task7ClosedSpeed = (uint16_t)CHASSIS_TASK7_CLOSED_SPEED_DEFAULT;
-    g_task7OpenSpeed = (uint16_t)CHASSIS_TASK7_OPEN_SPEED_DEFAULT;
     g_forceRefresh = 1U;
     g_refreshTicks = CAR_MENU_REFRESH_TICKS;
     g_lastState = CAR_STATE_INIT;
@@ -696,9 +652,15 @@ void Menu_Next(void)
         if (g_task1LapCount > 5U) {
             g_task1LapCount = 1U;
         }
+    } else if (g_menuPage == MENU_PAGE_TASK2_DISTANCE) {
+        g_task2Distance = (uint8_t)((g_task2Distance + 1U) %
+            MENU_GIMBAL_DISTANCE_COUNT);
     } else if (g_menuPage == MENU_PAGE_TASK3_DISTANCE) {
         g_task3Distance = (uint8_t)((g_task3Distance + 1U) %
-            MENU_TASK3_DISTANCE_COUNT);
+            MENU_GIMBAL_DISTANCE_COUNT);
+    } else if (g_menuPage == MENU_PAGE_TASK7_DISTANCE) {
+        g_task7Distance = (uint8_t)((g_task7Distance + 1U) %
+            MENU_GIMBAL_DISTANCE_COUNT);
     } else if (g_menuPage == MENU_PAGE_TASK6_MODE) {
         g_task6DriveMode = (g_task6DriveMode ==
             CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
@@ -708,16 +670,6 @@ void Menu_Next(void)
             g_task6ClosedSpeed = Menu_NextDriveSpeed(g_task6ClosedSpeed);
         } else {
             g_task6OpenSpeed = Menu_NextDriveSpeed(g_task6OpenSpeed);
-        }
-    } else if (g_menuPage == MENU_PAGE_TASK7_MODE) {
-        g_task7DriveMode = (g_task7DriveMode ==
-            CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
-            CAR_CHASSIS_DRIVE_OPEN_LOOP : CAR_CHASSIS_DRIVE_CLOSED_LOOP;
-    } else if (g_menuPage == MENU_PAGE_TASK7_SPEED) {
-        if (g_task7DriveMode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) {
-            g_task7ClosedSpeed = Menu_NextDriveSpeed(g_task7ClosedSpeed);
-        } else {
-            g_task7OpenSpeed = Menu_NextDriveSpeed(g_task7OpenSpeed);
         }
     } else {
         g_taskIndex = (uint8_t)((g_taskIndex + 1U) % MENU_TASK_COUNT);
@@ -731,9 +683,17 @@ CarEvent Menu_Confirm(void)
         StateMachine_SetMission1LapCount(g_task1LapCount);
         return CAR_EVENT_MISSION_1_START;
     }
+    if (g_menuPage == MENU_PAGE_TASK2_DISTANCE) {
+        StateMachine_SetMission2Distance(g_task2Distance);
+        return CAR_EVENT_MISSION_2_START;
+    }
     if (g_menuPage == MENU_PAGE_TASK3_DISTANCE) {
         StateMachine_SetMission3Distance(g_task3Distance);
         return CAR_EVENT_MISSION_3_START;
+    }
+    if (g_menuPage == MENU_PAGE_TASK7_DISTANCE) {
+        StateMachine_SetMission7Distance(g_task7Distance);
+        return CAR_EVENT_MISSION_7_START;
     }
     if (g_menuPage == MENU_PAGE_TASK6_MODE) {
         g_menuPage = MENU_PAGE_TASK6_SPEED;
@@ -745,24 +705,15 @@ CarEvent Menu_Confirm(void)
             Menu_GetDriveSpeed(6U));
         return CAR_EVENT_MISSION_6_START;
     }
-    if (g_menuPage == MENU_PAGE_TASK7_MODE) {
-        g_menuPage = MENU_PAGE_TASK7_SPEED;
-        Menu_RequestRefresh();
-        return CAR_EVENT_NONE;
-    }
-    if (g_menuPage == MENU_PAGE_TASK7_SPEED) {
-        StateMachine_SetMissionDriveConfig(7U, g_task7DriveMode,
-            Menu_GetDriveSpeed(7U));
-        return CAR_EVENT_MISSION_7_START;
-    }
-
     switch (g_taskIndex) {
     case 0U:
         g_menuPage = MENU_PAGE_TASK1_LAPS;
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
     case 1U:
-        return CAR_EVENT_MISSION_2_START;
+        g_menuPage = MENU_PAGE_TASK2_DISTANCE;
+        Menu_RequestRefresh();
+        return CAR_EVENT_NONE;
     case 2U:
         g_menuPage = MENU_PAGE_TASK3_DISTANCE;
         Menu_RequestRefresh();
@@ -776,7 +727,7 @@ CarEvent Menu_Confirm(void)
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
     case 6U:
-        g_menuPage = MENU_PAGE_TASK7_MODE;
+        g_menuPage = MENU_PAGE_TASK7_DISTANCE;
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
     default:
@@ -792,8 +743,6 @@ uint8_t Menu_Back(void)
 
     if (g_menuPage == MENU_PAGE_TASK6_SPEED) {
         g_menuPage = MENU_PAGE_TASK6_MODE;
-    } else if (g_menuPage == MENU_PAGE_TASK7_SPEED) {
-        g_menuPage = MENU_PAGE_TASK7_MODE;
     } else {
         g_menuPage = MENU_PAGE_MAIN;
     }
@@ -833,4 +782,7 @@ void Menu_Task(CarState state)
     g_forceRefresh = 0U;
     g_refreshTicks = 0U;
     Menu_RenderByState(state);
+    if (Board_IsOledAvailable() == 0U) {
+        g_forceRefresh = 1U;
+    }
 }

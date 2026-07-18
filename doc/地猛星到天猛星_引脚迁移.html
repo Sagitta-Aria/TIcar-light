@@ -882,7 +882,7 @@
     <div class="header-inner">
       <div class="title-block">
         <h1>地猛星 → 天猛星引脚迁移</h1>
-        <p class="subtitle">m0-light-rtos · MSPM0G3507 48P → 64P · 源码核对版 2026-07-15</p>
+        <p class="subtitle">m0-light-rtos · MSPM0G3507 48P → 64P · 外设扩展版 2026-07-17</p>
       </div>
       <div class="header-actions">
         <div class="segmented" role="group" aria-label="迁移模式">
@@ -912,7 +912,7 @@
       </div>
       <div class="metric">
         <span id="metricChange" class="metric-value">0</span>
-        <span class="metric-label">建议重分配</span>
+        <span class="metric-label">已重分配</span>
       </div>
       <div class="metric">
         <span id="metricRisk" class="metric-value">0</span>
@@ -934,7 +934,7 @@
           <select id="statusFilter" class="field" aria-label="按迁移状态筛选">
             <option value="all">全部状态</option>
             <option value="keep">保持</option>
-            <option value="change">需改</option>
+            <option value="change">已重分配</option>
             <option value="warning">注意</option>
             <option value="danger">冲突</option>
             <option value="board">板内</option>
@@ -1019,6 +1019,7 @@
       </div>
 
       <div class="legend" aria-label="排针状态图例">
+        <span class="legend-item"><span class="legend-swatch" style="background:#f7f9f9"></span>未分配/未纳入方案</span>
         <span class="legend-item"><span class="legend-swatch" style="background:#dff2e9"></span>保持</span>
         <span class="legend-item"><span class="legend-swatch" style="background:#dceefa"></span>重分配</span>
         <span class="legend-item"><span class="legend-swatch" style="background:#ffebc3"></span>注意</span>
@@ -1043,7 +1044,9 @@
           <ol>
             <li>断开电机动力电源，只保留逻辑电源。</li>
             <li>确认两块板共地，核对 3.3V 与 VBUS_5V，禁止互相短接。</li>
-            <li>先验证 OLED、K1/K2、Type-C 日志、K230 UART。</li>
+            <li>先验证 OLED、K1-K5、Type-C 日志、K230 UART 和 JQ8400 UART1。</li>
+            <li>确保 Flash CS 与 IMU CS 均为高电平，再验证 LSM6DSRTR 的 WHO_AM_I=0x6B 和 INT1。</li>
+            <li>继电器先不接负载，只确认 PB27 上电保持关闭且控制极性正确。</li>
             <li>架空车轮，使用 Task5 低 PWM 分别检查方向与编码器符号。</li>
             <li>重新标定左右轮 start、FF、Kp/Ki；旧参数不能直接视为实车最终值。</li>
             <li>最后接地验证 Task1，再逐项验证 Task2-Task4。</li>
@@ -1076,6 +1079,46 @@
           <strong>PA21 / PA23</strong>
           <p>天猛星把它们标为 VREF-/VREF+ 网络。推荐方案把两路电机方向迁到 PA29/PA30，避免后续启用外部参考电压时产生冲突。</p>
         </div>
+        <div class="power-row">
+          <strong>SPI1 / LSM6DSRTR</strong>
+          <p>IMU 与板载 Flash 共享 PB7/POCI、PB8/PICO、PB9/SCK；Flash 保持 PB6/CS0，IMU 单独使用 PB14/CS。任一器件通信时，另一个 CS 必须保持高电平。</p>
+        </div>
+        <div class="power-row">
+          <strong>PB27 / 继电器</strong>
+          <p>PB27 只接继电器模块控制输入或外部三极管/MOSFET 驱动级，上电默认关闭。禁止 GPIO 直接驱动继电器线圈，线圈侧需要续流保护。</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-band" aria-labelledby="imuWiringTitle">
+      <div class="section-heading">
+        <div>
+          <h2 id="imuWiringTitle">逐飞 IMU660RB 接线</h2>
+          <p>模块核心为 LSM6DSR，下面按逐飞模块背面丝印记录 SPI 接法；推荐使用 3.3V 供电。</p>
+        </div>
+      </div>
+      <div class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>模块端子</th>
+              <th>SPI功能</th>
+              <th>天猛星连接</th>
+              <th>排针位置</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="pin-code">VCC</span></td><td>电源</td><td><span class="pin-code">3.3V</span></td><td>U21-22/38 或 U22-22/38</td><td>模块标称支持 3.3-5V；与 MCU 同电平时优先使用 3.3V。</td></tr>
+            <tr><td><span class="pin-code">GND</span></td><td>电源地</td><td><span class="pin-code">GND</span></td><td>任一数字 GND</td><td>必须与天猛星主控共地。</td></tr>
+            <tr><td><span class="pin-code">SCL/SPC</span></td><td>SPI SCK</td><td><span class="pin-code">PB9</span></td><td>U21-28</td><td>SPI1 SCLK，与板载 Flash 共享时钟。</td></tr>
+            <tr><td><span class="pin-code">SDA/SDI</span></td><td>SPI MOSI</td><td><span class="pin-code">PB8</span></td><td>U21-27</td><td>SPI1 PICO，MCU 输出、IMU 输入。</td></tr>
+            <tr><td><span class="pin-code">SA0/SDO</span></td><td>SPI MISO</td><td><span class="pin-code">PB7</span></td><td>U21-26</td><td>SPI1 POCI，IMU 输出、MCU 输入。</td></tr>
+            <tr><td><span class="pin-code">CS</span></td><td>SPI片选</td><td><span class="pin-code">PB14</span></td><td>U22-34</td><td>IMU 独立低有效片选；不能连接板载 Flash 的 PB6/CS0。</td></tr>
+            <tr><td><span class="pin-code">INT1</span></td><td>中断1</td><td><span class="pin-code">PB17</span></td><td>U22-15</td><td>数据就绪，上升沿 GPIO 中断。</td></tr>
+            <tr><td><span class="pin-code">INT2</span></td><td>中断2</td><td><span class="pin-code">PB12</span></td><td>U21-16</td><td>第二中断输入，替代原计划的 K6。</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -1181,8 +1224,11 @@
         PB2: "U21-15", PB3: "U21-17", PB4: "U21-8", PB5: "U21-10",
         PB6: "U21-25 / SPI Flash", PB7: "U21-26 / SPI Flash",
         PB8: "U21-27 / SPI Flash", PB9: "U21-28 / SPI Flash",
-        PB18: "U22-16", PB19: "U22-17", PB20: "U22-9", PB22: "U22-26 / 板载 LED",
-        PB24: "U22-8", NRST: "U22-35"
+        PB10: "U22-31 / LCD RESET", PB11: "U22-33 / LCD DC", PB12: "U21-16",
+        PB13: "U21-18", PB14: "U22-34 / LCD CS", PB15: "U21-11", PB16: "U21-13",
+        PB17: "U22-15", PB18: "U22-16", PB19: "U22-17", PB20: "U22-9",
+        PB21: "U22-25 / 板载 KEY", PB22: "U22-26 / 板载 LED", PB24: "U22-8",
+        PB25: "U22-7", PB26: "U21-32 / LCD BLK", PB27: "U21-33", NRST: "U22-35"
       };
 
       var mappings = [
@@ -1192,8 +1238,8 @@
         {id:"left_enc_a", category:"底盘", signal:"左编码器 A", sourcePin:"PB19", sourceLoc:"H3-9", directPin:"PB19", targetPin:"PB19", note:"GPIOB 双边沿中断路径保持。", files:["config/pin_map.h","hardware/encoder_motor.c"]},
         {id:"left_enc_b", category:"底盘", signal:"左编码器 B", sourcePin:"PB20", sourceLoc:"H3-8", directPin:"PB20", targetPin:"PB20", note:"GPIOB 双边沿中断路径保持。", files:["config/pin_map.h","hardware/encoder_motor.c"]},
         {id:"right_pwm", category:"底盘", signal:"右轮 PWMB · TIMA0 CCP3", sourcePin:"PA12", sourceLoc:"H5-17", directPin:"PA12", targetPin:"PA12", note:"TIMA0 CCP3 与 PINCM34 均可保持。", files:["config/pin_map.h","hardware/encoder_motor.c"]},
-        {id:"right_in1", category:"底盘", signal:"右轮 BIN1", sourcePin:"PA21", sourceLoc:"H5-8", directPin:"PA21", targetPin:"PA29", directRisk:"warning", note:"推荐换到新增 PA29，避开天猛星 VREF- 网络；仍位于 GPIOA。", files:["config/pin_map.h","doc/PINOUT.md"]},
-        {id:"right_in2", category:"底盘", signal:"右轮 BIN2", sourcePin:"PA23", sourceLoc:"H5-6", directPin:"PA23", targetPin:"PA30", directRisk:"danger", note:"推荐换到新增 PA30，避开天猛星 VREF+ 三选一网络；GPIOA 批量初始化代码无需换端口。", files:["config/pin_map.h","doc/PINOUT.md"]},
+        {id:"right_in1", category:"底盘", signal:"右轮 BIN1", sourcePin:"PA21", sourceLoc:"H5-8", directPin:"PA21", targetPin:"PA29", directRisk:"warning", note:"已确认迁到 PA29，避开天猛星 VREF- 网络；仍位于 GPIOA。", files:["config/pin_map.h","doc/PINOUT.md"]},
+        {id:"right_in2", category:"底盘", signal:"右轮 BIN2", sourcePin:"PA23", sourceLoc:"H5-6", directPin:"PA23", targetPin:"PA30", directRisk:"danger", note:"已确认迁到 PA30，避开天猛星 VREF+ 三选一网络；GPIOA 批量初始化代码无需换端口。", files:["config/pin_map.h","doc/PINOUT.md"]},
         {id:"right_enc_a", category:"底盘", signal:"右编码器 A", sourcePin:"PA13", sourceLoc:"H5-16", directPin:"PA13", targetPin:"PA13", note:"GPIOA 双边沿中断与诊断计数保持。", files:["config/pin_map.h","hardware/encoder_motor.c"]},
         {id:"right_enc_b", category:"底盘", signal:"右编码器 B", sourcePin:"PB24", sourceLoc:"H3-7", directPin:"PB24", targetPin:"PB24", note:"GPIOB 双边沿中断与诊断计数保持。", files:["config/pin_map.h","hardware/encoder_motor.c"]},
 
@@ -1206,14 +1252,26 @@
         {id:"oled_scl", category:"显示", signal:"OLED I2C0 SCL", sourcePin:"PA1", sourceLoc:"H3-2", directPin:"PA1", targetPin:"PA1", note:"天猛星 PA1 已有 4.7kΩ 上拉到 3.3V。", files:["generated/ti_msp_dl_config.h","hardware/oled.c"]},
         {id:"key_1", category:"输入", signal:"K1", sourcePin:"PB9", sourceLoc:"H5-9", directPin:"PB9", targetPin:"PB0", directRisk:"danger", note:"PB9 在天猛星连接板载 SPI Flash SCK；推荐换到新增 PB0。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/key.c"]},
         {id:"key_2", category:"输入", signal:"K2", sourcePin:"PB8", sourceLoc:"H5-10", directPin:"PB8", targetPin:"PB1", directRisk:"danger", note:"PB8 在天猛星连接板载 SPI Flash PICO；推荐换到新增 PB1。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/key.c"]},
+        {id:"key_3", category:"输入", signal:"K3 · 天猛星板载 KEY", sourcePin:"新增", sourceLoc:"天猛星板载", directPin:"PB21", targetPin:"PB21", note:"按下接地，按低电平有效和内部上拉配置。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/key.c"]},
+        {id:"key_4", category:"输入", signal:"K4 · 外接按键", sourcePin:"新增", sourceLoc:"外接", directPin:"PB10", targetPin:"PB10", note:"按下接地，内部上拉；当前未使用 LCD RESET 接口。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/key.c"]},
+        {id:"key_5", category:"输入", signal:"K5 · 外接按键", sourcePin:"新增", sourceLoc:"外接", directPin:"PB11", targetPin:"PB11", note:"按下接地，内部上拉；当前未使用 LCD DC 接口。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/key.c"]},
         {id:"status_led", category:"状态", signal:"系统状态 LED", sourcePin:"PA14", sourceLoc:"H5-15", directPin:"PA14", targetPin:"PB22", directRisk:"warning", note:"PA14 直迁只会驱动排针；改为 PB22 可直接使用天猛星板载 LED，且同为高电平点亮。", files:["system/board.c","config/board_config.h","doc/PINOUT.md"]},
+        {id:"relay_ctrl", category:"输出", signal:"继电器 CTRL", sourcePin:"新增", sourceLoc:"外接驱动模块", directPin:"PB27", targetPin:"PB27", note:"普通 GPIO 输出，上电默认关闭；只接模块控制端或外部驱动级，不能直接带线圈。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/relay.c"]},
 
         {id:"log_tx", category:"通信", signal:"Type-C 日志 UART0 TX", sourcePin:"PA10", sourceLoc:"板载 CH340", directPin:"PA10", targetPin:"PA10", boardOnly:true, note:"两块板均由 CH340 接到 PA10，115200 配置保持。", files:["generated/ti_msp_dl_config.h","hardware/log_uart.c"]},
         {id:"log_rx", category:"通信", signal:"Type-C 日志 UART0 RX", sourcePin:"PA11", sourceLoc:"板载 CH340", directPin:"PA11", targetPin:"PA11", boardOnly:true, note:"两块板均由 CH340 接到 PA11，115200 配置保持。", files:["generated/ti_msp_dl_config.h","hardware/log_uart.c"]},
         {id:"vision_tx", category:"通信", signal:"K230 / Exchange UART3 TX", sourcePin:"PB2", sourceLoc:"H3-12", directPin:"PB2", targetPin:"PB2", note:"UART3 TX 与 PINCM15 保持。", files:["generated/ti_msp_dl_config.h","hardware/link.c"]},
         {id:"vision_rx", category:"通信", signal:"K230 / Exchange UART3 RX", sourcePin:"PB3", sourceLoc:"H3-13", directPin:"PB3", targetPin:"PB3", note:"UART3 RX 与 PINCM16 保持。", files:["generated/ti_msp_dl_config.h","hardware/link.c"]},
-        {id:"jy61p_tx", category:"通信", signal:"JY61P UART1 TX", sourcePin:"PB6", sourceLoc:"H3-16", directPin:"PB6", targetPin:"PB4", directRisk:"danger", note:"PB6 是天猛星 SPI Flash CS；保留 JY61P 时改到新增 PB4/UART1_TX。比赛流程不用 JY61P 时也可禁用 UART1。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/jy61p.c"]},
-        {id:"jy61p_rx", category:"通信", signal:"JY61P UART1 RX", sourcePin:"PB7", sourceLoc:"H3-17", directPin:"PB7", targetPin:"PB5", directRisk:"danger", note:"PB7 是天猛星 SPI Flash POCI；保留 JY61P 时改到新增 PB5/UART1_RX。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/jy61p.c"]},
+        {id:"jq8400_tx", category:"通信", signal:"JQ8400 UART1 TX", sourcePin:"PB6", sourceLoc:"H3-16", directPin:"PB6", targetPin:"PB4", directRisk:"danger", note:"停用 JY61P，UART1 改接语音模块；PB4 为 MCU TX，应连接 JQ8400 RX。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/jq8400.c"]},
+        {id:"jq8400_rx", category:"通信", signal:"JQ8400 UART1 RX", sourcePin:"PB7", sourceLoc:"H3-17", directPin:"PB7", targetPin:"PB5", directRisk:"danger", note:"PB5 为 MCU RX，连接 JQ8400 TX；若模块只需要单向命令，可不接此线但仍保留管脚。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/jq8400.c"]},
+
+        {id:"flash_cs", category:"SPI", signal:"板载 Flash CS0", sourcePin:"PB6", sourceLoc:"天猛星板载 U24", directPin:"PB6", targetPin:"PB6", boardOnly:true, note:"保留板载 Flash 独立片选；访问 IMU 时必须保持高电平。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c"]},
+        {id:"imu_poci", category:"SPI", signal:"LSM6DSRTR SA0/SDO · SPI1 POCI/MISO", sourcePin:"新增", sourceLoc:"逐飞 IMU660RB", directPin:"PB7", targetPin:"PB7", directRisk:"warning", note:"与板载 Flash 共用 SPI1 POCI；模块按 3.3V 逻辑供电。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/imu660rb.c"]},
+        {id:"imu_pico", category:"SPI", signal:"LSM6DSRTR SDA/SDI · SPI1 PICO/MOSI", sourcePin:"新增", sourceLoc:"逐飞 IMU660RB", directPin:"PB8", targetPin:"PB8", directRisk:"warning", note:"与板载 Flash 共用 SPI1 PICO；通信期间只拉低目标器件 CS。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/imu660rb.c"]},
+        {id:"imu_sclk", category:"SPI", signal:"LSM6DSRTR SCL/SPC · SPI1 SCK", sourcePin:"新增", sourceLoc:"逐飞 IMU660RB", directPin:"PB9", targetPin:"PB9", directRisk:"warning", note:"与板载 Flash 共用 SPI1 SCK；LSM6DSR 使用 Motorola mode 3。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/imu660rb.c"]},
+        {id:"imu_cs", category:"SPI", signal:"LSM6DSRTR CS", sourcePin:"新增", sourceLoc:"逐飞 IMU660RB", directPin:"PB14", targetPin:"PB14", note:"IMU 独立低有效片选；当前不使用 LCD CS，初始化后默认拉高。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/imu660rb.c"]},
+        {id:"imu_int1", category:"SPI", signal:"LSM6DSRTR INT1", sourcePin:"新增", sourceLoc:"逐飞 IMU660RB", directPin:"PB17", targetPin:"PB17", note:"数据就绪输入，建议上升沿 GPIO 中断；与云台 PB18 相邻但不冲突。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/imu660rb.c"]},
+        {id:"imu_int2", category:"SPI", signal:"LSM6DSRTR INT2", sourcePin:"新增", sourceLoc:"逐飞 IMU660RB", directPin:"PB12", targetPin:"PB12", note:"第二中断输入，使用原 K6 的 PB12/PINCM29；UART3 继续使用 PB2/PB3。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/imu660rb.c"]},
 
         {id:"gray_1", category:"灰度", signal:"灰度 S1", sourcePin:"PA15", sourceLoc:"H5-14", directPin:"PA15", targetPin:"PA15", note:"数字输入与 PINCM37 保持。", files:["config/pin_map.h","hardware/gray.c"]},
         {id:"gray_2", category:"灰度", signal:"灰度 S2", sourcePin:"PA16", sourceLoc:"H5-13", directPin:"PA16", targetPin:"PA16", note:"数字输入与 PINCM38 保持。", files:["config/pin_map.h","hardware/gray.c"]},
@@ -1238,11 +1296,27 @@
         },
         {
           file:"generated/ti_msp_dl_config.h / .c",
-          text:"K1/K2：PB9/PB8 → PB0/PB1（PINCM12/13）；JY61P UART1：PB6/PB7 → PB4/PB5（PINCM17/18，UART1_TX/RX）。"
+          text:"K1/K2：PB9/PB8 → PB0/PB1（PINCM12/13）；新增 K3-K5：PB21/PB10/PB11（PINCM49/27/28）；停用 JY61P，JQ8400 UART1 使用 PB4/PB5（PINCM17/18）。"
         },
         {
           file:"hardware/key.c",
-          text:"DL_GPIO_setLowerPinsPolarity() 的边沿掩码从 DIO9/DIO8 改为 DIO0/DIO1；GPIOB 中断号保持不变。"
+          text:"把按键扫描与边沿掩码扩展到 K1-K5；PB21/PB10/PB11 均按低有效和内部上拉处理，保留独立消抖状态。"
+        },
+        {
+          file:"hardware/imu660rb.c / SPI1",
+          text:"逐飞 LSM6DSRTR：SCL/SPC 接 PB9 SCK，SDA/SDI 接 PB8 PICO，SA0/SDO 接 PB7 POCI（PINCM26/25/24）；PB14/PINCM31 为独立低有效 CS，PB17/PINCM43 为 INT1，PB12/PINCM29 为 INT2。VCC 接 3.3V并与主控共地。"
+        },
+        {
+          file:"hardware/jq8400.c / hardware/jy61p.c",
+          text:"停用 JY61P 解析与航向辅助，UART1 改为 JQ8400 命令通道；若只发送语音命令，PB5 RX 可保留但不必接线。"
+        },
+        {
+          file:"hardware/relay.c",
+          text:"新增 PB27/PINCM58 继电器控制，GPIO 初始化前先写入关闭电平再切换输出；实际有效电平由继电器模块确认。"
+        },
+        {
+          file:"硬件互斥",
+          text:"K4/PB10、K5/PB11 和 IMU CS/PB14 占用了 H8 LCD 的 RESET、DC、CS 信号，因此不能同时连接 H8 SPI LCD；PA0/PA1 的 I2C OLED 不受影响。"
         },
         {
           file:"system/board.c",
@@ -1254,7 +1328,7 @@
         },
         {
           file:"doc/PINOUT.md / README.md",
-          text:"更新目标板、排针位置、两路电机方向、K1/K2、状态 LED 与 JY61P 接线；记录 PB6-PB9 为天猛星板载 SPI Flash 总线。"
+          text:"更新目标板、排针位置、PA29/PA30 电机方向、K1-K5、状态 LED、JQ8400、LSM6DSRTR 和继电器接线；记录 PB7-PB9 为 Flash/IMU 共享 SPI1 总线。"
         },
         {
           file:"构建验证",
@@ -1314,7 +1388,7 @@
       function statusLabel(status) {
         return {
           keep: "保持",
-          change: "需改",
+          change: "已重分配",
           warning: "注意",
           danger: "冲突",
           board: "板内"
@@ -1475,10 +1549,10 @@
 
         if (mode === "recommended") {
           elements.description.textContent =
-            "共享管脚尽量保持，7 个信号使用天猛星新增 GPIO 规避 VREF 与板载 SPI Flash，并接管板载 LED。";
+            "保留底盘、云台、OLED 和视觉主链路；新增 LSM6DSRTR、JQ8400、K3-K5 与继电器，并用独立片选安全共享板载 SPI1 总线。";
         } else {
           elements.description.textContent =
-            "保持所有 PAx/PBx 名称时，固件改动最少，但 PB6-PB9 会与板载 Flash 冲突，PA21/PA23 和状态灯也需要人工处理。";
+            "保持旧 PAx/PBx 名称时，JQ8400 和 K1/K2 会与板载 Flash 冲突，PA21/PA23 和状态灯也需要人工处理。";
         }
       }
 
@@ -1492,7 +1566,8 @@
         } else {
           elements.changeSummary.textContent = "同名直迁不要求改多数宏，但必须先处理以下硬件冲突。";
           elements.changeList.innerHTML = [
-            ["PB6-PB9", "JY61P 与 K1/K2 直接落到天猛星板载 SPI Flash 的 CS/POCI/PICO/SCK 网络；应拆除 U24、断开对应连接，或改用推荐模式。"],
+            ["PB6-PB9", "JQ8400 与 K1/K2 若按旧引脚直迁，会落到天猛星板载 SPI Flash 网络；JQ8400 应改到 PB4/PB5，K1/K2 应改到 PB0/PB1。"],
+            ["SPI1 共享", "LSM6DSRTR 只共享 PB7/PB8/PB9 数据和时钟，必须使用 PB14 独立 CS；PB6 继续作为 Flash CS，不能接到 IMU CS。"],
             ["PA21/PA23", "分别位于 VREF-/VREF+ 网络。必须确认 R4-R7 的实际焊接和外部参考电压状态，不能与电机方向信号同时驱动。"],
             ["PA14", "代码仍可输出到 U22-11，但天猛星板载用户 LED 在 PB22，不会看到原来的板载状态灯效果。"],
             ["构建验证", "即使只改接线，也应 Clean Build，并在电机断电、车轮架空条件下逐项验证。"]

@@ -20,14 +20,39 @@
 #define CAR_ENABLE_PA14_DEBUG_LED      (1U)
 
 /*
+ * UI任务和硬件看门狗。
+ *
+ * ENABLE：1 创建监督任务并启动WWDT0；0 不创建任务，也不启动WWDT0。
+ * TASK_PRIORITY：FreeRTOS优先级，当前范围0~6；默认5，低于底盘/云台控制6。
+ * TASK_STACK_WORDS：栈深度单位是32位word；96 word等于384字节。
+ * CHECK_PERIOD_MS：监督任务读取一次UI心跳的周期。
+ * UI_TIMEOUT_MS：UI心跳多久不变化后停止喂狗；内部按CHECK周期向上取整。
+ *
+ * WWDT0使用32768Hz LFCLK，硬件超时公式为：
+ * divider * 2^period_bits / 32768 秒。
+ * 默认DIVIDE_8 + 12_BITS约1秒；10_BITS约250ms；15_BITS约8秒。
+ * 最坏复位时间约为UI_TIMEOUT_MS向上取整后的时间，再加一个WWDT硬件周期。
+ *
+ * 注意：MSPM0G3507的WWDT0违规触发SYSRST，不是整板断电，也不会切断
+ * 四线OLED的VCC。OLED控制器自身锁死时，MCU复位后屏幕仍可能不亮。
+ */
+#define CAR_ENABLE_UI_WATCHDOG         (1U)  /* 1：启用UI监督任务和WWDT0；0：全部关闭。 */
+#define CAR_WATCHDOG_TASK_PRIORITY     (5U)  /* 监督任务优先级，低于优先级6的控制任务。 */
+#define CAR_WATCHDOG_TASK_STACK_WORDS  (96U) /* 任务栈深度，96个32位word即384字节。 */
+#define CAR_WATCHDOG_CHECK_PERIOD_MS   (250U) /* 每250ms检查一次UI心跳。 */
+#define CAR_WATCHDOG_UI_TIMEOUT_MS     (2000U) /* UI连续2秒无心跳后停止喂狗。 */
+#define CAR_WATCHDOG_HW_CLOCK_DIVIDER  DL_WWDT_CLOCK_DIVIDE_8 /* LFCLK进行8分频。 */
+#define CAR_WATCHDOG_HW_TIMER_PERIOD   DL_WWDT_TIMER_PERIOD_12_BITS /* 2^12计数，当前约1秒。 */
+
+/*
  * 两路云台步进轴公共参数。
  * 速度单位为 step/s；TIMG0 每 20us 调度一次 STEP，方向由 DIR 引脚单独控制。
  */
-#define CAR_STEPPER_SPEED_MAX_SPS      (10000U) /* yaw/pitch 目标速度绝对值上限。 */
+#define CAR_STEPPER_SPEED_MAX_SPS      (1000U) /* yaw/pitch 目标速度绝对值上限。 */
 #define CAR_STEPPER_PULSE_HIGH_TICKS   (1U)     /* STEP 高电平保持 1 个 TIMG0 tick，即 20us。 */
 #define CAR_STEPPER_RAMP_PERIOD_MS     (1U)     /* 每 1ms 更新一次当前 STEP 速度。 */
-#define CAR_STEPPER_ACCEL_STEP_SPS     (500U)   /* 每次斜坡更新最多增加 500 step/s。 */
-#define CAR_STEPPER_DECEL_STEP_SPS     (500U)   /* 每次斜坡更新最多减少 500 step/s。 */
+#define CAR_STEPPER_ACCEL_STEP_SPS     (3U)   /* 每次斜坡更新最多增加 500 step/s。 */
+#define CAR_STEPPER_DECEL_STEP_SPS     (3U)   /* 每次斜坡更新最多减少 500 step/s。 */
 
 /* 云台 EN 无可用 MCU 引脚；该值只记录状态机默认请求，硬件必须固定有效。 */
 #define CAR_GIMBAL_ENABLE_DEFAULT_ON   (0U)     /* 0：上电默认不启用云台闭环；1：默认请求启用。 */
@@ -43,10 +68,10 @@
  * 云台闭环参数。
  * pitch 没有回零开关，软限位以每次启用闭环时的位置作为相对 0 度。
  */
-#define CAR_GIMBAL_YAW_REVERSE         (1U)  /* 1：反转 yaw 控制方向；0：保持计算方向。 */
+#define CAR_GIMBAL_YAW_REVERSE         (0U)  /* 1：反转 yaw 控制方向；0：保持计算方向。 */
 #define CAR_GIMBAL_PITCH_REVERSE       (0U)  /* 1：反转 pitch 控制方向；0：保持计算方向。 */
-#define CAR_GIMBAL_VISION_TIMEOUT_TICKS (50U) /* 视觉数据 50ms 未更新时停止视觉追点。 */
-#define CAR_GIMBAL_PITCH_LIMIT_STEPS   (400U) /* pitch 相对启用位置允许正负 400 STEP。 */
+#define CAR_GIMBAL_VISION_TIMEOUT_TICKS (60U) /* 视觉数据 50ms 未更新时停止视觉追点。 */
+#define CAR_GIMBAL_PITCH_LIMIT_STEPS   (200U) /* pitch 相对启用位置允许正负 400 STEP。 */
 
 /*
  * Motor NO YAW：Task1 编码底盘循迹参数。
@@ -59,7 +84,8 @@
 #define CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_COUNTS_PER_PERIOD    (-40)  /* 差速目标数值下限。 */
 #define CAR_MOTOR_NO_YAW_MAX_LINE_SPEED_COUNTS_PER_PERIOD    (0)  /* 差速目标数值上限。 */
 #define CAR_MOTOR_NO_YAW_LINE_DEADBAND         (0)     /* 误差死区：灰度误差小于该值时按居中处理。 */
-#define CAR_MOTOR_NO_YAW_TURN_GAIN             (5)     /* 修正量 = 灰度误差 * gain / 100。 */
+#define CAR_MOTOR_NO_YAW_TURN_GAIN             (5)     /* P修正 = 当前灰度误差 * gain / 100。 */
+#define CAR_MOTOR_NO_YAW_TURN_D_GAIN           (1)     /* D修正 = 相邻20ms误差差值 * gain / 100。 */
 #define CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD       (40U)  /* 普通循迹最大差速修正。 */
 #define CAR_MOTOR_NO_YAW_TURN_SPEED_COUNTS_PER_PERIOD        (-25)  /* 右直角强转时左轮目标。 */
 #define CAR_MOTOR_NO_YAW_TURN_NEAR_SPEED_COUNTS_PER_PERIOD   (-20)  /* 接近粗略参考角时左轮目标。 */
@@ -90,6 +116,7 @@
 #define CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_CPS    (5000U)  /* Task4 单轮目标速度上限。 */
 #define CAR_MOTOR_NO_YAW_TASK4_LINE_DEADBAND         (30)      /* Task4 灰度误差死区。 */
 #define CAR_MOTOR_NO_YAW_TASK4_TURN_GAIN             (100)     /* Task4 差速修正强度。 */
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_D_GAIN           (0)       /* Task4 D增益，0表示暂不启用。 */
 #define CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_CPS        (800U)    /* Task4 最大差速修正量。 */
 #define CAR_MOTOR_NO_YAW_TASK4_TURN_SPEED_CPS        (2800U)   /* Task4 右直角强转外轮速度。 */
 #define CAR_MOTOR_NO_YAW_TASK4_TURN_NEAR_SPEED_CPS   (1250U)   /* Task4 接近粗略参考角时外轮速度，25 count/20ms。 */
@@ -105,28 +132,27 @@
 /*
  * Task4 云台 yaw 随动参数。
  * NEAR/MID/FAR 三组会按 Task4 当前位置切换：近/中/远/中循环。
+ * BASE_SPEED_SPS：循迹期间固定的 yaw 基础速度；负数可反向。
  * STEPS：每次强转开始后，yaw 额外跟随的 STEP 数，方向由速度符号决定。
- * RATIO_X1000：yaw 基础速度 = 当前底盘平均速度 * ratio / 1000；负数可反向。
  * SPEED_SPS：强转期间单独使用的 yaw 目标速度。
  * ACCEL/DECEL_STEP_SPS：强转期间只给 yaw 轴使用的更快斜坡；DECEL 是降速斜坡。
  */
-#define CAR_MISSION4_GIMBAL_NEAR_YAW_STEPS          (3000U)
-#define CAR_MISSION4_GIMBAL_NEAR_YAW_RATIO_X1000    (300)
-#define CAR_MISSION4_GIMBAL_NEAR_YAW_SPEED_SPS      (6000U)
-#define CAR_MISSION4_GIMBAL_NEAR_YAW_ACCEL_STEP_SPS (3000U)  //加速度
-#define CAR_MISSION4_GIMBAL_NEAR_YAW_DECEL_STEP_SPS (3000U)
+#define CAR_MISSION4_GIMBAL_YAW_BASE_SPEED_SPS       (0)
 
-#define CAR_MISSION4_GIMBAL_MID_YAW_STEPS           (3000U)
-#define CAR_MISSION4_GIMBAL_MID_YAW_RATIO_X1000     (150)
-#define CAR_MISSION4_GIMBAL_MID_YAW_SPEED_SPS       (6000U)
-#define CAR_MISSION4_GIMBAL_MID_YAW_ACCEL_STEP_SPS  (3000U)
-#define CAR_MISSION4_GIMBAL_MID_YAW_DECEL_STEP_SPS  (3000U)
+#define CAR_MISSION4_GIMBAL_NEAR_YAW_STEPS          (0U)  //强转步数
+#define CAR_MISSION4_GIMBAL_NEAR_YAW_SPEED_SPS      (400)
+#define CAR_MISSION4_GIMBAL_NEAR_YAW_ACCEL_STEP_SPS (3U)  //加速度
+#define CAR_MISSION4_GIMBAL_NEAR_YAW_DECEL_STEP_SPS (3U)
 
-#define CAR_MISSION4_GIMBAL_FAR_YAW_STEPS           (3000U)
-#define CAR_MISSION4_GIMBAL_FAR_YAW_RATIO_X1000     (300)
-#define CAR_MISSION4_GIMBAL_FAR_YAW_SPEED_SPS       (6000U)
-#define CAR_MISSION4_GIMBAL_FAR_YAW_ACCEL_STEP_SPS  (3000U)
-#define CAR_MISSION4_GIMBAL_FAR_YAW_DECEL_STEP_SPS  (3000U)
+#define CAR_MISSION4_GIMBAL_MID_YAW_STEPS           (0U)
+#define CAR_MISSION4_GIMBAL_MID_YAW_SPEED_SPS       (400U)
+#define CAR_MISSION4_GIMBAL_MID_YAW_ACCEL_STEP_SPS  (3U)
+#define CAR_MISSION4_GIMBAL_MID_YAW_DECEL_STEP_SPS  (3U)
+
+#define CAR_MISSION4_GIMBAL_FAR_YAW_STEPS           (0U)
+#define CAR_MISSION4_GIMBAL_FAR_YAW_SPEED_SPS       (400U)
+#define CAR_MISSION4_GIMBAL_FAR_YAW_ACCEL_STEP_SPS  (3U)
+#define CAR_MISSION4_GIMBAL_FAR_YAW_DECEL_STEP_SPS  (3U)
 
 /* 主循环和 OLED 菜单刷新节拍。 */
 #define CAR_APP_LOOP_DELAY_MS          (1U)

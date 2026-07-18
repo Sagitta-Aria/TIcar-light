@@ -24,6 +24,9 @@
 
 #define RTOS_HOUSEKEEPING_PERIOD_MS      (20U)
 #define RTOS_DYNAMIC_UI_PERIOD_MS        (100U)
+#define RTOS_UI_STALE_CHECKS             \
+    ((CAR_WATCHDOG_UI_TIMEOUT_MS + CAR_WATCHDOG_CHECK_PERIOD_MS - 1U) / \
+        CAR_WATCHDOG_CHECK_PERIOD_MS)
 
 #define RTOS_CONTROL_STACK_WORDS         (128U)
 #define RTOS_GIMBAL_STACK_WORDS          (192U)
@@ -35,6 +38,9 @@
 static StaticTask_t g_controlTaskControl;
 static StaticTask_t g_gimbalTaskControl;
 static StaticTask_t g_inputTaskControl;
+#if CAR_ENABLE_UI_WATCHDOG
+static StaticTask_t g_watchdogTaskControl;
+#endif
 static StaticTask_t g_missionTaskControl;
 static StaticTask_t g_commTaskControl;
 static StaticTask_t g_uiTaskControl;
@@ -42,6 +48,9 @@ static StaticTask_t g_uiTaskControl;
 static StackType_t g_controlTaskStack[RTOS_CONTROL_STACK_WORDS];
 static StackType_t g_gimbalTaskStack[RTOS_GIMBAL_STACK_WORDS];
 static StackType_t g_inputTaskStack[RTOS_INPUT_STACK_WORDS];
+#if CAR_ENABLE_UI_WATCHDOG
+static StackType_t g_watchdogTaskStack[CAR_WATCHDOG_TASK_STACK_WORDS];
+#endif
 static StackType_t g_missionTaskStack[RTOS_MISSION_STACK_WORDS];
 static StackType_t g_commTaskStack[RTOS_COMM_STACK_WORDS];
 static StackType_t g_uiTaskStack[RTOS_UI_STACK_WORDS];
@@ -58,11 +67,64 @@ static TaskHandle_t g_uiTaskHandle;
 static uint8_t g_controlTaskSuspended;
 static uint8_t g_gimbalTaskSuspended;
 static volatile uint8_t g_controlScheduleReset;
+#if CAR_ENABLE_UI_WATCHDOG
+static volatile uint32_t g_uiHeartbeat;
+#endif
 
 static volatile const char *g_assertFile;
 static volatile int g_assertLine;
 
 static uint8_t RtosApp_ShouldSuspendControl(void);
+
+#if CAR_ENABLE_UI_WATCHDOG
+#if (CAR_WATCHDOG_CHECK_PERIOD_MS == 0U)
+#error "CAR_WATCHDOG_CHECK_PERIOD_MS must be greater than zero"
+#endif
+
+/* WWDT0分频和周期由board_config.h配置；调试暂停时同时暂停看门狗。 */
+static void RtosApp_InitWatchdog(void)
+{
+    DL_WWDT_reset(WWDT0);
+    DL_WWDT_enablePower(WWDT0);
+    delay_cycles(POWER_STARTUP_DELAY);
+    DL_WWDT_initWatchdogMode(WWDT0, CAR_WATCHDOG_HW_CLOCK_DIVIDER,
+        CAR_WATCHDOG_HW_TIMER_PERIOD, DL_WWDT_RUN_IN_SLEEP,
+        DL_WWDT_WINDOW_PERIOD_0, DL_WWDT_WINDOW_PERIOD_0);
+    DL_WWDT_setActiveWindow(WWDT0, DL_WWDT_WINDOW0);
+    DL_WWDT_setCoreHaltBehavior(WWDT0, DL_WWDT_CORE_HALT_STOP);
+    DL_WWDT_restart(WWDT0);
+}
+
+/* UI心跳达到配置超时后停止喂狗，让WWDT0复位整机。 */
+static void RtosApp_WatchdogTask(void *parameter)
+{
+    TickType_t lastWakeTime = xTaskGetTickCount();
+    uint32_t lastHeartbeat = g_uiHeartbeat;
+    uint32_t currentHeartbeat;
+    uint32_t staleChecks = 0U;
+    uint8_t healthy = 1U;
+
+    (void)parameter;
+    for (;;) {
+        (void)xTaskDelayUntil(&lastWakeTime,
+            pdMS_TO_TICKS(CAR_WATCHDOG_CHECK_PERIOD_MS));
+        currentHeartbeat = g_uiHeartbeat;
+        if (currentHeartbeat != lastHeartbeat) {
+            lastHeartbeat = currentHeartbeat;
+            staleChecks = 0U;
+        } else if (staleChecks < RTOS_UI_STALE_CHECKS) {
+            ++staleChecks;
+        }
+
+        if (staleChecks >= RTOS_UI_STALE_CHECKS) {
+            healthy = 0U;
+        }
+        if (healthy != 0U) {
+            DL_WWDT_restart(WWDT0);
+        }
+    }
+}
+#endif
 
 static TickType_t RtosApp_GetControlWaitTicks(TickType_t lastControlTime)
 {
@@ -134,19 +196,23 @@ static uint8_t RtosApp_ShouldSuspendGimbal(void)
     return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
         ((StateMachine_GetMissionId() == 1U) ||
             (StateMachine_GetMissionId() == 5U) ||
-            (StateMachine_GetMissionId() == 6U) ||
-            (StateMachine_GetMissionId() == 7U)));
+            (StateMachine_GetMissionId() == 6U)));
 }
 
 static uint8_t RtosApp_ShouldSuspendControl(void)
 {
-    return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
-        (StateMachine_GetMissionId() == 7U) &&
-        (StateMachine_GetMissionDriveMode(7U) ==
-            CAR_CHASSIS_DRIVE_OPEN_LOOP));
+    uint8_t missionId;
+
+    if (StateMachine_GetState() != CAR_STATE_MISSION) {
+        return 0U;
+    }
+
+    missionId = StateMachine_GetMissionId();
+    return (uint8_t)((missionId == 2U) || (missionId == 3U) ||
+        (missionId == 7U));
 }
 
-/* Task7 开环由硬件保持 PWM；闭环必须保留 20ms CarControl。 */
+/* Task2/3/7 是纯云台任务，运行时停止底盘控制调度。 */
 static void RtosApp_UpdateControlTaskState(void)
 {
     uint8_t shouldSuspend = RtosApp_ShouldSuspendControl();
@@ -212,8 +278,8 @@ static uint8_t RtosApp_IsMissionPeriodic(void)
         return 0U;
     }
     missionId = StateMachine_GetMissionId();
-    if ((missionId == 3U) || (missionId == 7U)) {
-        return 1U;
+    if (missionId == 3U) {
+        return (uint8_t)(StateMachine_IsMissionGimbalPrepDone() == 0U);
     }
     if ((missionId == 4U) &&
         (StateMachine_GetMission4Stage() != CAR_MISSION4_STAGE_LINE)) {
@@ -294,6 +360,9 @@ static void RtosApp_UiTask(void *parameter)
 
     (void)parameter;
     for (;;) {
+#if CAR_ENABLE_UI_WATCHDOG
+        ++g_uiHeartbeat;
+#endif
         now = xTaskGetTickCount();
         elapsed = now - lastHousekeepingTime;
         waitTicks = (elapsed >= pdMS_TO_TICKS(RTOS_HOUSEKEEPING_PERIOD_MS)) ?
@@ -306,13 +375,14 @@ static void RtosApp_UiTask(void *parameter)
         if ((now - lastHousekeepingTime) >=
             pdMS_TO_TICKS(RTOS_HOUSEKEEPING_PERIOD_MS)) {
             lastHousekeepingTime = now;
-            App_HousekeepingStep();
+            if (App_HousekeepingStep() != 0U) {
+                App_UiStep();
+            }
         }
 
         dynamicUi = (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
             ((StateMachine_GetMissionId() == 5U) ||
-                (StateMachine_GetMissionId() == 6U) ||
-                (StateMachine_GetMissionId() == 7U)));
+                (StateMachine_GetMissionId() == 6U)));
         if (dynamicUi == 0U) {
             lastDynamicUiTime = now;
         } else if ((now - lastDynamicUiTime) >=
@@ -329,6 +399,9 @@ static void RtosApp_CreateObjects(void)
     g_controlTaskSuspended = 0U;
     g_gimbalTaskSuspended = 0U;
     g_controlScheduleReset = 0U;
+#if CAR_ENABLE_UI_WATCHDOG
+    g_uiHeartbeat = 0U;
+#endif
     g_eventQueue = xQueueCreateStatic(RTOS_EVENT_QUEUE_LENGTH,
         sizeof(CarEvent), g_eventQueueStorage, &g_eventQueueControl);
     configASSERT(g_eventQueue != 0);
@@ -345,6 +418,11 @@ static void RtosApp_CreateObjects(void)
         RTOS_INPUT_STACK_WORDS, 0, RTOS_INPUT_PRIORITY,
         g_inputTaskStack, &g_inputTaskControl);
     configASSERT(g_inputTaskHandle != 0);
+#if CAR_ENABLE_UI_WATCHDOG
+    configASSERT(xTaskCreateStatic(RtosApp_WatchdogTask, "Watchdog",
+        CAR_WATCHDOG_TASK_STACK_WORDS, 0, CAR_WATCHDOG_TASK_PRIORITY,
+        g_watchdogTaskStack, &g_watchdogTaskControl) != 0);
+#endif
     g_missionTaskHandle = xTaskCreateStatic(RtosApp_MissionTask, "Mission",
         RTOS_MISSION_STACK_WORDS, 0, RTOS_MISSION_PRIORITY,
         g_missionTaskStack, &g_missionTaskControl);
@@ -361,6 +439,9 @@ static void RtosApp_CreateObjects(void)
     xTaskNotifyGive(g_missionTaskHandle);
     xTaskNotifyGive(g_gimbalTaskHandle);
     xTaskNotifyGive(g_uiTaskHandle);
+#if CAR_ENABLE_UI_WATCHDOG
+    RtosApp_InitWatchdog();
+#endif
 }
 
 static void RtosApp_NotifyTask(TaskHandle_t task)

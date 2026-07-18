@@ -37,7 +37,7 @@ typedef enum {
     CAR_MISSION4_STAGE_LINE
 } CarMission4Stage;
 
-/* Task6/Task7 底盘调试模式；开环速度单位为 PWM%，闭环为 count/控制周期。 */
+/* Task6 底盘调试模式；开环速度单位为 PWM%，闭环为 count/控制周期。 */
 typedef enum {
     CAR_CHASSIS_DRIVE_OPEN_LOOP = 0,
     CAR_CHASSIS_DRIVE_CLOSED_LOOP
@@ -73,24 +73,33 @@ void StateMachine_SetMission1LapCount(uint8_t lapCount);
 /* StateMachine_GetMission1LapCount：读取 Task 1 当前目标圈数。 */
 uint8_t StateMachine_GetMission1LapCount(void);
 
+/* StateMachine_SetMission2Distance：设置 Task 2 的打靶距离，0~2 对应近/中/远。 */
+void StateMachine_SetMission2Distance(uint8_t distance);
+
+/* StateMachine_GetMission2Distance：读取 Task 2 当前打靶距离，0~2 对应近/中/远。 */
+uint8_t StateMachine_GetMission2Distance(void);
+
 /* StateMachine_SetMission3Distance：设置 Task 3 的打靶距离，0~2 对应近/中/远。 */
 void StateMachine_SetMission3Distance(uint8_t distance);
 
 /* StateMachine_GetMission3Distance：读取 Task 3 当前打靶距离，0~2 对应近/中/远。 */
 uint8_t StateMachine_GetMission3Distance(void);
 
-/* 设置 Task6/Task7 的开闭环模式和对应速度；仅 missionId=6/7 有效。 */
+/* StateMachine_SetMission7Distance：设置 Task 7 的圆点追踪距离。 */
+void StateMachine_SetMission7Distance(uint8_t distance);
+
+/* StateMachine_GetMission7Distance：读取 Task 7 当前圆点追踪距离。 */
+uint8_t StateMachine_GetMission7Distance(void);
+
+/* 设置 Task6 的开闭环模式和对应速度；仅 missionId=6 有效。 */
 void StateMachine_SetMissionDriveConfig(uint8_t missionId,
     CarChassisDriveMode mode, uint16_t speed);
 
-/* 读取 Task6/Task7 当前选择的底盘控制模式。 */
+/* 读取 Task6 当前选择的底盘控制模式。 */
 CarChassisDriveMode StateMachine_GetMissionDriveMode(uint8_t missionId);
 
-/* 读取 Task6/Task7 当前速度；单位由控制模式决定。 */
+/* 读取 Task6 当前速度；单位由控制模式决定。 */
 uint16_t StateMachine_GetMissionDriveSpeed(uint8_t missionId);
-
-/* StateMachine_GetMission7EncoderCounts：读取 Task7 本次运行的右轮编码器增量。 */
-uint32_t StateMachine_GetMission7EncoderCounts(void);
 
 /* StateMachine_GetMission4Stage：读取 Task4 当前内部阶段。 */
 CarMission4Stage StateMachine_GetMission4Stage(void);

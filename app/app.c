@@ -1,5 +1,8 @@
 #include "app.h"
 
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "board.h"
 #include "board_config.h"
 #include "delay.h"
@@ -22,11 +25,7 @@
 #define APP_TASK2_OLED_START_Y          (16U)
 #define APP_TASK2_OLED_LINE_STEP        (12U)
 #define APP_TASK2_OLED_MAX_CHARS        (18U)
-#define APP_CAMERA_LASER_DELAY_MS       (500U)
-#define APP_COMM_SERVICE_PERIOD_MS           (5U)
-#define APP_CAMERA_LASER_DELAY_TICKS \
-    ((APP_CAMERA_LASER_DELAY_MS + APP_COMM_SERVICE_PERIOD_MS - 1U) / \
-        APP_COMM_SERVICE_PERIOD_MS)
+#define APP_CAMERA_LASER_DELAY_MS       (1000U)
 
 typedef enum {
     APP_TASK2_OLED_NONE = 0,
@@ -99,12 +98,20 @@ static uint8_t App_IsTask2GimbalRunning(void)
         (Vision_IsRunning() != 0U));
 }
 
+/* 作用：Task7 复用 Task2 快路径，但读取圆点误差参数。 */
+static uint8_t App_IsTask7GimbalRunning(void)
+{
+    return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
+        (StateMachine_GetMissionId() == 7U) &&
+        (Vision_IsRunning() != 0U));
+}
+
 static uint8_t g_appFastMissionId;
 static AppTask2OledStatus g_appTask2OledStatus;
-static uint8_t g_appTask2RectCommandSent;
+static uint8_t g_appDirectGimbalCommandSent;
 static uint8_t g_appInputHadEvent;
 static uint8_t g_appLaserMissionId;
-static uint16_t g_appLaserDelayTicks;
+static TickType_t g_appLaserDelayStartTick;
 static AppCameraLaserStage g_appLaserStage;
 
 /* 作用：进入快路径时只刷一次 OLED，避免任务已经启动但屏幕还停在菜单。 */
@@ -117,19 +124,22 @@ static void App_ShowFastMissionOnce(uint8_t missionId)
     g_appFastMissionId = missionId;
     Menu_RequestRefresh();
     Menu_Task(StateMachine_GetState());
+    if (Board_IsOledAvailable() == 0U) {
+        g_appFastMissionId = 0U;
+    }
 }
 
 static void App_ResetCameraLaserCommand(void)
 {
     g_appLaserMissionId = 0U;
-    g_appLaserDelayTicks = 0U;
+    g_appLaserDelayStartTick = 0U;
     g_appLaserStage = APP_CAMERA_LASER_IDLE;
 }
 
-/* 作用：Task2 收到第一帧有效矩形中心误差后，只向 K230 发一次 F。 */
-static void App_UpdateTask2RectangleCommand(void)
+/* 作用：Task7 收到第一帧有效视觉误差后，只向 K230 发一次 F。 */
+static void App_UpdateDirectGimbalCommand(void)
 {
-    if (g_appTask2RectCommandSent != 0U) {
+    if (g_appDirectGimbalCommandSent != 0U) {
         return;
     }
     if (Vision_HasFrame() == 0U) {
@@ -137,13 +147,15 @@ static void App_UpdateTask2RectangleCommand(void)
     }
 
     Link_SendByte((uint8_t)'F');
-    g_appTask2RectCommandSent = 1U;
+    g_appDirectGimbalCommandSent = 1U;
 }
 
-/* 作用：Task3/Task4 进入追踪后延时 500ms，向 K230 发送 F 打开激光。 */
+/* 作用：Task2/Task3/Task4 收到首帧后非阻塞等待 1s，再发送一次 F。 */
 static void App_UpdateCameraLaserCommand(uint8_t missionId)
 {
-    if ((missionId != 3U) && (missionId != 4U)) {
+    TickType_t now;
+
+    if ((missionId != 2U) && (missionId != 3U) && (missionId != 4U)) {
         return;
     }
 
@@ -153,7 +165,8 @@ static void App_UpdateCameraLaserCommand(uint8_t missionId)
         return;
     }
 
-    if (StateMachine_IsMissionGimbalPrepDone() == 0U) {
+    if ((missionId != 2U) &&
+        (StateMachine_IsMissionGimbalPrepDone() == 0U)) {
         return;
     }
 
@@ -176,7 +189,7 @@ static void App_UpdateCameraLaserCommand(uint8_t missionId)
         if (Vision_HasFrame() == 0U) {
             return;
         }
-        g_appLaserDelayTicks = 0U;
+        g_appLaserDelayStartTick = xTaskGetTickCount();
         g_appLaserStage = APP_CAMERA_LASER_TRACKING_DELAY;
         return;
     }
@@ -185,11 +198,10 @@ static void App_UpdateCameraLaserCommand(uint8_t missionId)
         return;
     }
 
-    if (g_appLaserDelayTicks < (uint16_t)APP_CAMERA_LASER_DELAY_TICKS) {
-        ++g_appLaserDelayTicks;
-        if (g_appLaserDelayTicks < (uint16_t)APP_CAMERA_LASER_DELAY_TICKS) {
-            return;
-        }
+    now = xTaskGetTickCount();
+    if ((now - g_appLaserDelayStartTick) <
+        pdMS_TO_TICKS(APP_CAMERA_LASER_DELAY_MS)) {
+        return;
     }
 
     Link_SendByte((uint8_t)'F');
@@ -227,12 +239,10 @@ static void App_ShowGimbalOledStatus(uint8_t missionId,
     char title[8];
     const char *statusText;
 
-    if (g_appTask2OledStatus == status) {
+    if (Board_IsOledAvailable() == 0U) {
         return;
     }
-    g_appTask2OledStatus = status;
-
-    if (Board_IsOledAvailable() == 0U) {
+    if (g_appTask2OledStatus == status) {
         return;
     }
 
@@ -255,6 +265,9 @@ static void App_ShowGimbalOledStatus(uint8_t missionId,
     App_ShowTask2OledLine(2U, "");
     App_ShowTask2OledLine(3U, "");
     OLED_Refresh();
+    if (Board_IsOledAvailable() != 0U) {
+        g_appTask2OledStatus = status;
+    }
 }
 
 static void App_ShowTask2OledStatus(AppTask2OledStatus status)
@@ -270,6 +283,11 @@ static void App_ShowTask3OledStatus(AppTask2OledStatus status)
 static void App_ShowTask4OledStatus(AppTask2OledStatus status)
 {
     App_ShowGimbalOledStatus(4U, status);
+}
+
+static void App_ShowTask7OledStatus(AppTask2OledStatus status)
+{
+    App_ShowGimbalOledStatus(7U, status);
 }
 
 /* 作用：Task3 打靶时走快路径，三档距离都直接追中心点。 */
@@ -293,7 +311,7 @@ static void App_ClearFastMission(void)
 {
     g_appFastMissionId = 0U;
     g_appTask2OledStatus = APP_TASK2_OLED_NONE;
-    g_appTask2RectCommandSent = 0U;
+    g_appDirectGimbalCommandSent = 0U;
     App_ResetCameraLaserCommand();
 }
 
@@ -369,12 +387,12 @@ void App_CommStep(void)
 
     Link_Task();
     if ((StateMachine_GetState() == CAR_STATE_MISSION) &&
-        (missionId == 2U)) {
-        App_UpdateTask2RectangleCommand();
+        (missionId == 7U)) {
+        App_UpdateDirectGimbalCommand();
     } else {
-        g_appTask2RectCommandSent = 0U;
+        g_appDirectGimbalCommandSent = 0U;
     }
-    if ((missionId == 3U) || (missionId == 4U)) {
+    if ((missionId == 2U) || (missionId == 3U) || (missionId == 4U)) {
         App_UpdateCameraLaserCommand(missionId);
     } else {
         App_ResetCameraLaserCommand();
@@ -407,15 +425,25 @@ void App_UiStep(void)
             App_ShowTask4OledStatus((Vision_GetFrameCount() == 0U) ?
                 APP_TASK2_OLED_WAITING : APP_TASK2_OLED_TRACKING);
         }
+    } else if (App_IsTask7GimbalRunning() != 0U) {
+        App_ShowTask7OledStatus((Vision_GetFrameCount() == 0U) ?
+            APP_TASK2_OLED_WAITING : APP_TASK2_OLED_TRACKING);
     } else {
         App_ClearFastMission();
         Menu_Task(StateMachine_GetState());
     }
 }
 
-void App_HousekeepingStep(void)
+uint8_t App_HousekeepingStep(void)
 {
-    Board_Task();
+    if (Board_Task() == 0U) {
+        return 0U;
+    }
+
+    g_appFastMissionId = 0U;
+    g_appTask2OledStatus = APP_TASK2_OLED_NONE;
+    Menu_RequestRefresh();
+    return 1U;
 }
 
 void App_Task(void)

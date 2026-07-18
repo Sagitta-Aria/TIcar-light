@@ -14,7 +14,7 @@
  * board_config.h 只保留方向、超时、pitch 限幅、测试速度等硬件/测试参数。
  */
 
-/* 距离档：后续由小车旋转角度或路线状态判断当前位置。 */
+/* 距离档：Task2/3/7由菜单选择，Task4由循迹转向次数选择。 */
 typedef enum {
     STATICCONFIG_DISTANCE_NEAR = 0,
     STATICCONFIG_DISTANCE_MID,
@@ -46,7 +46,6 @@ typedef enum {
  * 使用场景：
  * - 直接改 g_taskNearCenter/g_taskNearCircle/... 的字段来调实车。
  * - App 或路线层根据当前位置调用 StaticConfig_SetActiveTask() 切换参数。
- * - 如果按旋转角自动分段，调用 StaticConfig_UpdateByTurnAngleDeg()。
  *
  * 控制公式：
  * commandSps = (error0.1px * kp + deltaError0.1px * kd) / gainScale
@@ -58,9 +57,6 @@ typedef struct {
     /* distance/mode：这套参数所属距离档和视觉模式。 */
     StaticConfigDistance distance;
     StaticConfigMode mode;
-    /* turnAngleMin/MaxDeg：累计旋转角分段范围，闭区间，单位度。 */
-    int16_t turnAngleMinDeg;
-    int16_t turnAngleMaxDeg;
     /* deadbandX/Y：停止阈值，单位 0.1 像素；10 表示 1 像素。 */
     uint16_t deadbandX;
     uint16_t deadbandY;
@@ -109,14 +105,6 @@ StaticConfigTaskId StaticConfig_GetTaskFor(StaticConfigDistance distance,
 
 /* StaticConfig_SetActiveByDistanceMode：按距离档和模式直接切换 active 参数。 */
 void StaticConfig_SetActiveByDistanceMode(StaticConfigDistance distance,
-    StaticConfigMode mode);
-
-/*
- * StaticConfig_UpdateByTurnAngleDeg：用累计旋转角度和模式自动选择 active 参数。
- * 说明：角度范围来自 staticconfig.c 里的六个任务结构体。
- * 注意：只有调用本函数后 active 才会随角度变化；不调用时保持 Init/Set 选择的任务。
- */
-void StaticConfig_UpdateByTurnAngleDeg(int16_t turnAngleDeg,
     StaticConfigMode mode);
 
 #endif

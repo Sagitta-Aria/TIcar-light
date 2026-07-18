@@ -128,6 +128,7 @@ typedef struct {
     int16_t maxLineSpeedCounts;
     int16_t lineDeadband;
     int16_t turnGain;
+    int16_t turnDGain;
     uint16_t turnLimitCounts;
     int16_t turnSpeedCounts;
     int16_t turnNearSpeedCounts;
@@ -148,6 +149,7 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
         (int16_t)CAR_MOTOR_NO_YAW_MAX_LINE_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_LINE_DEADBAND,
         (int16_t)CAR_MOTOR_NO_YAW_TURN_GAIN,
+        (int16_t)CAR_MOTOR_NO_YAW_TURN_D_GAIN,
         (uint16_t)CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TURN_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
@@ -169,6 +171,7 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
             CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_CPS),
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_LINE_DEADBAND,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_GAIN,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_D_GAIN,
         (uint16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
             CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_CPS),
         (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
@@ -191,6 +194,7 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
 
 typedef struct {
     int16_t lineError;
+    int16_t lastLineError;
     int16_t lastLeftTargetCounts;
     int16_t lastRightTargetCounts;
     uint16_t turnTicks;
@@ -212,6 +216,7 @@ typedef struct {
     volatile uint8_t lineMaskCandidate;
     volatile uint8_t lineMaskConfirmSamples;
     volatile uint8_t lineMaskFilterReady;
+    uint8_t lineDerivativeReady;
     uint8_t hasLastLineCommand;
     uint8_t hasTurnYawBase;
     volatile uint8_t turnFlag;
@@ -465,18 +470,20 @@ static uint8_t MotorNoYaw_CalcDigitalLineError(uint8_t mask,
     }
 
     if (error != 0) {
-        *error = (int16_t)(((int16_t)(sum / (int16_t)count)) *
-            (int16_t)GRAY_LINE_ERROR_SCALE);
+        *error = (int16_t)(((int32_t)sum *
+            (int32_t)GRAY_LINE_ERROR_SCALE) / (int32_t)count);
     }
     return 1U;
 }
 
 static void MotorNoYaw_CalculateLineTargets(const MotorNoYawConfig *config,
-    int16_t error, int16_t *leftTargetCounts, int16_t *rightTargetCounts)
+    int16_t error, int16_t errorDelta, int16_t *leftTargetCounts,
+    int16_t *rightTargetCounts)
 {
     int16_t lineError = MotorNoYaw_ApplyLineDeadband(config, error);
     int16_t correction = MotorNoYaw_ClampCorrection(config,
-        ((int32_t)lineError * (int32_t)config->turnGain) /
+        (((int32_t)lineError * (int32_t)config->turnGain) +
+            ((int32_t)errorDelta * (int32_t)config->turnDGain)) /
             (int32_t)GRAY_LINE_ERROR_SCALE);
     int16_t baseSpeed = MotorNoYaw_ClampLineSpeed(config,
         (int32_t)config->baseSpeedCounts);
@@ -501,7 +508,7 @@ uint8_t MotorNoYaw_CalculateTask1LineCommand(uint8_t digitalMask,
         return 0U;
     }
     MotorNoYaw_CalculateLineTargets(
-        &g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_TASK1], error,
+        &g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_TASK1], error, 0,
         leftTargetCounts, rightTargetCounts);
     return 1U;
 }
@@ -511,15 +518,22 @@ static void MotorNoYaw_ApplyLineControl(void)
 {
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
     int16_t error = 0;
+    int16_t errorDelta = 0;
     int16_t leftSpeed;
     int16_t rightSpeed;
 
     if (MotorNoYaw_CalcDigitalLineError(g_motorNoYaw.digitalMask,
         &error) != 0U) {
+        if (g_motorNoYaw.lineDerivativeReady != 0U) {
+            errorDelta = (int16_t)(error - g_motorNoYaw.lastLineError);
+        } else {
+            g_motorNoYaw.lineDerivativeReady = 1U;
+        }
+        g_motorNoYaw.lastLineError = error;
         g_motorNoYaw.lineError = error;
     }
     MotorNoYaw_CalculateLineTargets(config, g_motorNoYaw.lineError,
-        &leftSpeed, &rightSpeed);
+        errorDelta, &leftSpeed, &rightSpeed);
 
     g_motorNoYaw.lastLeftTargetCounts = leftSpeed;
     g_motorNoYaw.lastRightTargetCounts = rightSpeed;
@@ -598,6 +612,7 @@ static void MotorNoYaw_StartTurnApproach(void)
     (void)MotorNoYaw_CaptureTurnYawBase();
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
+    g_motorNoYaw.lineDerivativeReady = 0U;
     g_motorNoYaw.s5RecentSamples = 0U;
     g_motorNoYaw.s6RecentSamples = 0U;
     g_motorNoYaw.s7RecentSamples = 0U;
@@ -645,6 +660,7 @@ static void MotorNoYaw_FinishRightTurn(void)
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
+    g_motorNoYaw.lineDerivativeReady = 0U;
     g_motorNoYaw.s5RecentSamples = 0U;
     g_motorNoYaw.s6RecentSamples = 0U;
     g_motorNoYaw.s7RecentSamples = 0U;
@@ -757,6 +773,7 @@ static void MotorNoYaw_TaskLine(void)
     }
 
     if (g_motorNoYaw.digitalMask == 0U) {
+        g_motorNoYaw.lineDerivativeReady = 0U;
         MotorNoYaw_ApplyLineLostCommand();
         if ((lineLostTimeoutTicks != 0U) &&
             (g_motorNoYaw.lineLostTicks >= lineLostTimeoutTicks)) {
@@ -840,6 +857,7 @@ static void MotorNoYaw_TaskTurnExit(void)
 static void MotorNoYaw_ResetControl(void)
 {
     g_motorNoYaw.lineError = 0;
+    g_motorNoYaw.lastLineError = 0;
     g_motorNoYaw.lastLeftTargetCounts = 0;
     g_motorNoYaw.lastRightTargetCounts = 0;
     g_motorNoYaw.turnTicks = 0U;
@@ -860,6 +878,7 @@ static void MotorNoYaw_ResetControl(void)
     g_motorNoYaw.lineMaskCandidate = 0U;
     g_motorNoYaw.lineMaskConfirmSamples = 0U;
     g_motorNoYaw.lineMaskFilterReady = 0U;
+    g_motorNoYaw.lineDerivativeReady = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
     g_motorNoYaw.hasTurnYawBase = 0U;
     g_motorNoYaw.turnFlag = 1U;
