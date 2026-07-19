@@ -1047,6 +1047,7 @@
             <li>先验证 OLED、K1-K5、Type-C 日志、K230 UART 和 JQ8400 UART1。</li>
             <li>确保 Flash CS 与 IMU CS 均为高电平，再验证 LSM6DSRTR 的 WHO_AM_I=0x6B 和 INT1。</li>
             <li>继电器先不接负载，只确认 PB27 上电保持关闭且控制极性正确。</li>
+            <li>确认 PB23/PB25 上电低电平时两只外接 LED 熄灭，再空载测量 PA14 的 PWM 频率和占空比。</li>
             <li>架空车轮，使用 Task5 低 PWM 分别检查方向与编码器符号。</li>
             <li>重新标定左右轮 start、FF、Kp/Ki；旧参数不能直接视为实车最终值。</li>
             <li>最后接地验证 Task1，再逐项验证 Task2-Task4。</li>
@@ -1086,6 +1087,10 @@
         <div class="power-row">
           <strong>PB27 / 继电器</strong>
           <p>PB27 只接继电器模块控制输入或外部三极管/MOSFET 驱动级，上电默认关闭。禁止 GPIO 直接驱动继电器线圈，线圈侧需要续流保护。</p>
+        </div>
+        <div class="power-row">
+          <strong>PA14 / PWM 与 PB23/PB25 / LED</strong>
+          <p>PA14 使用 TIMG12 CCP0 输出扩展 PWM。PB23/PB25 分别驱动两只外接 LED，按 GPIO→限流电阻→LED→GND 接线，高电平点亮；每路必须串联 330Ω～1kΩ 电阻。</p>
         </div>
       </div>
     </section>
@@ -1257,6 +1262,9 @@
         {id:"key_5", category:"输入", signal:"K5 · 外接按键", sourcePin:"新增", sourceLoc:"外接", directPin:"PB11", targetPin:"PB11", note:"按下接地，内部上拉；当前未使用 LCD DC 接口。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/key.c"]},
         {id:"status_led", category:"状态", signal:"系统状态 LED", sourcePin:"PA14", sourceLoc:"H5-15", directPin:"PA14", targetPin:"PB22", directRisk:"warning", note:"PA14 直迁只会驱动排针；改为 PB22 可直接使用天猛星板载 LED，且同为高电平点亮。", files:["system/board.c","config/board_config.h","doc/PINOUT.md"]},
         {id:"relay_ctrl", category:"输出", signal:"继电器 CTRL", sourcePin:"新增", sourceLoc:"外接驱动模块", directPin:"PB27", targetPin:"PB27", note:"普通 GPIO 输出，上电默认关闭；只接模块控制端或外部驱动级，不能直接带线圈。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/relay.c"]},
+        {id:"aux_pwm", category:"输出", signal:"扩展 PWM · TIMG12 CCP0", sourcePin:"新增", sourceLoc:"外接负载", directPin:"PA14", targetPin:"PA14", note:"硬件 PWM 输出；使用 PA14/PINCM36 的 TIMG12_CCP0，不占用 UART2。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/aux_output.c"]},
+        {id:"external_led_1", category:"状态", signal:"外接 LED 1", sourcePin:"新增", sourceLoc:"外接", directPin:"PB23", targetPin:"PB23", note:"普通 GPIO 输出，默认低电平熄灭；串联 330Ω～1kΩ 限流电阻。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/aux_output.c"]},
+        {id:"external_led_2", category:"状态", signal:"外接 LED 2", sourcePin:"新增", sourceLoc:"外接", directPin:"PB25", targetPin:"PB25", note:"普通 GPIO 输出，默认低电平熄灭；串联 330Ω～1kΩ 限流电阻。", files:["generated/ti_msp_dl_config.h","generated/ti_msp_dl_config.c","hardware/aux_output.c"]},
 
         {id:"log_tx", category:"通信", signal:"Type-C 日志 UART0 TX", sourcePin:"PA10", sourceLoc:"板载 CH340", directPin:"PA10", targetPin:"PA10", boardOnly:true, note:"两块板均由 CH340 接到 PA10，115200 配置保持。", files:["generated/ti_msp_dl_config.h","hardware/log_uart.c"]},
         {id:"log_rx", category:"通信", signal:"Type-C 日志 UART0 RX", sourcePin:"PA11", sourceLoc:"板载 CH340", directPin:"PA11", targetPin:"PA11", boardOnly:true, note:"两块板均由 CH340 接到 PA11，115200 配置保持。", files:["generated/ti_msp_dl_config.h","hardware/log_uart.c"]},
@@ -1315,6 +1323,10 @@
           text:"新增 PB27/PINCM58 继电器控制，GPIO 初始化前先写入关闭电平再切换输出；实际有效电平由继电器模块确认。"
         },
         {
+          file:"hardware/aux_output.c / TIMG12",
+          text:"新增 PA14/PINCM36 的 TIMG12_CCP0 硬件 PWM；新增 PB23/PINCM51 和 PB25/PINCM56 两路外接 LED GPIO，初始化为低电平熄灭。"
+        },
+        {
           file:"硬件互斥",
           text:"K4/PB10、K5/PB11 和 IMU CS/PB14 占用了 H8 LCD 的 RESET、DC、CS 信号，因此不能同时连接 H8 SPI LCD；PA0/PA1 的 I2C OLED 不受影响。"
         },
@@ -1328,7 +1340,7 @@
         },
         {
           file:"doc/PINOUT.md / README.md",
-          text:"更新目标板、排针位置、PA29/PA30 电机方向、K1-K5、状态 LED、JQ8400、LSM6DSRTR 和继电器接线；记录 PB7-PB9 为 Flash/IMU 共享 SPI1 总线。"
+          text:"更新目标板、排针位置、PA29/PA30 电机方向、K1-K5、状态 LED、两路外接 LED、扩展 PWM、JQ8400、LSM6DSRTR 和继电器接线；记录 PB7-PB9 为 Flash/IMU 共享 SPI1 总线。"
         },
         {
           file:"构建验证",
@@ -1549,7 +1561,7 @@
 
         if (mode === "recommended") {
           elements.description.textContent =
-            "保留底盘、云台、OLED 和视觉主链路；新增 LSM6DSRTR、JQ8400、K3-K5 与继电器，并用独立片选安全共享板载 SPI1 总线。";
+            "保留底盘、云台、OLED 和视觉主链路；新增 LSM6DSRTR、JQ8400、K3-K5、继电器、扩展 PWM 与两路 LED，并用独立片选安全共享板载 SPI1 总线。";
         } else {
           elements.description.textContent =
             "保持旧 PAx/PBx 名称时，JQ8400 和 K1/K2 会与板载 Flash 冲突，PA21/PA23 和状态灯也需要人工处理。";

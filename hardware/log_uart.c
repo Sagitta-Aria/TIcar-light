@@ -73,6 +73,7 @@ void LogUart_Init(void)
     g_logRxReadIndex = 0U;
     g_logRxDropCount = 0U;
     g_logRxErrorCount = 0U;
+#if CAR_ENABLE_LOG_UART_RX
     DL_UART_Main_setRXFIFOThreshold(LogUart_INST,
         DL_UART_MAIN_RX_FIFO_LEVEL_ONE_ENTRY);
     DL_UART_Main_enableInterrupt(LogUart_INST,
@@ -83,6 +84,7 @@ void LogUart_Init(void)
     NVIC_ClearPendingIRQ(LogUart_INST_INT_IRQN);
     NVIC_EnableIRQ(LogUart_INST_INT_IRQN);
 #endif
+#endif
 }
 
 void LogUart_Task(void)
@@ -91,7 +93,7 @@ void LogUart_Task(void)
 
 void LogUart_HandleUARTInterrupt(void)
 {
-#if CAR_ENABLE_LOG_UART
+#if CAR_ENABLE_LOG_UART && CAR_ENABLE_LOG_UART_RX
     DL_UART_IIDX pending;
     uint8_t data;
     uint8_t serviceCount = 0U;
@@ -119,7 +121,7 @@ void LogUart_HandleUARTInterrupt(void)
 
 uint8_t LogUart_TryReadByte(uint8_t *data)
 {
-#if CAR_ENABLE_LOG_UART
+#if CAR_ENABLE_LOG_UART && CAR_ENABLE_LOG_UART_RX
     uint32_t primask;
 
     if (data == 0) {
@@ -152,10 +154,15 @@ void LogUart_ClearRx(void)
     g_logRxReadIndex = 0U;
     g_logRxDropCount = 0U;
     g_logRxErrorCount = 0U;
+#if CAR_ENABLE_LOG_UART_RX
     while ((count < LOG_UART_IRQ_RX_DRAIN_LIMIT) &&
         DL_UART_Main_receiveDataCheck(LogUart_INST, &data)) {
         ++count;
     }
+#else
+    (void)data;
+    (void)count;
+#endif
     LogUart_ExitCritical(primask);
 #endif
 }

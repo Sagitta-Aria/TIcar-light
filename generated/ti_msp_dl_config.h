@@ -89,7 +89,7 @@ extern "C" {
 #define GPIO_OLED_IOMUX_SCL                                       (IOMUX_PINCM2)
 #define GPIO_OLED_IOMUX_SCL_FUNC                        IOMUX_PINCM2_PF_I2C0_SCL
 
-/* Type-C CH340 日志 UART0: PA10 TX, PA11 RX。PA18 仍只作为 BSL invoke。 */
+/* UART0: PA10保留日志TX，PA11由H7 BMI088姿态链路独占接收。 */
 #define LogUart_INST                                                       UART0
 #define LogUart_INST_FREQUENCY                                          32000000
 #define LogUart_INST_IRQHandler                                 UART0_IRQHandler
@@ -104,7 +104,14 @@ extern "C" {
 #define GPIO_LogUart_IOMUX_TX_FUNC                    IOMUX_PINCM21_PF_UART0_TX
 #define LogUart_BAUD_RATE                                            (115200)
 
-/* JY61P UART1: PB6 TX, PB7 RX。JQ8400 暂停接入后释放给姿态模块。 */
+/* H7姿态反馈与日志TX共用UART0；H7只连接PA11 RX。 */
+#define H7GyroLink_INST                                                    UART0
+#define H7GyroLink_INST_FREQUENCY                                       32000000
+#define H7GyroLink_INST_IRQHandler                              UART0_IRQHandler
+#define H7GyroLink_INST_INT_IRQN                                  UART0_INT_IRQn
+#define H7GyroLink_BAUD_RATE                                           (115200)
+
+/* 板载JY61P作为底座前馈：UART1 PB6 TX、PB7 RX。 */
 #define JY61P_INST                                                         UART1
 #define JY61P_INST_FREQUENCY                                            32000000
 #define JY61P_INST_IRQHandler                                   UART1_IRQHandler

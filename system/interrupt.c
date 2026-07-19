@@ -1,10 +1,10 @@
 #include "interrupt.h"
 
 #include "encoder_motor.h"
+#include "h7_gyro_link.h"
 #include "jy61p.h"
 #include "key.h"
 #include "link.h"
-#include "log_uart.h"
 #include "motor_no_yaw.h"
 #include "rtos_app.h"
 #include "stepper_pulse.h"
@@ -16,8 +16,8 @@ void Interrupt_Init(void)
     NVIC_SetPriority(TIMG0_INT_IRQn, 1U);
     NVIC_SetPriority(GPIOB_INT_IRQn, 0U);
     NVIC_SetPriority(UART3_INT_IRQn, 1U);
-    NVIC_SetPriority(UART1_INT_IRQn, 2U);
-    NVIC_SetPriority(UART0_INT_IRQn, 2U);
+    NVIC_SetPriority(H7GyroLink_INST_INT_IRQN, 2U);
+    NVIC_SetPriority(JY61P_INST_INT_IRQN, 2U);
 }
 
 /*
@@ -53,7 +53,7 @@ void GPIOB_IRQHandler(void)
 
 void UART0_IRQHandler(void)
 {
-    LogUart_HandleUARTInterrupt();
+    H7GyroLink_HandleUARTInterrupt();
 }
 
 void UART1_IRQHandler(void)

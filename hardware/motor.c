@@ -127,6 +127,13 @@ void Motor_SetChassisPeriodCommand(int16_t leftCounts, int16_t rightCounts)
     EncoderMotor_SetPeriodTargets(leftCounts, rightCounts);
 }
 
+void Motor_SetChassisZeroTargetBrake(uint8_t leftEnabled,
+    uint8_t rightEnabled)
+{
+    EncoderMotor_SetZeroTargetBrake(ENCODER_MOTOR_LEFT, leftEnabled);
+    EncoderMotor_SetZeroTargetBrake(ENCODER_MOTOR_RIGHT, rightEnabled);
+}
+
 void Motor_SetAllStop(void)
 {
     uint8_t index;

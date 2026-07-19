@@ -35,10 +35,10 @@ typedef struct {
     uint16_t calibrationTarget;
 } BodyMotionSnapshot;
 
-/* 初始化唯一一份 JY61 yaw 估计状态；底盘和云台都读取这一份结果。 */
+/* 初始化板载JY61P的底座yaw估计，供云台前馈和循迹转弯辅助共用。 */
 void BodyMotion_Init(void);
 
-/* 以 10 ms 固定周期消费 JY61 快照并执行预测、低通和角度校正。 */
+/* 以 10 ms 固定周期消费姿态快照并执行预测、低通和角度校正。 */
 void BodyMotion_Task(void);
 
 /* 清空零偏累计并重新采集静止角速度，校准期间控制输出应保持为零。 */

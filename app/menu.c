@@ -9,8 +9,9 @@
 #include "oled.h"
 #include "tuning_console.h"
 
-#define MENU_TASK_COUNT       (8U)
+#define MENU_TASK_COUNT       (9U)
 #define MENU_GIMBAL_DISTANCE_COUNT (3U)
+#define MENU_TASK4_ROUTE_COUNT ((uint8_t)CAR_MISSION4_ROUTE_COUNT)
 #define MENU_OLED_FONT_SIZE   (12U)
 #define MENU_MONO_START_X     (6U)
 #define MENU_MONO_START_Y     (16U)
@@ -27,7 +28,8 @@ static const char *const g_taskNames[MENU_TASK_COUNT] = {
     "Task 5 PID",
     "Task 6 Drive",
     "Task 7 Circle",
-    "Task 8 IMU"
+    "Task 8 IMU",
+    "Task 9 Encoder"
 };
 
 static const char *const g_gimbalDistanceNames[MENU_GIMBAL_DISTANCE_COUNT] = {
@@ -36,11 +38,18 @@ static const char *const g_gimbalDistanceNames[MENU_GIMBAL_DISTANCE_COUNT] = {
     "Far"
 };
 
+static const char *const g_task4RouteNames[MENU_TASK4_ROUTE_COUNT] = {
+    "Point Track 1L",
+    "Point Track 2L",
+    "Circle Track 1L"
+};
+
 typedef enum {
     MENU_PAGE_MAIN = 0,
     MENU_PAGE_TASK1_LAPS,
     MENU_PAGE_TASK2_DISTANCE,
     MENU_PAGE_TASK3_DISTANCE,
+    MENU_PAGE_TASK4_ROUTE,
     MENU_PAGE_TASK7_DISTANCE,
     MENU_PAGE_TASK6_MODE,
     MENU_PAGE_TASK6_SPEED
@@ -51,6 +60,7 @@ static uint8_t g_taskIndex;
 static uint8_t g_task1LapCount;
 static uint8_t g_task2Distance;
 static uint8_t g_task3Distance;
+static CarMission4Route g_task4Route;
 static uint8_t g_task7Distance;
 static CarChassisDriveMode g_task6DriveMode;
 static uint16_t g_task6ClosedSpeed;
@@ -301,6 +311,29 @@ static void Menu_RenderGimbalDistanceMenu(const char *title,
     Menu_RenderLines(title, optionLine, distanceLine, "K2 Start");
 }
 
+static void Menu_BuildTask4RouteLine(char line[MENU_LINE_SIZE],
+    uint8_t route)
+{
+    char *write = line;
+    char *end = &line[MENU_LINE_SIZE - 1U];
+
+    write = Menu_AppendChar(write, end,
+        (route == (uint8_t)g_task4Route) ? '>' : ' ');
+    (void)Menu_AppendText(write, end, g_task4RouteNames[route]);
+}
+
+static void Menu_RenderTask4RouteMenu(void)
+{
+    char line1[MENU_LINE_SIZE];
+    char line2[MENU_LINE_SIZE];
+    char line3[MENU_LINE_SIZE];
+
+    Menu_BuildTask4RouteLine(line1, 0U);
+    Menu_BuildTask4RouteLine(line2, 1U);
+    Menu_BuildTask4RouteLine(line3, 2U);
+    Menu_RenderLines("Task 4", line1, line2, line3);
+}
+
 static CarChassisDriveMode Menu_GetDriveMode(uint8_t missionId)
 {
     (void)missionId;
@@ -398,23 +431,15 @@ static void Menu_RenderTask5(void)
     if (status.gimbalMode != 0U) {
         write = line1;
         end = &line1[MENU_LINE_SIZE - 1U];
-        if (status.gimbalState == (uint8_t)BODY_MOTION_CALIBRATING) {
-            write = Menu_AppendText(write, end, "CAL ");
-            write = Menu_AppendUnsigned(write, end,
-                status.gimbalCalibrationCount);
-            write = Menu_AppendChar(write, end, '/');
-            (void)Menu_AppendUnsigned(write, end,
-                status.gimbalCalibrationTarget);
-        } else if (status.gimbalState == (uint8_t)BODY_MOTION_READY) {
+        if (status.gimbalFeedbackFresh != 0U) {
             write = Menu_AppendText(write, end,
                 (status.gimbalHoldEnabled != 0U) ? "HOLD" : "OBSERVE");
             write = Menu_AppendText(write, end, " FF");
-            (void)Menu_AppendUnsigned(write, end,
-                status.gimbalFeedForwardEnabled);
-        } else if (status.gimbalState == (uint8_t)BODY_MOTION_STALE) {
-            (void)Menu_AppendText(write, end, "IMU STALE");
+            (void)Menu_AppendUnsigned(write, end, (uint32_t)(
+                (status.gimbalFeedForwardEnabled != 0U) &&
+                (status.gimbalFeedForwardFresh != 0U)));
         } else {
-            (void)Menu_AppendText(write, end, "WAIT IMU");
+            (void)Menu_AppendText(write, end, "WAIT H7");
         }
         write = line2;
         end = &line2[MENU_LINE_SIZE - 1U];
@@ -426,7 +451,8 @@ static void Menu_RenderTask5(void)
         write = line3;
         end = &line3[MENU_LINE_SIZE - 1U];
         write = Menu_AppendText(write, end, "E ");
-        write = Menu_AppendSigned(write, end, status.gimbalStepError);
+        write = Menu_AppendSigned(write, end,
+            status.gimbalAngleErrorX100);
         write = Menu_AppendText(write, end, " S ");
         (void)Menu_AppendSigned(write, end, status.gimbalCommandSps);
         Menu_RenderLines("Task 5 GIMBAL", line1, line2, line3);
@@ -557,6 +583,46 @@ static void Menu_RenderTask6Mission(void)
     Menu_RenderLines(line0, line1, line2, line3);
 }
 
+static uint32_t Menu_AbsEncoderCount(int32_t count)
+{
+    return (count < 0) ? (uint32_t)(-(count + 1)) + 1U :
+        (uint32_t)count;
+}
+
+/* 作用：Task9 显示手推产生的原始编码器值和 Task4 使用的平均绝对count。 */
+static void Menu_RenderTask9Encoder(void)
+{
+    char leftLine[MENU_LINE_SIZE];
+    char rightLine[MENU_LINE_SIZE];
+    char averageLine[MENU_LINE_SIZE];
+    char *write;
+    char *end;
+    int32_t leftCount = EncoderMotor_GetTotalCount(ENCODER_MOTOR_LEFT);
+    int32_t rightCount = EncoderMotor_GetTotalCount(ENCODER_MOTOR_RIGHT);
+    uint32_t averageCount = (Menu_AbsEncoderCount(leftCount) +
+        Menu_AbsEncoderCount(rightCount)) / 2U;
+
+    write = leftLine;
+    end = &leftLine[MENU_LINE_SIZE - 1U];
+    write = Menu_AppendText(write, end, "L ");
+    (void)Menu_AppendSigned(write, end, leftCount);
+
+    write = rightLine;
+    end = &rightLine[MENU_LINE_SIZE - 1U];
+    write = Menu_AppendText(write, end, "R ");
+    (void)Menu_AppendSigned(write, end, rightCount);
+
+    write = averageLine;
+    end = &averageLine[MENU_LINE_SIZE - 1U];
+    write = Menu_AppendText(write, end, "AVG ");
+    write = Menu_AppendUnsigned(write, end, averageCount);
+    write = Menu_AppendChar(write, end, '/');
+    (void)Menu_AppendUnsigned(write, end,
+        (uint32_t)CAR_MISSION4_EXTRA_ENCODER_COUNTS);
+
+    Menu_RenderLines("Task 9 Encoder", leftLine, rightLine, averageLine);
+}
+
 static void Menu_RenderMission(void)
 {
     char line[MENU_LINE_SIZE];
@@ -595,36 +661,33 @@ static void Menu_RenderMission(void)
         char *controlEnd = &controlLine[MENU_LINE_SIZE - 1U];
 
         GimbalAttitude_GetSnapshot(&status);
-        if (status.motion.state == BODY_MOTION_CALIBRATING) {
-            stateWrite = Menu_AppendText(stateWrite, stateEnd, "CAL ");
-            stateWrite = Menu_AppendUnsigned(stateWrite, stateEnd,
-                status.motion.calibrationCount);
-            stateWrite = Menu_AppendChar(stateWrite, stateEnd, '/');
-            (void)Menu_AppendUnsigned(stateWrite, stateEnd,
-                status.motion.calibrationTarget);
-        } else if (status.motion.state == BODY_MOTION_READY) {
+        if (status.feedbackFresh != 0U) {
             stateWrite = Menu_AppendText(stateWrite, stateEnd,
                 (status.holdEnabled != 0U) ? "HOLD" : "OBSERVE");
             stateWrite = Menu_AppendText(stateWrite, stateEnd, " FF");
-            (void)Menu_AppendUnsigned(stateWrite, stateEnd,
-                status.feedForwardEnabled);
-        } else if (status.motion.state == BODY_MOTION_STALE) {
-            (void)Menu_AppendText(stateWrite, stateEnd, "IMU STALE");
+            (void)Menu_AppendUnsigned(stateWrite, stateEnd, (uint32_t)(
+                (status.feedForwardEnabled != 0U) &&
+                (status.feedForwardFresh != 0U)));
         } else {
-            (void)Menu_AppendText(stateWrite, stateEnd, "WAIT IMU");
+            (void)Menu_AppendText(stateWrite, stateEnd, "WAIT H7");
         }
         yawWrite = Menu_AppendText(yawWrite, yawEnd, "Y100 ");
         yawWrite = Menu_AppendSigned(yawWrite, yawEnd,
-            status.motion.yawEstimateX100);
+            status.feedbackYawX100);
         yawWrite = Menu_AppendText(yawWrite, yawEnd, " R ");
         (void)Menu_AppendSigned(yawWrite, yawEnd,
-            status.motion.yawRateFilteredX100PerSec);
+            status.feedbackRateX100PerSec);
         controlWrite = Menu_AppendText(controlWrite, controlEnd, "E ");
         controlWrite = Menu_AppendSigned(controlWrite, controlEnd,
-            status.stepError);
+            status.angleErrorX100);
         controlWrite = Menu_AppendText(controlWrite, controlEnd, " S ");
         (void)Menu_AppendSigned(controlWrite, controlEnd, status.commandSps);
         Menu_RenderLines("Task 8 IMU", stateLine, yawLine, controlLine);
+        return;
+    }
+
+    if (missionId == 9U) {
+        Menu_RenderTask9Encoder();
         return;
     }
 
@@ -697,6 +760,8 @@ static void Menu_RenderByState(CarState state)
             Menu_RenderGimbalDistanceMenu("Task 2", g_task2Distance);
         } else if (g_menuPage == MENU_PAGE_TASK3_DISTANCE) {
             Menu_RenderGimbalDistanceMenu("Task 3", g_task3Distance);
+        } else if (g_menuPage == MENU_PAGE_TASK4_ROUTE) {
+            Menu_RenderTask4RouteMenu();
         } else if (g_menuPage == MENU_PAGE_TASK7_DISTANCE) {
             Menu_RenderGimbalDistanceMenu("Task 7 Circle", g_task7Distance);
         } else if (g_menuPage == MENU_PAGE_TASK6_MODE) {
@@ -737,6 +802,7 @@ void Menu_Init(void)
     g_task1LapCount = 1U;
     g_task2Distance = 0U;
     g_task3Distance = 0U;
+    g_task4Route = CAR_MISSION4_POINT_ONE_LAP;
     g_task7Distance = 0U;
     g_task6DriveMode = (CHASSIS_TASK6_DEFAULT_CLOSED_LOOP != 0U) ?
         CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
@@ -760,6 +826,9 @@ void Menu_Next(void)
     } else if (g_menuPage == MENU_PAGE_TASK3_DISTANCE) {
         g_task3Distance = (uint8_t)((g_task3Distance + 1U) %
             MENU_GIMBAL_DISTANCE_COUNT);
+    } else if (g_menuPage == MENU_PAGE_TASK4_ROUTE) {
+        g_task4Route = (CarMission4Route)(((uint8_t)g_task4Route + 1U) %
+            MENU_TASK4_ROUTE_COUNT);
     } else if (g_menuPage == MENU_PAGE_TASK7_DISTANCE) {
         g_task7Distance = (uint8_t)((g_task7Distance + 1U) %
             MENU_GIMBAL_DISTANCE_COUNT);
@@ -793,6 +862,10 @@ CarEvent Menu_Confirm(void)
         StateMachine_SetMission3Distance(g_task3Distance);
         return CAR_EVENT_MISSION_3_START;
     }
+    if (g_menuPage == MENU_PAGE_TASK4_ROUTE) {
+        StateMachine_SetMission4Route(g_task4Route);
+        return CAR_EVENT_MISSION_4_START;
+    }
     if (g_menuPage == MENU_PAGE_TASK7_DISTANCE) {
         StateMachine_SetMission7Distance(g_task7Distance);
         return CAR_EVENT_MISSION_7_START;
@@ -821,7 +894,9 @@ CarEvent Menu_Confirm(void)
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
     case 3U:
-        return CAR_EVENT_MISSION_4_START;
+        g_menuPage = MENU_PAGE_TASK4_ROUTE;
+        Menu_RequestRefresh();
+        return CAR_EVENT_NONE;
     case 4U:
         return CAR_EVENT_MISSION_5_START;
     case 5U:
@@ -834,6 +909,8 @@ CarEvent Menu_Confirm(void)
         return CAR_EVENT_NONE;
     case 7U:
         return CAR_EVENT_MISSION_8_START;
+    case 8U:
+        return CAR_EVENT_MISSION_9_START;
     default:
         return CAR_EVENT_NONE;
     }

@@ -126,7 +126,8 @@ static void TuningConsole_SetMode(TuningMode mode)
         g_gimbalPlotEnabled = 1U;
         g_lastGimbalPlotTime = xTaskGetTickCount();
         g_oledPage = TUNING_CONSOLE_OLED_GIMBAL;
-        LogUart_SendString("#OK mode=gimbal; keep car and IMU still for calibration\r\n");
+        LogUart_SendString(
+            "#OK mode=gimbal; H7 feedback active, JY61 feedforward off\r\n");
     } else if (mode == TUNING_MODE_VISION) {
         TuningConsole_StopChassisActivity();
         GimbalAttitude_Stop();
@@ -388,9 +389,9 @@ static void TuningConsole_SendHelp(void)
     LogUart_SendString(
         "# gcal | ghold on|off | gff on|off | gplot on|off | gshow\r\n");
     LogUart_SendString(
-        "# gsteps|gkff|gkp|glpf|gbeta|gpred VALUE\r\n");
+        "# gsteps|gkff|gkp|grkp|glpf|gbeta|gpred VALUE\r\n");
     LogUart_SendString(
-        "# gsign -1|1 | gmax|gaccel|glimit VALUE\r\n");
+        "# gsign|gh7sign|gjysign -1|1 | gmax|gaccel|glimit VALUE\r\n");
     LogUart_SendString(
         "# vconfig near|mid|far center|circle | vplot on|off | vshow\r\n");
     LogUart_SendString("# Task5 PWM commands use percent:\r\n");
@@ -503,9 +504,15 @@ static void TuningConsole_SendStatus(void)
         GimbalAttitudeSnapshot gimbal;
 
         GimbalAttitude_GetSnapshot(&gimbal);
-        LogUart_SendString("G state=");
+        LogUart_SendString("G h7=");
+        LogUart_SendUnsigned(gimbal.feedbackFresh);
+        LogUart_SendString(" h7_age=");
+        LogUart_SendUnsigned(gimbal.feedbackAngleAgeMs);
+        LogUart_SendString("/");
+        LogUart_SendUnsigned(gimbal.feedbackGyroAgeMs);
+        LogUart_SendString(" jy_state=");
         LogUart_SendUnsigned((uint32_t)gimbal.motion.state);
-        LogUart_SendString(" cal=");
+        LogUart_SendString(" jy_cal=");
         LogUart_SendUnsigned(gimbal.motion.calibrationCount);
         LogUart_SendString("/");
         LogUart_SendUnsigned(gimbal.motion.calibrationTarget);
@@ -513,20 +520,30 @@ static void TuningConsole_SendStatus(void)
         LogUart_SendUnsigned(gimbal.holdEnabled);
         LogUart_SendString(" ff_gate=");
         LogUart_SendUnsigned(gimbal.feedForwardEnabled);
-        LogUart_SendString(" yaw_x100=");
-        LogUart_SendSigned(gimbal.motion.yawEstimateX100);
-        LogUart_SendString(" rate_x100_s=");
+        LogUart_SendString(" ff_ready=");
+        LogUart_SendUnsigned(gimbal.feedForwardFresh);
+        LogUart_SendString(" h7_yaw_x100=");
+        LogUart_SendSigned(gimbal.feedbackYawX100);
+        LogUart_SendString(" h7_rate_x100_s=");
+        LogUart_SendSigned(gimbal.feedbackRateX100PerSec);
+        LogUart_SendString(" jy_rate_x100_s=");
         LogUart_SendSigned(gimbal.motion.yawRateFilteredX100PerSec);
-        LogUart_SendString(" bias_x100_s=");
+        LogUart_SendString(" jy_bias_x100_s=");
         LogUart_SendSigned(gimbal.motion.gyroBiasX100PerSec);
-        LogUart_SendString(" ref_step=");
-        LogUart_SendSigned(gimbal.referenceStep);
+        LogUart_SendString(" ref_yaw_x100=");
+        LogUart_SendSigned(gimbal.referenceYawX100);
+        LogUart_SendString(" angle_err_x100=");
+        LogUart_SendSigned(gimbal.angleErrorX100);
+        LogUart_SendString(" rate_ref_x100_s=");
+        LogUart_SendSigned(gimbal.rateReferenceX100PerSec);
+        LogUart_SendString(" rate_err_x100_s=");
+        LogUart_SendSigned(gimbal.rateErrorX100PerSec);
         LogUart_SendString(" step=");
         LogUart_SendSigned(gimbal.currentStep);
-        LogUart_SendString(" err=");
-        LogUart_SendSigned(gimbal.stepError);
         LogUart_SendString(" ff_sps=");
         LogUart_SendSigned(gimbal.feedForwardSps);
+        LogUart_SendString(" rate_fb_sps=");
+        LogUart_SendSigned(gimbal.rateFeedbackSps);
         LogUart_SendString(" cmd_sps=");
         LogUart_SendSigned(gimbal.commandSps);
         LogUart_SendString(" step_sps=");
@@ -632,23 +649,23 @@ static void TuningConsole_SendGimbalPlotFrame(void)
 
     GimbalAttitude_GetSnapshot(&gimbal);
     LogUart_SendString("A ");
-    LogUart_SendSigned(gimbal.motion.yawEstimateX100);
+    LogUart_SendSigned(gimbal.feedbackYawX100);
     LogUart_SendString(",");
-    LogUart_SendSigned(gimbal.motion.yawControlX100);
+    LogUart_SendSigned(gimbal.referenceYawX100);
     LogUart_SendString(",");
-    LogUart_SendSigned(gimbal.motion.yawRateRawX100PerSec);
+    LogUart_SendSigned(gimbal.angleErrorX100);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.feedbackRateX100PerSec);
     LogUart_SendString(",");
     LogUart_SendSigned(gimbal.motion.yawRateFilteredX100PerSec);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.rateReferenceX100PerSec);
+    LogUart_SendString(",");
+    LogUart_SendSigned(gimbal.feedForwardSps);
     LogUart_SendString(",");
     LogUart_SendSigned(gimbal.commandSps);
     LogUart_SendString(",");
     LogUart_SendSigned(gimbal.stepOutputSps);
-    LogUart_SendString(",");
-    LogUart_SendSigned(gimbal.stepError);
-    LogUart_SendString(",");
-    LogUart_SendSigned(gimbal.currentStep);
-    LogUart_SendString(",");
-    LogUart_SendSigned(gimbal.feedForwardSps);
     LogUart_SendString("\r\n");
 }
 
@@ -692,11 +709,17 @@ static void TuningConsole_SendDetails(void)
         LogUart_SendString("# gsteps=");
         LogUart_SendUnsigned(gimbal.stepsPerRevolution);
         LogUart_SendString(" gsign=");
-        LogUart_SendSigned(gimbal.directionSign);
+        LogUart_SendSigned(gimbal.motorDirectionSign);
+        LogUart_SendString(" gh7sign=");
+        LogUart_SendSigned(gimbal.h7FeedbackSign);
+        LogUart_SendString(" gjysign=");
+        LogUart_SendSigned(gimbal.jy61FeedForwardSign);
         LogUart_SendString(" gkff=");
-        LogUart_SendUnsigned(gimbal.kffQ1024);
+        LogUart_SendUnsigned(gimbal.jy61KffQ1024);
         LogUart_SendString(" gkp=");
-        LogUart_SendUnsigned(gimbal.kpQ1024);
+        LogUart_SendUnsigned(gimbal.h7AngleKpQ1024);
+        LogUart_SendString(" grkp=");
+        LogUart_SendUnsigned(gimbal.h7RateKpQ1024);
         LogUart_SendString(" gmax=");
         LogUart_SendUnsigned(gimbal.maxSpeedSps);
         LogUart_SendString(" gaccel=");
@@ -1421,17 +1444,32 @@ static uint8_t TuningConsole_ApplyGimbalValue(const char *command,
         if ((value != -1) && (value != 1)) {
             return 0U;
         }
-        gimbal.directionSign = (int8_t)value;
+        gimbal.motorDirectionSign = (int8_t)value;
+    } else if (TuningConsole_TextEquals(command, "gh7sign") != 0U) {
+        if ((value != -1) && (value != 1)) {
+            return 0U;
+        }
+        gimbal.h7FeedbackSign = (int8_t)value;
+    } else if (TuningConsole_TextEquals(command, "gjysign") != 0U) {
+        if ((value != -1) && (value != 1)) {
+            return 0U;
+        }
+        gimbal.jy61FeedForwardSign = (int8_t)value;
     } else if (TuningConsole_TextEquals(command, "gkff") != 0U) {
         if ((value < 0) || (value > 65535L)) {
             return 0U;
         }
-        gimbal.kffQ1024 = (uint16_t)value;
+        gimbal.jy61KffQ1024 = (uint16_t)value;
     } else if (TuningConsole_TextEquals(command, "gkp") != 0U) {
         if ((value < 0) || (value > 65535L)) {
             return 0U;
         }
-        gimbal.kpQ1024 = (uint16_t)value;
+        gimbal.h7AngleKpQ1024 = (uint16_t)value;
+    } else if (TuningConsole_TextEquals(command, "grkp") != 0U) {
+        if ((value < 0) || (value > 65535L)) {
+            return 0U;
+        }
+        gimbal.h7RateKpQ1024 = (uint16_t)value;
     } else if (TuningConsole_TextEquals(command, "gmax") != 0U) {
         if ((value < 0) || (value > 65535L)) {
             return 0U;
@@ -1496,8 +1534,11 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
         (TuningConsole_TextEquals(tokens[0], "gplot") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gsteps") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gsign") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gh7sign") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "gjysign") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gkff") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gkp") != 0U) ||
+        (TuningConsole_TextEquals(tokens[0], "grkp") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gmax") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "gaccel") != 0U) ||
         (TuningConsole_TextEquals(tokens[0], "glimit") != 0U) ||
@@ -1527,7 +1568,8 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
             GimbalAttitude_StartCalibration();
         }
         g_forceStatus = 1U;
-        LogUart_SendString("#OK gcal started; keep chassis and IMU still\r\n");
+        LogUart_SendString(
+            "#OK gcal started; keep board JY61 still\r\n");
         return 1U;
     }
     if ((TuningConsole_TextEquals(tokens[0], "ghold") != 0U) &&
@@ -2041,12 +2083,13 @@ void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status)
     status->gimbalState = (uint8_t)gimbal.motion.state;
     status->gimbalHoldEnabled = gimbal.holdEnabled;
     status->gimbalFeedForwardEnabled = gimbal.feedForwardEnabled;
+    status->gimbalFeedbackFresh = gimbal.feedbackFresh;
+    status->gimbalFeedForwardFresh = gimbal.feedForwardFresh;
     status->gimbalCalibrationCount = gimbal.motion.calibrationCount;
     status->gimbalCalibrationTarget = gimbal.motion.calibrationTarget;
-    status->gimbalYawX100 = gimbal.motion.yawEstimateX100;
-    status->gimbalRateX100PerSec =
-        gimbal.motion.yawRateFilteredX100PerSec;
-    status->gimbalStepError = gimbal.stepError;
+    status->gimbalYawX100 = gimbal.feedbackYawX100;
+    status->gimbalRateX100PerSec = gimbal.feedbackRateX100PerSec;
+    status->gimbalAngleErrorX100 = gimbal.angleErrorX100;
     status->gimbalCommandSps = gimbal.commandSps;
     if (g_setState == TUNING_SET_SETTLING) {
         status->setStage = TUNING_CONSOLE_SET_STAGE_SETTLING;

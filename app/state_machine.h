@@ -24,6 +24,7 @@ typedef enum {
     CAR_EVENT_MISSION_6_START,
     CAR_EVENT_MISSION_7_START,
     CAR_EVENT_MISSION_8_START,
+    CAR_EVENT_MISSION_9_START,
     CAR_EVENT_FINISHED,
     CAR_EVENT_STOP,
     CAR_EVENT_MENU,
@@ -37,6 +38,14 @@ typedef enum {
     CAR_MISSION4_STAGE_TRACK,
     CAR_MISSION4_STAGE_LINE
 } CarMission4Stage;
+
+/* Task4 三条比赛路线；点/圆决定视觉误差源，圈数决定目标转向次数。 */
+typedef enum {
+    CAR_MISSION4_POINT_ONE_LAP = 0,
+    CAR_MISSION4_POINT_TWO_LAPS,
+    CAR_MISSION4_CIRCLE_ONE_LAP,
+    CAR_MISSION4_ROUTE_COUNT
+} CarMission4Route;
 
 /* Task6 底盘调试模式；开环速度单位为 PWM%，闭环为 count/控制周期。 */
 typedef enum {
@@ -56,7 +65,7 @@ void StateMachine_Task(void);
 /* StateMachine_ChassisControlPeriod：在20ms底盘周期先生成本拍目标速度。 */
 void StateMachine_ChassisControlPeriod(void);
 
-/* StateMachine_HandleChassisFastEvent：立即消费灰度中断形成的入弯和S4回线事件。 */
+/* StateMachine_HandleChassisFastEvent：立即消费灰度中断形成的左右入弯和回线事件。 */
 void StateMachine_HandleChassisFastEvent(void);
 
 /* StateMachine_GetState：读取当前顶层状态。 */
@@ -85,6 +94,10 @@ void StateMachine_SetMission3Distance(uint8_t distance);
 
 /* StateMachine_GetMission3Distance：读取 Task 3 当前打靶距离，0~2 对应近/中/远。 */
 uint8_t StateMachine_GetMission3Distance(void);
+
+/* 设置/读取 Task4 子菜单路线。 */
+void StateMachine_SetMission4Route(CarMission4Route route);
+CarMission4Route StateMachine_GetMission4Route(void);
 
 /* StateMachine_SetMission7Distance：设置 Task 7 的圆点追踪距离。 */
 void StateMachine_SetMission7Distance(uint8_t distance);

@@ -43,6 +43,8 @@ void EncoderMotor_SetTargets(int16_t leftCps, int16_t rightCps);
 /* 正常闭环目标，单位与 Task5 target/move 相同：encoder count/控制周期。 */
 void EncoderMotor_SetPeriodTargets(int16_t leftCounts,
     int16_t rightCounts);
+/* 仅在目标为0时允许按编码反馈输出反向阻尼PWM。 */
+void EncoderMotor_SetZeroTargetBrake(uint8_t motorIndex, uint8_t enabled);
 void EncoderMotor_SetTarget(uint8_t motorIndex, int16_t targetCps);
 void EncoderMotor_RunControlPeriod(void);
 void EncoderMotor_Stop(void);

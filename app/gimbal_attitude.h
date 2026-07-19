@@ -4,12 +4,16 @@
 #include <stdint.h>
 
 #include "body_motion.h"
+#include "h7_gyro_link.h"
 
 typedef struct {
     uint16_t stepsPerRevolution;
-    int8_t directionSign;
-    uint16_t kffQ1024;
-    uint16_t kpQ1024;
+    int8_t motorDirectionSign;
+    int8_t h7FeedbackSign;
+    int8_t jy61FeedForwardSign;
+    uint16_t jy61KffQ1024;
+    uint16_t h7AngleKpQ1024;
+    uint16_t h7RateKpQ1024;
     uint16_t maxSpeedSps;
     uint16_t accelStepSps;
     uint32_t positionLimitSteps;
@@ -17,25 +21,35 @@ typedef struct {
 
 typedef struct {
     BodyMotionSnapshot motion;
+    H7GyroLinkFeedback feedback;
     GimbalAttitudeConfig config;
-    int32_t referenceStep;
+    int32_t referenceYawX100;
+    int32_t feedbackYawX100;
+    int32_t feedbackRateX100PerSec;
+    int32_t angleErrorX100;
+    int32_t rateReferenceX100PerSec;
+    int32_t rateErrorX100PerSec;
     int32_t currentStep;
-    int32_t stepError;
     int16_t feedForwardSps;
+    int16_t rateFeedbackSps;
     int16_t commandSps;
     int16_t stepOutputSps;
+    uint32_t feedbackAngleAgeMs;
+    uint32_t feedbackGyroAgeMs;
     uint8_t active;
     uint8_t holdEnabled;
     uint8_t feedForwardEnabled;
+    uint8_t feedbackFresh;
+    uint8_t feedForwardFresh;
     uint8_t hasReference;
     uint8_t referenceTracking;
     uint8_t directOutput;
 } GimbalAttitudeSnapshot;
 
-/* 初始化独立于视觉云台的 yaw 姿态保持模块，默认不输出。 */
+/* 初始化 H7 反馈、JY61前馈的 yaw 姿态保持模块，默认不输出。 */
 void GimbalAttitude_Init(void);
 
-/* 启动 Task8/Task5 云台姿态保持，并先执行静止零偏校准。 */
+/* 启动 Task8/Task5 云台姿态保持，并锁存首个有效H7 yaw为目标。 */
 void GimbalAttitude_Start(void);
 
 /* 启动 Task4 姿态辅助；只计算补偿命令，由视觉云台统一输出电机速度。 */
@@ -44,19 +58,19 @@ void GimbalAttitude_StartAssist(void);
 /* 停止 yaw 输出并恢复该轴的默认斜坡参数。 */
 void GimbalAttitude_Stop(void);
 
-/* 10 ms 周期控制入口；只消费 BodyMotion 的共享估计结果。 */
+/* 10ms控制入口：H7为反馈，板载JY61的BodyMotion为底座前馈。 */
 void GimbalAttitude_Task(void);
 
-/* 重新采集 JY61 零偏，校准期间立即停止 yaw。 */
+/* 重新采集板载JY61前馈零偏；H7反馈不在M0端重复校准。 */
 void GimbalAttitude_StartCalibration(void);
 
 /* 在线启停姿态保持；模块保持 active 以便继续观察姿态。 */
 void GimbalAttitude_SetHoldEnabled(uint8_t enabled);
 
-/* 上层按任务策略控制角速度前馈；通用启动默认关闭，Task8入口会显式开启。 */
+/* 上层按任务策略控制板载JY61角速度前馈；H7反馈始终生效。 */
 void GimbalAttitude_SetFeedForwardEnabled(uint8_t enabled);
 
-/* 视觉主动转动 yaw 时跟随当前 STEP 重置参考，避免姿态环反向抵消视觉命令。 */
+/* 主动转yaw时跟随当前H7参考以避免角度环抵消，同时保留已启用的底座yaw前馈。 */
 void GimbalAttitude_SetReferenceTracking(uint8_t enabled);
 
 uint8_t GimbalAttitude_IsActive(void);

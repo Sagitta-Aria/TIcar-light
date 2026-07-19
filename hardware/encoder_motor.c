@@ -13,6 +13,7 @@ typedef struct {
     int32_t feedbackCounts;
     int64_t integralScaled;
     uint8_t startupActive;
+    uint8_t zeroTargetBrakeEnabled;
 } EncoderMotorController;
 
 static EncoderMotorController g_controller[ENCODER_MOTOR_COUNT];
@@ -48,10 +49,10 @@ static void EncoderMotor_ExitCritical(uint32_t primask)
 
 static int16_t EncoderMotor_ClampTarget(int32_t value)
 {
-    if (value > CHASSIS_TARGET_LIMIT_CPS) {
-        value = CHASSIS_TARGET_LIMIT_CPS;
-    } else if (value < -CHASSIS_TARGET_LIMIT_CPS) {
-        value = -CHASSIS_TARGET_LIMIT_CPS;
+    if (value > (int32_t)CHASSIS_TARGET_LIMIT_CPS) {
+        value = (int32_t)CHASSIS_TARGET_LIMIT_CPS;
+    } else if (value < -(int32_t)CHASSIS_TARGET_LIMIT_CPS) {
+        value = -(int32_t)CHASSIS_TARGET_LIMIT_CPS;
     }
     return (int16_t)value;
 }
@@ -196,6 +197,30 @@ static int16_t EncoderMotor_ClampPwm(int64_t value)
         value = -(int64_t)CHASSIS_PWM_LIMIT_COUNTS;
     }
     return (int16_t)value;
+}
+
+/* 目标为0时只按当前编码速度生成反向阻尼，不使用起步、FF或积分项。 */
+static int16_t EncoderMotor_CalculateZeroTargetBrakePwm(int32_t feedback)
+{
+    int64_t feedbackMagnitude = (feedback < 0) ? -(int64_t)feedback :
+        (int64_t)feedback;
+    int64_t pwm;
+
+    if ((CHASSIS_ZERO_TARGET_BRAKE_ENABLE == 0U) ||
+        (feedbackMagnitude <= (int64_t)
+            CHASSIS_ZERO_TARGET_BRAKE_DEADBAND_COUNTS_PER_PERIOD)) {
+        return 0;
+    }
+
+    pwm = -((int64_t)feedback * CHASSIS_ZERO_TARGET_BRAKE_KP_Q1024) /
+        CHASSIS_Q1024_SCALE;
+    if (pwm > (int64_t)CHASSIS_ZERO_TARGET_BRAKE_PWM_LIMIT_COUNTS) {
+        pwm = (int64_t)CHASSIS_ZERO_TARGET_BRAKE_PWM_LIMIT_COUNTS;
+    } else if (pwm <
+        -(int64_t)CHASSIS_ZERO_TARGET_BRAKE_PWM_LIMIT_COUNTS) {
+        pwm = -(int64_t)CHASSIS_ZERO_TARGET_BRAKE_PWM_LIMIT_COUNTS;
+    }
+    return (int16_t)pwm;
 }
 
 static uint8_t EncoderMotor_ReadState(uint8_t motorIndex)
@@ -427,6 +452,7 @@ void EncoderMotor_Init(void)
         g_controller[index].feedbackCounts = 0;
         g_controller[index].integralScaled = 0;
         g_controller[index].startupActive = 0U;
+        g_controller[index].zeroTargetBrakeEnabled = 0U;
         g_totalCount[index] = 0;
         g_intervalCount[index] = 0;
         g_encoderState[index] = EncoderMotor_ReadState(index);
@@ -487,6 +513,27 @@ void EncoderMotor_SetPeriodTargets(int16_t leftCounts, int16_t rightCounts)
     EncoderMotor_ExitCritical(primask);
 }
 
+void EncoderMotor_SetZeroTargetBrake(uint8_t motorIndex, uint8_t enabled)
+{
+    EncoderMotorController *controller;
+    uint32_t primask;
+
+    if (motorIndex >= ENCODER_MOTOR_COUNT) {
+        return;
+    }
+
+    primask = EncoderMotor_EnterCritical();
+    controller = &g_controller[motorIndex];
+    controller->zeroTargetBrakeEnabled = (enabled != 0U) ? 1U : 0U;
+    if ((controller->zeroTargetBrakeEnabled == 0U) &&
+        (controller->commandCounts == 0)) {
+        controller->integralScaled = 0;
+        controller->pwm = 0;
+        EncoderMotor_WritePwm(motorIndex, 0);
+    }
+    EncoderMotor_ExitCritical(primask);
+}
+
 void EncoderMotor_SetTarget(uint8_t motorIndex, int16_t targetCps)
 {
     uint32_t primask;
@@ -528,8 +575,9 @@ static int16_t EncoderMotor_UpdateClosedLoop(uint8_t motorIndex,
     if (targetCounts == 0) {
         controller->integralScaled = 0;
         controller->startupActive = 0U;
-        controller->pwm = 0;
-        return 0;
+        controller->pwm = (controller->zeroTargetBrakeEnabled != 0U) ?
+            EncoderMotor_CalculateZeroTargetBrakePwm(feedback) : 0;
+        return controller->pwm;
     }
     feedbackMagnitude = (feedback < 0) ? -(int64_t)feedback :
         (int64_t)feedback;
@@ -627,6 +675,7 @@ void EncoderMotor_Stop(void)
         g_controller[index].feedbackCounts = 0;
         g_controller[index].integralScaled = 0;
         g_controller[index].startupActive = 0U;
+        g_controller[index].zeroTargetBrakeEnabled = 0U;
         g_intervalCount[index] = 0;
     }
     EncoderMotor_WritePwm(ENCODER_MOTOR_LEFT, 0);
@@ -648,6 +697,7 @@ void EncoderMotor_EnterCalibration(void)
         g_controller[index].pwm = 0;
         g_controller[index].integralScaled = 0;
         g_controller[index].startupActive = 0U;
+        g_controller[index].zeroTargetBrakeEnabled = 0U;
         g_intervalCount[index] = 0;
     }
     EncoderMotor_WritePwm(ENCODER_MOTOR_LEFT, 0);
@@ -669,6 +719,7 @@ void EncoderMotor_ExitCalibration(void)
         g_controller[index].pwm = 0;
         g_controller[index].integralScaled = 0;
         g_controller[index].startupActive = 0U;
+        g_controller[index].zeroTargetBrakeEnabled = 0U;
         g_intervalCount[index] = 0;
     }
     EncoderMotor_WritePwm(ENCODER_MOTOR_LEFT, 0);
@@ -693,6 +744,8 @@ void EncoderMotor_SetOpenLoopPwm(int16_t leftPwm, int16_t rightPwm)
     g_controller[ENCODER_MOTOR_RIGHT].integralScaled = 0;
     g_controller[ENCODER_MOTOR_LEFT].startupActive = 0U;
     g_controller[ENCODER_MOTOR_RIGHT].startupActive = 0U;
+    g_controller[ENCODER_MOTOR_LEFT].zeroTargetBrakeEnabled = 0U;
+    g_controller[ENCODER_MOTOR_RIGHT].zeroTargetBrakeEnabled = 0U;
     g_controller[ENCODER_MOTOR_LEFT].pwm =
         g_controller[ENCODER_MOTOR_LEFT].openLoopPwm;
     g_controller[ENCODER_MOTOR_RIGHT].pwm =

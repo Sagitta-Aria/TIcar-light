@@ -17,10 +17,14 @@
 #define MOTOR_NO_YAW_S6_MASK        (0x02U)
 #define MOTOR_NO_YAW_S7_MASK        (0x01U)
 
-#define MOTOR_NO_YAW_RETURN_MASK    MOTOR_NO_YAW_S7_MASK
+#define MOTOR_NO_YAW_LEFT_RETURN_MASK  MOTOR_NO_YAW_S1_MASK
+#define MOTOR_NO_YAW_RIGHT_RETURN_MASK MOTOR_NO_YAW_S7_MASK
+#define MOTOR_NO_YAW_LEFT_TURN_MASK \
+    (MOTOR_NO_YAW_S1_MASK | MOTOR_NO_YAW_S2_MASK)
 #define MOTOR_NO_YAW_RIGHT_TURN_MASK \
-    (MOTOR_NO_YAW_S5_MASK | MOTOR_NO_YAW_S6_MASK | \
-        MOTOR_NO_YAW_S7_MASK)
+    (MOTOR_NO_YAW_S6_MASK | MOTOR_NO_YAW_S7_MASK)
+#define MOTOR_NO_YAW_ALL_TURN_MASK \
+    (MOTOR_NO_YAW_LEFT_TURN_MASK | MOTOR_NO_YAW_RIGHT_TURN_MASK)
 
 #define MOTOR_NO_YAW_INVALID_TICKS  (0xFFFFU)
 #define MOTOR_NO_YAW_ABS_TARGET(value) \
@@ -61,10 +65,19 @@
     (CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TURN_SPEED_COUNTS_PER_PERIOD) > \
+        CAR_MOTOR_NO_YAW_TURN_INNER_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
+        CAR_MOTOR_NO_YAW_LEFT_TURN_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
         CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD) > \
@@ -78,20 +91,44 @@
 #error "Task1 speed targets must stay within the Task5 -100..100 scale"
 #endif
 
-#if (((CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_TURN_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_TURN_NEAR_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_DEFAULT_SEARCH_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U) || \
-    ((CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_CPS % CHASSIS_CONTROL_HZ) != 0U))
-#error "Task4 CPS speeds must map exactly to count/control-period"
+#if ((CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_COUNTS_PER_PERIOD > \
+        CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_COUNTS_PER_PERIOD > \
+        CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_COUNTS_PER_PERIOD))
+#error "Task4 line speeds must satisfy min <= base <= max"
 #endif
 
-#define MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(value) \
-    ((value) / CHASSIS_CONTROL_HZ)
+#if ((MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_COUNTS_PER_PERIOD > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD))
+#error "Task4 speed targets must stay within the Task5 -100..100 scale"
+#endif
 
 #define MOTOR_NO_YAW_TIMER_DIV_TICKS \
     (((GRAY_SAMPLE_TIMER_TICK_HZ * CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US) + \
@@ -100,6 +137,11 @@
 #if (MOTOR_NO_YAW_TIMER_DIV_TICKS == 0U)
 #error "MOTOR_NO_YAW_TIMER_DIV_TICKS must be greater than 0"
 #endif
+
+#define MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES \
+    (((CAR_MOTOR_NO_YAW_LEFT_TURN_WINDOW_MS * 1000U) + \
+        CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US - 1U) / \
+        CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US)
 
 #define MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES \
     (((CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS * 1000U) + \
@@ -110,6 +152,13 @@
     (((CAR_MOTOR_NO_YAW_TURN_REARM_MS * 1000U) + \
         CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US - 1U) / \
         CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US)
+
+#if ((MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES == 0U) || \
+    (MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES > 0xFFFFU) || \
+    (MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES == 0U) || \
+    (MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES > 0xFFFFU))
+#error "Turn window samples must fit uint16_t and be greater than zero"
+#endif
 
 #if ((MOTOR_NO_YAW_TURN_REARM_SAMPLES == 0U) || \
     (MOTOR_NO_YAW_TURN_REARM_SAMPLES > 0xFFFFU))
@@ -122,6 +171,12 @@ typedef enum {
     MOTOR_NO_YAW_PROFILE_COUNT
 } MotorNoYawProfile;
 
+typedef enum {
+    MOTOR_NO_YAW_TURN_NONE = 0,
+    MOTOR_NO_YAW_TURN_LEFT,
+    MOTOR_NO_YAW_TURN_RIGHT
+} MotorNoYawTurnDirection;
+
 typedef struct {
     int16_t baseSpeedCounts;
     int16_t minLineSpeedCounts;
@@ -130,8 +185,10 @@ typedef struct {
     int16_t turnGain;
     int16_t turnDGain;
     uint16_t turnLimitCounts;
-    int16_t turnSpeedCounts;
-    int16_t turnNearSpeedCounts;
+    int16_t leftTurnSpeedCounts;
+    int16_t leftTurnNearSpeedCounts;
+    int16_t rightTurnSpeedCounts;
+    int16_t rightTurnNearSpeedCounts;
     uint32_t turnMinEncoderGapCounts;
     int16_t defaultSearchSpeedCounts;
     uint16_t turnApproachMs;
@@ -151,8 +208,10 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
         (int16_t)CAR_MOTOR_NO_YAW_TURN_GAIN,
         (int16_t)CAR_MOTOR_NO_YAW_TURN_D_GAIN,
         (uint16_t)CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_TURN_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_LEFT_TURN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
         (uint32_t)CAR_MOTOR_NO_YAW_TURN_MIN_ENCODER_GAP_COUNTS,
         (int16_t)CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD,
         (uint16_t)CAR_MOTOR_NO_YAW_TURN_APPROACH_MS,
@@ -163,29 +222,22 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
         (uint16_t)CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS
     },
     {
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_CPS),
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_CPS),
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_CPS),
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_LINE_DEADBAND,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_GAIN,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_D_GAIN,
-        (uint16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_CPS),
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_TURN_SPEED_CPS),
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_TURN_NEAR_SPEED_CPS),
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
         (uint32_t)CAR_MOTOR_NO_YAW_TASK4_TURN_MIN_ENCODER_GAP_COUNTS,
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_DEFAULT_SEARCH_SPEED_CPS),
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD,
         (uint16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_APPROACH_MS,
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_CPS),
-        (int16_t)MOTOR_NO_YAW_CPS_TO_PERIOD_COUNTS(
-            CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_CPS),
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD,
         (uint16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_MS,
         (uint16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_HOLD_MS,
         (uint16_t)CAR_MOTOR_NO_YAW_TASK4_LINE_LOST_TIMEOUT_MS
@@ -199,10 +251,11 @@ typedef struct {
     int16_t lastRightTargetCounts;
     uint16_t turnTicks;
     uint16_t lineLostTicks;
-    volatile uint16_t s5RecentSamples;
+    volatile uint16_t s1RecentSamples;
+    volatile uint16_t s2RecentSamples;
     volatile uint16_t s6RecentSamples;
     volatile uint16_t s7RecentSamples;
-    volatile uint16_t rightTurnReleaseSamples;
+    volatile uint16_t turnReleaseSamples;
     int32_t turnEncoderLeftBaseCounts;
     int32_t turnEncoderRightBaseCounts;
     int16_t turnYawBaseX100;
@@ -212,6 +265,7 @@ typedef struct {
     uint8_t phase;
     uint8_t hasTurnEncoderBase;
     MotorNoYawProfile profile;
+    MotorNoYawTurnDirection turnDirection;
     volatile uint8_t digitalMask;
     volatile uint8_t lineMaskCandidate;
     volatile uint8_t lineMaskConfirmSamples;
@@ -222,7 +276,7 @@ typedef struct {
     volatile uint8_t turnFlag;
     volatile uint8_t returnFlag;
     volatile uint8_t returnConfirmSamples;
-    volatile uint8_t rightTurnRequest;
+    volatile uint8_t turnRequest;
     volatile uint8_t returnLineRequest;
     volatile uint8_t running;
     volatile MotorNoYawState state;
@@ -231,6 +285,7 @@ typedef struct {
 static MotorNoYawControl g_motorNoYaw;
 
 static void MotorNoYaw_StopWithReason(const char *reason);
+static void MotorNoYaw_StartTurn(void);
 
 /* 灰度快采样定时器只在正式循迹期间运行，Task8 不承担这 10kHz 中断。 */
 static void MotorNoYaw_SetSampleTimerEnabled(uint8_t enabled)
@@ -278,7 +333,7 @@ static uint16_t MotorNoYaw_AbsYawDeltaX100(int16_t yawX100,
     return (uint16_t)delta;
 }
 
-/* 在灰度确认入弯时锁存一次航向，后续整个右转都不再移动基准。 */
+/* 在灰度确认入弯时锁存一次航向，后续整个直角转向都不再移动基准。 */
 static uint8_t MotorNoYaw_CaptureTurnYawBase(void)
 {
     JY61P_Attitude attitude;
@@ -315,14 +370,18 @@ static void MotorNoYaw_UpdateTurnYaw(void)
     }
 }
 
-/* 按已完成转角把强转左轮从初始速度线性降到粗略参考角对应的速度。 */
-static int16_t MotorNoYaw_CalculateRightTurnSpeed(
-    const MotorNoYawConfig *config)
+/* 按已完成转角把外轮从初始速度线性降到粗略参考角对应的速度。 */
+static int16_t MotorNoYaw_CalculateTurnOuterSpeed(
+    const MotorNoYawConfig *config, MotorNoYawTurnDirection direction)
 {
-    int32_t startMagnitude = (config->turnSpeedCounts < 0) ?
-        -(int32_t)config->turnSpeedCounts : config->turnSpeedCounts;
-    int32_t nearMagnitude = (config->turnNearSpeedCounts < 0) ?
-        -(int32_t)config->turnNearSpeedCounts : config->turnNearSpeedCounts;
+    int16_t startSpeed = (direction == MOTOR_NO_YAW_TURN_LEFT) ?
+        config->leftTurnSpeedCounts : config->rightTurnSpeedCounts;
+    int16_t nearSpeed = (direction == MOTOR_NO_YAW_TURN_LEFT) ?
+        config->leftTurnNearSpeedCounts : config->rightTurnNearSpeedCounts;
+    int32_t startMagnitude = (startSpeed < 0) ?
+        -(int32_t)startSpeed : startSpeed;
+    int32_t nearMagnitude = (nearSpeed < 0) ?
+        -(int32_t)nearSpeed : nearSpeed;
     int32_t deltaX100 = g_motorNoYaw.turnYawDeltaX100;
     int32_t magnitude;
 
@@ -337,7 +396,7 @@ static int16_t MotorNoYaw_CalculateRightTurnSpeed(
                 (int32_t)CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100 / 2) /
                 (int32_t)CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100);
     }
-    return (config->turnSpeedCounts < 0) ?
+    return (startSpeed < 0) ?
         (int16_t)-magnitude : (int16_t)magnitude;
 }
 
@@ -442,9 +501,9 @@ static void MotorNoYaw_ResetTurnEncoderGap(void)
     g_motorNoYaw.hasTurnEncoderBase = 1U;
 }
 
-static uint8_t MotorNoYaw_CanStartRightTurn(void)  //判断：现在能不能开始一次新的右直角强转
+static uint8_t MotorNoYaw_CanStartTurn(void)
 {
-    if (g_motorNoYaw.hasTurnEncoderBase == 0U) {   //如果还没有记录过右转基准点，说明这是第一次右直角触发，直接允许右转
+    if (g_motorNoYaw.hasTurnEncoderBase == 0U) {
         return 1U;
     }
 
@@ -459,8 +518,14 @@ static uint8_t MotorNoYaw_CanStartRightTurn(void)  //判断：现在能不能开
 static uint8_t MotorNoYaw_CalcDigitalLineError(uint8_t mask,
     int16_t *error)
 {
-    static const int16_t weight[GRAY_SENSOR_COUNT] = {   //左右轮不对称，所以灰度设计不对称
-        -11, -5, -2,0, 2 ,5,11
+    static const int16_t weight[GRAY_SENSOR_COUNT] = {
+        CAR_MOTOR_NO_YAW_S1_LINE_WEIGHT,
+        CAR_MOTOR_NO_YAW_S2_LINE_WEIGHT,
+        CAR_MOTOR_NO_YAW_S3_LINE_WEIGHT,
+        CAR_MOTOR_NO_YAW_S4_LINE_WEIGHT,
+        CAR_MOTOR_NO_YAW_S5_LINE_WEIGHT,
+        CAR_MOTOR_NO_YAW_S6_LINE_WEIGHT,
+        CAR_MOTOR_NO_YAW_S7_LINE_WEIGHT
     };
     int16_t sum = 0;
     uint8_t count = 0U;
@@ -548,6 +613,7 @@ static void MotorNoYaw_ApplyLineControl(void)
     MotorNoYaw_CalculateLineTargets(config, g_motorNoYaw.lineError,
         errorDelta, &leftSpeed, &rightSpeed);
 
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
     g_motorNoYaw.lastLeftTargetCounts = leftSpeed;
     g_motorNoYaw.lastRightTargetCounts = rightSpeed;
     g_motorNoYaw.hasLastLineCommand = 1U;
@@ -559,17 +625,14 @@ static void MotorNoYaw_ApplyLineLostCommand(void)
 {
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
 
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
     if (g_motorNoYaw.hasLastLineCommand != 0U) {
         Motion_SetChassisPeriodCommand(g_motorNoYaw.lastLeftTargetCounts,
             g_motorNoYaw.lastRightTargetCounts);
         return;
     }
 
-    if (g_motorNoYaw.profile == MOTOR_NO_YAW_PROFILE_TASK1) {
-        Motion_SetChassisPeriodCommand(config->defaultSearchSpeedCounts, 0);
-    } else {
-        Motion_SetChassisPeriodCommand(0, config->defaultSearchSpeedCounts);
-    }
+    Motion_SetChassisPeriodCommand(config->defaultSearchSpeedCounts, 0);
 }
 
 /* 作用：异常停车，OLED 保留在 NO YAW 页面，方便看 mask/err/state。 */
@@ -577,6 +640,7 @@ static void MotorNoYaw_StopWithReason(const char *reason)
 {
     (void)reason;
 
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
     Motion_SetChassisPeriodCommand(0, 0);
     MotorEnable_SetChassis(0U);
     g_motorNoYaw.running = 0U;
@@ -584,34 +648,55 @@ static void MotorNoYaw_StopWithReason(const char *reason)
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_STOP;
 }
 
-/* 作用：记录 S5/S6/S7 最近是否触发，窗口内三路都出现就认为是右直角。 */
+static void MotorNoYaw_ResetTurnSampleHistory(void)
+{
+    g_motorNoYaw.s1RecentSamples = 0U;
+    g_motorNoYaw.s2RecentSamples = 0U;
+    g_motorNoYaw.s6RecentSamples = 0U;
+    g_motorNoYaw.s7RecentSamples = 0U;
+}
+
+static void MotorNoYaw_UpdateRecentSample(uint8_t mask, uint8_t sensorMask,
+    volatile uint16_t *recentSamples, uint16_t windowSamples)
+{
+    if ((mask & sensorMask) != 0U) {
+        *recentSamples = windowSamples;
+    } else if (*recentSamples > 0U) {
+        --(*recentSamples);
+    }
+}
+
+/* 作用：记录 S1/S2，两路在窗口内都出现就认为是左直角。 */
+static uint8_t MotorNoYaw_RecordLeftTurnSample(uint8_t mask)
+{
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S1_MASK,
+        &g_motorNoYaw.s1RecentSamples,
+        (uint16_t)MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES);
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S2_MASK,
+        &g_motorNoYaw.s2RecentSamples,
+        (uint16_t)MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES);
+
+    if ((g_motorNoYaw.s1RecentSamples > 0U) &&
+        (g_motorNoYaw.s2RecentSamples > 0U)) {
+        g_motorNoYaw.s1RecentSamples = 0U;
+        g_motorNoYaw.s2RecentSamples = 0U;
+        return 1U;
+    }
+    return 0U;
+}
+
+/* 作用：记录 S6/S7，两路在窗口内都出现就认为是右直角。 */
 static uint8_t MotorNoYaw_RecordRightTurnSample(uint8_t mask)
 {
-    if ((mask & MOTOR_NO_YAW_S5_MASK) != 0U) {
-        g_motorNoYaw.s5RecentSamples =
-            (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES;   //“倒计时计数器
-    } else if (g_motorNoYaw.s5RecentSamples > 0U) {
-        --g_motorNoYaw.s5RecentSamples;
-    }
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S6_MASK,
+        &g_motorNoYaw.s6RecentSamples,
+        (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES);
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S7_MASK,
+        &g_motorNoYaw.s7RecentSamples,
+        (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES);
 
-    if ((mask & MOTOR_NO_YAW_S6_MASK) != 0U) {
-        g_motorNoYaw.s6RecentSamples =
-            (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES;   //“倒计时计数器
-    } else if (g_motorNoYaw.s6RecentSamples > 0U) {
-        --g_motorNoYaw.s6RecentSamples;
-    }
-
-    if ((mask & MOTOR_NO_YAW_S7_MASK) != 0U) {
-        g_motorNoYaw.s7RecentSamples =
-            (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES;
-    } else if (g_motorNoYaw.s7RecentSamples > 0U) {
-        --g_motorNoYaw.s7RecentSamples;
-    }
-
-    if ((g_motorNoYaw.s5RecentSamples > 0U) &&
-        (g_motorNoYaw.s6RecentSamples > 0U) &&
+    if ((g_motorNoYaw.s6RecentSamples > 0U) &&
         (g_motorNoYaw.s7RecentSamples > 0U)) {
-        g_motorNoYaw.s5RecentSamples = 0U;
         g_motorNoYaw.s6RecentSamples = 0U;
         g_motorNoYaw.s7RecentSamples = 0U;
         return 1U;
@@ -620,40 +705,79 @@ static uint8_t MotorNoYaw_RecordRightTurnSample(uint8_t mask)
     return 0U;
 }
 
-/* 作用：S5/S6/S7 触发后，先让车头继续往直角里走一点。 */
-static void MotorNoYaw_StartTurnApproach(void)
+/* 作用：左右直角触发后，先让车头继续往直角里走一点。 */
+static void MotorNoYaw_StartTurnApproach(MotorNoYawTurnDirection direction)
 {
     (void)MotorNoYaw_CaptureTurnYawBase();
+    g_motorNoYaw.turnDirection = direction;
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
     g_motorNoYaw.lineDerivativeReady = 0U;
-    g_motorNoYaw.s5RecentSamples = 0U;
-    g_motorNoYaw.s6RecentSamples = 0U;
-    g_motorNoYaw.s7RecentSamples = 0U;
-    g_motorNoYaw.rightTurnReleaseSamples = 0U;
+    MotorNoYaw_ResetTurnSampleHistory();
+    g_motorNoYaw.turnReleaseSamples = 0U;
     g_motorNoYaw.turnFlag = 0U;      /* 进弯后不再允许重复触发强转。 */
     g_motorNoYaw.returnFlag = 0U;
     g_motorNoYaw.returnConfirmSamples = 0U;
-    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.returnLineRequest = 0U;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_TURN_APPROACH;
+    if (MotorNoYaw_GetConfig()->turnApproachMs == 0U) {
+        MotorNoYaw_StartTurn();
+    }
 }
 
-/* 作用：前进时间到了以后强右转；JY61只提供可选的角度减速参考。 */
-static void MotorNoYaw_StartRightTurn(void)
+/* 作用：按锁存方向写强转目标；内轮使用轻微反向闭环目标。 */
+static void MotorNoYaw_ApplyTurnCommand(const MotorNoYawConfig *config)
 {
+    int16_t outerSpeed = MotorNoYaw_CalculateTurnOuterSpeed(config,
+        g_motorNoYaw.turnDirection);
+    int16_t innerSpeed =
+        (int16_t)CAR_MOTOR_NO_YAW_TURN_INNER_SPEED_COUNTS_PER_PERIOD;
+
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
+    if (g_motorNoYaw.turnDirection == MOTOR_NO_YAW_TURN_LEFT) {
+        Motion_SetChassisPeriodCommand(innerSpeed, outerSpeed);
+    } else {
+        Motion_SetChassisPeriodCommand(outerSpeed, innerSpeed);
+    }
+}
+
+/* 作用：切换内外轮目标后，进入已锁存方向的强转状态。 */
+static void MotorNoYaw_StartTurn(void)
+{
+    const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
+
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
     g_motorNoYaw.turnFlag = 0U;      /* 强转中不准再次进入强转。 */
-    g_motorNoYaw.returnFlag = 0U;    /* 必须先等入弯前的S4释放。 */
+    g_motorNoYaw.returnFlag = 0U;    /* 必须先等转向侧最外传感器释放。 */
     g_motorNoYaw.returnConfirmSamples = 0U;
-    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.returnLineRequest = 0U;
-    g_motorNoYaw.state = MOTOR_NO_YAW_STATE_TURN_RIGHT;
+    MotorNoYaw_ApplyTurnCommand(config);
+    g_motorNoYaw.state = (g_motorNoYaw.turnDirection ==
+        MOTOR_NO_YAW_TURN_LEFT) ? MOTOR_NO_YAW_STATE_TURN_LEFT :
+        MOTOR_NO_YAW_STATE_TURN_RIGHT;
 }
 
-/* 作用：灰度S4重新回线后低速向前出弯。 */
+static void MotorNoYaw_ApplyTurnExitCommand(const MotorNoYawConfig *config)
+{
+    int16_t leftSpeed;
+    int16_t rightSpeed;
+
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
+    if (g_motorNoYaw.turnDirection == MOTOR_NO_YAW_TURN_LEFT) {
+        leftSpeed = config->turnExitInnerSpeedCounts;
+        rightSpeed = config->turnExitOuterSpeedCounts;
+    } else {
+        leftSpeed = config->turnExitOuterSpeedCounts;
+        rightSpeed = config->turnExitInnerSpeedCounts;
+    }
+    Motion_SetChassisPeriodCommand(leftSpeed, rightSpeed);
+}
+
+/* 作用：转向侧最外灰度重新回线后，按内外轮速度低速出弯。 */
 static void MotorNoYaw_StartTurnExit(void)
 {
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
@@ -661,13 +785,12 @@ static void MotorNoYaw_StartTurnExit(void)
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.returnLineRequest = 0U;
     g_motorNoYaw.returnConfirmSamples = 0U;
-    Motion_SetChassisPeriodCommand((int16_t)config->turnExitOuterSpeedCounts,
-        (int16_t)config->turnExitInnerSpeedCounts);
+    MotorNoYaw_ApplyTurnExitCommand(config);
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_TURN_EXIT;
 }
 
 /* 作用：低速出弯结束后累计转向次数，并回到普通循迹。 */
-static void MotorNoYaw_FinishRightTurn(void)
+static void MotorNoYaw_FinishTurn(void)
 {
     ++g_motorNoYaw.turnCount;   //转向次数计数
     g_motorNoYaw.phase = (uint8_t)((g_motorNoYaw.phase + 1U) & 0x03U);
@@ -675,29 +798,31 @@ static void MotorNoYaw_FinishRightTurn(void)
     g_motorNoYaw.lineLostTicks = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
     g_motorNoYaw.lineDerivativeReady = 0U;
-    g_motorNoYaw.s5RecentSamples = 0U;
-    g_motorNoYaw.s6RecentSamples = 0U;
-    g_motorNoYaw.s7RecentSamples = 0U;
-    g_motorNoYaw.rightTurnReleaseSamples = 0U;
-    g_motorNoYaw.turnFlag = 0U;      /* S5/S6/S7 稳定释放后才重新允许强转。 */
+    MotorNoYaw_ResetTurnSampleHistory();
+    g_motorNoYaw.turnReleaseSamples = 0U;
+    g_motorNoYaw.turnFlag = 0U;      /* 两侧直角传感器稳定释放后才重新允许强转。 */
     g_motorNoYaw.returnFlag = 0U;
     g_motorNoYaw.returnConfirmSamples = 0U;
-    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.returnLineRequest = 0U;
     g_motorNoYaw.hasTurnYawBase = 0U;
     g_motorNoYaw.turnYawDeltaX100 = 0U;
+    g_motorNoYaw.turnDirection = MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_LINE;
 }
 
 /*
  * 作用：TIMG0 中断里的灰度快采样。
- * 使用场景：每个云台STEP定时器tick调一次，本函数内部再分频到100us左右。
+ * 使用场景：TIMG0 灰度采样中断调用，本工程当前周期为100us。
  * 说明：中断里只读 GPIO 和置请求标志，不直接控制电机、不打印、不刷屏。
  */
 uint8_t MotorNoYaw_TimerSample(void)
 {
     static uint16_t sampleDivTicks;
     uint8_t mask;
+    uint8_t leftTurnDetected;
+    uint8_t rightTurnDetected;
+    uint8_t returnMask;
     MotorNoYawState state;
 
     if (g_motorNoYaw.running == 0U) {
@@ -717,40 +842,46 @@ uint8_t MotorNoYaw_TimerSample(void)
 
     if (state == MOTOR_NO_YAW_STATE_LINE) {  //检测强转
         if (g_motorNoYaw.turnFlag == 0U) {
-            if ((mask & MOTOR_NO_YAW_RIGHT_TURN_MASK) == 0U) {
-                if (g_motorNoYaw.rightTurnReleaseSamples <
+            if ((mask & MOTOR_NO_YAW_ALL_TURN_MASK) == 0U) {
+                if (g_motorNoYaw.turnReleaseSamples <
                     (uint16_t)MOTOR_NO_YAW_TURN_REARM_SAMPLES) {
-                    ++g_motorNoYaw.rightTurnReleaseSamples;
+                    ++g_motorNoYaw.turnReleaseSamples;
                 }
-                if (g_motorNoYaw.rightTurnReleaseSamples >=
+                if (g_motorNoYaw.turnReleaseSamples >=
                     (uint16_t)MOTOR_NO_YAW_TURN_REARM_SAMPLES) {
-                    g_motorNoYaw.rightTurnReleaseSamples = 0U;
+                    g_motorNoYaw.turnReleaseSamples = 0U;
                     g_motorNoYaw.turnFlag = 1U;
                 }
             } else {
-                g_motorNoYaw.rightTurnReleaseSamples = 0U;
+                g_motorNoYaw.turnReleaseSamples = 0U;
             }
             return 0U;
         }
-        if ((g_motorNoYaw.turnFlag != 0U) &&
-            (MotorNoYaw_RecordRightTurnSample(mask) != 0U)) {
-            if (g_motorNoYaw.rightTurnRequest == 0U) {
-                g_motorNoYaw.rightTurnRequest = 1U;
-                return 1U;
-            }
+        leftTurnDetected = MotorNoYaw_RecordLeftTurnSample(mask);
+        rightTurnDetected = MotorNoYaw_RecordRightTurnSample(mask);
+        if ((leftTurnDetected != rightTurnDetected) &&
+            (g_motorNoYaw.turnRequest ==
+                (uint8_t)MOTOR_NO_YAW_TURN_NONE)) {
+            g_motorNoYaw.turnRequest = (leftTurnDetected != 0U) ?
+                (uint8_t)MOTOR_NO_YAW_TURN_LEFT :
+                (uint8_t)MOTOR_NO_YAW_TURN_RIGHT;
+            return 1U;
         }
         return 0U;
     }
 
-    if (state == MOTOR_NO_YAW_STATE_TURN_RIGHT) {
+    if ((state == MOTOR_NO_YAW_STATE_TURN_LEFT) ||
+        (state == MOTOR_NO_YAW_STATE_TURN_RIGHT)) {
+        returnMask = (state == MOTOR_NO_YAW_STATE_TURN_LEFT) ?
+            MOTOR_NO_YAW_LEFT_RETURN_MASK : MOTOR_NO_YAW_RIGHT_RETURN_MASK;
         if (g_motorNoYaw.returnFlag == 0U) {
             g_motorNoYaw.returnConfirmSamples = 0U;
-            if ((mask & MOTOR_NO_YAW_RETURN_MASK) == 0U) {
+            if ((mask & returnMask) == 0U) {
                 g_motorNoYaw.returnFlag = 1U;
             }
             return 0U;
         }
-        if ((mask & MOTOR_NO_YAW_RETURN_MASK) == 0U) {
+        if ((mask & returnMask) == 0U) {
             g_motorNoYaw.returnConfirmSamples = 0U;
             return 0U;
         }
@@ -774,15 +905,17 @@ static void MotorNoYaw_TaskLine(void)
 {
     uint16_t lineLostTimeoutTicks =
         MotorNoYaw_MsToTicks(MotorNoYaw_GetConfig()->lineLostTimeoutMs);
+    MotorNoYawTurnDirection direction =
+        (MotorNoYawTurnDirection)g_motorNoYaw.turnRequest;
 
-    if (g_motorNoYaw.rightTurnRequest != 0U) {
-        g_motorNoYaw.rightTurnRequest = 0U;
-        if (MotorNoYaw_CanStartRightTurn() == 0U) {
+    if (direction != MOTOR_NO_YAW_TURN_NONE) {
+        g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
+        if (MotorNoYaw_CanStartTurn() == 0U) {
             MotorNoYaw_ApplyLineControl();
             return;
         }
-    MotorNoYaw_ResetTurnEncoderGap();
-        MotorNoYaw_StartTurnApproach();
+        MotorNoYaw_ResetTurnEncoderGap();
+        MotorNoYaw_StartTurnApproach(direction);
         return;
     }
 
@@ -802,7 +935,7 @@ static void MotorNoYaw_TaskLine(void)
     MotorNoYaw_ApplyLineControl();
 }
 
-/* 作用：右直角触发后，先前进一小段，再开始强右转。 */
+/* 作用：直角触发后先前进一小段，再按锁存方向强转。 */
 static void MotorNoYaw_TaskTurnApproach(void)
 {
     uint16_t approachTicks =
@@ -823,25 +956,23 @@ static void MotorNoYaw_TaskTurnApproach(void)
         ++g_motorNoYaw.turnTicks;
     }
     if (g_motorNoYaw.turnTicks >= approachTicks) {
-        MotorNoYaw_StartRightTurn();
+        MotorNoYaw_StartTurn();
     }
 }
 
-/* 作用：右内轮停车；优先响应S4回线，JY61只辅助减速且缺失时忽略。 */
-static void MotorNoYaw_TaskTurnRight(void)
+/* 作用：内轮停车、外轮转向；优先响应灰度回线，姿态角只辅助减速。 */
+static void MotorNoYaw_TaskTurn(void)
 {
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
     uint16_t timeoutTicks =
         MotorNoYaw_MsToTicks(config->turnHoldMs);
-    int16_t leftSpeed;
 
     if (g_motorNoYaw.returnLineRequest != 0U) {
         MotorNoYaw_StartTurnExit();
         return;
     }
     MotorNoYaw_UpdateTurnYaw();
-    leftSpeed = MotorNoYaw_CalculateRightTurnSpeed(config);
-    Motion_SetChassisPeriodCommand(leftSpeed, 0);
+    MotorNoYaw_ApplyTurnCommand(config);
     if (g_motorNoYaw.turnTicks < MOTOR_NO_YAW_INVALID_TICKS) {
         ++g_motorNoYaw.turnTicks;
     }
@@ -851,20 +982,18 @@ static void MotorNoYaw_TaskTurnRight(void)
     }
 }
 
-/* 作用：强转解除后双轮低速前进，右内轮略快并平滑恢复循迹。 */
+/* 作用：强转解除后双轮按内外轮配置低速前进并平滑恢复循迹。 */
 static void MotorNoYaw_TaskTurnExit(void)
 {
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
     uint16_t exitTicks = MotorNoYaw_MsToTicks(config->turnExitMs);
 
-        Motion_SetChassisPeriodCommand(
-            (int16_t)config->turnExitOuterSpeedCounts,
-            (int16_t)config->turnExitInnerSpeedCounts);
+    MotorNoYaw_ApplyTurnExitCommand(config);
     if (g_motorNoYaw.turnTicks < MOTOR_NO_YAW_INVALID_TICKS) {
         ++g_motorNoYaw.turnTicks;
     }
     if (g_motorNoYaw.turnTicks >= exitTicks) {
-        MotorNoYaw_FinishRightTurn();
+        MotorNoYaw_FinishTurn();
     }
 }
 
@@ -876,10 +1005,8 @@ static void MotorNoYaw_ResetControl(void)
     g_motorNoYaw.lastRightTargetCounts = 0;
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
-    g_motorNoYaw.s5RecentSamples = 0U;
-    g_motorNoYaw.s6RecentSamples = 0U;
-    g_motorNoYaw.s7RecentSamples = 0U;
-    g_motorNoYaw.rightTurnReleaseSamples = 0U;
+    MotorNoYaw_ResetTurnSampleHistory();
+    g_motorNoYaw.turnReleaseSamples = 0U;
     g_motorNoYaw.turnEncoderLeftBaseCounts = 0;
     g_motorNoYaw.turnEncoderRightBaseCounts = 0;
     g_motorNoYaw.turnYawBaseX100 = 0;
@@ -888,6 +1015,7 @@ static void MotorNoYaw_ResetControl(void)
     g_motorNoYaw.turnCount = 0U;
     g_motorNoYaw.phase = 0U;
     g_motorNoYaw.hasTurnEncoderBase = 0U;
+    g_motorNoYaw.turnDirection = MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.digitalMask = 0U;
     g_motorNoYaw.lineMaskCandidate = 0U;
     g_motorNoYaw.lineMaskConfirmSamples = 0U;
@@ -898,7 +1026,7 @@ static void MotorNoYaw_ResetControl(void)
     g_motorNoYaw.turnFlag = 1U;
     g_motorNoYaw.returnFlag = 0U;
     g_motorNoYaw.returnConfirmSamples = 0U;
-    g_motorNoYaw.rightTurnRequest = 0U;
+    g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.returnLineRequest = 0U;
 }
 
@@ -913,6 +1041,7 @@ void MotorNoYaw_Init(void)
 
 static void MotorNoYaw_StartWithProfile(MotorNoYawProfile profile)
 {
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
     g_motorNoYaw.profile = profile;
     MotorNoYaw_ResetControl();
     MotorNoYaw_UpdateFilteredLineMask(Gray_ReadDigitalMaskFast());
@@ -934,6 +1063,7 @@ void MotorNoYaw_StartMission4(void)
 
 void MotorNoYaw_Stop(void)
 {
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
     if (g_motorNoYaw.state != MOTOR_NO_YAW_STATE_IDLE) {
         Motion_SetChassisPeriodCommand(0, 0);
     MotorEnable_SetChassis(0U);
@@ -945,21 +1075,25 @@ void MotorNoYaw_Stop(void)
 
 void MotorNoYaw_HandleFastEvent(void)
 {
+    MotorNoYawTurnDirection direction;
+
     if (g_motorNoYaw.running == 0U) {
         return;
     }
 
+    direction = (MotorNoYawTurnDirection)g_motorNoYaw.turnRequest;
     if ((g_motorNoYaw.state == MOTOR_NO_YAW_STATE_LINE) &&
-        (g_motorNoYaw.rightTurnRequest != 0U)) {
-        g_motorNoYaw.rightTurnRequest = 0U;
-        if (MotorNoYaw_CanStartRightTurn() != 0U) {
+        (direction != MOTOR_NO_YAW_TURN_NONE)) {
+        g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
+        if (MotorNoYaw_CanStartTurn() != 0U) {
             MotorNoYaw_ResetTurnEncoderGap();
-            MotorNoYaw_StartTurnApproach();
+            MotorNoYaw_StartTurnApproach(direction);
         }
         return;
     }
 
-    if ((g_motorNoYaw.state == MOTOR_NO_YAW_STATE_TURN_RIGHT) &&
+    if (((g_motorNoYaw.state == MOTOR_NO_YAW_STATE_TURN_LEFT) ||
+        (g_motorNoYaw.state == MOTOR_NO_YAW_STATE_TURN_RIGHT)) &&
         (g_motorNoYaw.returnLineRequest != 0U)) {
         MotorNoYaw_StartTurnExit();
     }
@@ -979,13 +1113,13 @@ void MotorNoYaw_Task(void)
     case MOTOR_NO_YAW_STATE_TURN_APPROACH:
         MotorNoYaw_TaskTurnApproach();
         break;
+    case MOTOR_NO_YAW_STATE_TURN_LEFT:
     case MOTOR_NO_YAW_STATE_TURN_RIGHT:
-        MotorNoYaw_TaskTurnRight();
+        MotorNoYaw_TaskTurn();
         break;
     case MOTOR_NO_YAW_STATE_TURN_EXIT:
         MotorNoYaw_TaskTurnExit();
         break;
-    case MOTOR_NO_YAW_STATE_TURN_LEFT:
     case MOTOR_NO_YAW_STATE_STOP:
     case MOTOR_NO_YAW_STATE_IDLE:
     default:

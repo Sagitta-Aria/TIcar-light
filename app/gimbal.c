@@ -31,6 +31,7 @@ typedef struct {
     int16_t commandY;
     int16_t yawFeedForwardSps;
     int16_t yawAttitudeCompensationSps;
+    int32_t yawLostSearchCenterStep;
     /* lastVisionTick 用绝对RTOS时间做掉线保护，不依赖任务调用频率。 */
     TickType_t lastVisionTick;
     /* pitchBaseStep 是进入视觉闭环时的上下轴 STEP 计数，作为相对 0 度。 */
@@ -41,6 +42,9 @@ typedef struct {
     uint8_t controlPending;
     uint8_t axisActiveX;
     uint8_t axisActiveY;
+    int8_t yawLostSearchDirection;
+    uint8_t yawLostSearchEnabled;
+    uint8_t yawLostSearchActive;
 } GimbalControl;
 
 static GimbalControl g_gimbal;
@@ -210,6 +214,44 @@ static void Gimbal_SetAxis(MotorId motor, int16_t command)
     }
 }
 
+/* 以丢失瞬间的位置为中心，清除固定随动并沿最后一次yaw方向开始重搜。 */
+static void Gimbal_StartLostTargetSearch(void)
+{
+    g_gimbal.yawLostSearchCenterStep =
+        Motor_GetStepCount(MOTOR_GIMBAL_1);
+    g_gimbal.yawLostSearchDirection =
+        (g_gimbal.commandX < 0) ? -1 : 1;
+    g_gimbal.yawFeedForwardSps = 0;
+    g_gimbal.yawLostSearchActive = 1U;
+}
+
+/* 丢帧时停止旧视觉/pitch输出，只叠加左右搜索和Task8同源姿态补偿。 */
+static void Gimbal_ApplyLostTargetSearch(void)
+{
+    int32_t stepDelta = Motor_GetStepCount(MOTOR_GIMBAL_1) -
+        g_gimbal.yawLostSearchCenterStep;
+    int16_t searchCommand;
+    int16_t commandX;
+
+    if (stepDelta >=
+        (int32_t)CAR_MISSION4_GIMBAL_LOST_SEARCH_AMPLITUDE_STEPS) {
+        g_gimbal.yawLostSearchDirection = -1;
+    } else if (stepDelta <=
+        -(int32_t)CAR_MISSION4_GIMBAL_LOST_SEARCH_AMPLITUDE_STEPS) {
+        g_gimbal.yawLostSearchDirection = 1;
+    }
+
+    searchCommand = (g_gimbal.yawLostSearchDirection < 0) ?
+        (int16_t)(-(int32_t)CAR_MISSION4_GIMBAL_LOST_SEARCH_SPEED_SPS) :
+        (int16_t)CAR_MISSION4_GIMBAL_LOST_SEARCH_SPEED_SPS;
+    commandX = Gimbal_ClampCommand((int32_t)searchCommand +
+        (int32_t)g_gimbal.yawAttitudeCompensationSps);
+    g_gimbal.commandX = commandX;
+    g_gimbal.commandY = 0;
+    Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
+    Gimbal_SetAxis(MOTOR_GIMBAL_2, 0);
+}
+
 /* 作用：Task4 临时覆盖结束后恢复两个云台轴的默认斜坡。 */
 void Gimbal_ResetRamp(void)
 {
@@ -319,6 +361,7 @@ void Gimbal_Init(void)
     g_gimbal.commandY = 0;
     g_gimbal.yawFeedForwardSps = 0;
     g_gimbal.yawAttitudeCompensationSps = 0;
+    g_gimbal.yawLostSearchCenterStep = 0;
     g_gimbal.lastVisionTick = 0U;
     g_gimbal.pitchBaseStep = Motor_GetStepCount(MOTOR_GIMBAL_2);
     g_gimbal.enabled = 0U;
@@ -327,6 +370,9 @@ void Gimbal_Init(void)
     g_gimbal.controlPending = 0U;
     g_gimbal.axisActiveX = 0U;
     g_gimbal.axisActiveY = 0U;
+    g_gimbal.yawLostSearchDirection = 1;
+    g_gimbal.yawLostSearchEnabled = 0U;
+    g_gimbal.yawLostSearchActive = 0U;
     Gimbal_Stop();
 }
 
@@ -350,6 +396,7 @@ void Gimbal_SetEnabled(uint8_t enabled)
         g_gimbal.controlPending = 0U;
         g_gimbal.axisActiveX = 0U;
         g_gimbal.axisActiveY = 0U;
+        g_gimbal.yawLostSearchActive = 0U;
     }
 
     g_gimbal.enabled = nextEnabled;
@@ -357,6 +404,7 @@ void Gimbal_SetEnabled(uint8_t enabled)
         g_gimbal.controlPending = 0U;
         g_gimbal.axisActiveX = 0U;
         g_gimbal.axisActiveY = 0U;
+        g_gimbal.yawLostSearchActive = 0U;
         Gimbal_Stop();
         Gimbal_ResetRamp();
     }
@@ -461,8 +509,18 @@ void Gimbal_Task(void)
         return;
     }
 
-    /* 没有视觉数据时，允许 Task4 yaw 基础速度和姿态补偿继续输出。 */
+    /* 新视觉帧到达时直接退出搜索，本周期立即恢复视觉闭环。 */
+    if ((g_gimbal.yawLostSearchActive != 0U) &&
+        (g_gimbal.hasVision != 0U)) {
+        g_gimbal.yawLostSearchActive = 0U;
+    }
+
+    /* 没有视觉数据时只允许搜索或姿态补偿继续输出。 */
     if (!g_gimbal.hasVision) {
+        if (g_gimbal.yawLostSearchActive != 0U) {
+            Gimbal_ApplyLostTargetSearch();
+            return;
+        }
         if ((g_gimbal.yawFeedForwardSps != 0) ||
             (g_gimbal.yawAttitudeCompensationSps != 0)) {
             Gimbal_ApplyYawSupplementsOnly();
@@ -472,7 +530,7 @@ void Gimbal_Task(void)
         return;
     }
 
-    /* 视觉超时后保留 Task4 yaw 基础速度和姿态补偿，pitch 轴停止。 */
+    /* 视觉超时后清除固定yaw随动，pitch停止，yaw进入补偿叠加搜索。 */
     if ((xTaskGetTickCount() - g_gimbal.lastVisionTick) >=
         pdMS_TO_TICKS(CAR_GIMBAL_VISION_TIMEOUT_TICKS)) {
         g_gimbal.hasVision = 0U;
@@ -482,6 +540,11 @@ void Gimbal_Task(void)
         g_gimbal.controlPending = 0U;
         g_gimbal.axisActiveX = 0U;
         g_gimbal.axisActiveY = 0U;
+        if (g_gimbal.yawLostSearchEnabled != 0U) {
+            Gimbal_StartLostTargetSearch();
+            Gimbal_ApplyLostTargetSearch();
+            return;
+        }
         if ((g_gimbal.yawFeedForwardSps != 0) ||
             (g_gimbal.yawAttitudeCompensationSps != 0)) {
             Gimbal_ApplyYawSupplementsOnly();
@@ -501,6 +564,10 @@ void Gimbal_SetYawFeedForward(int16_t speedSps)
 {
     int16_t nextSpeedSps = Gimbal_ClampCommand((int32_t)speedSps);
 
+    /* 搜索期间固定随动保持为0；重新捕获视觉后状态机可在下一拍恢复。 */
+    if ((g_gimbal.yawLostSearchActive != 0U) && (nextSpeedSps != 0)) {
+        return;
+    }
     if (nextSpeedSps == g_gimbal.yawFeedForwardSps) {
         return;
     }
@@ -520,12 +587,35 @@ void Gimbal_SetYawAttitudeCompensation(int16_t speedSps)
     g_gimbal.controlPending = 1U;
 }
 
+void Gimbal_SetLostTargetSearchEnabled(uint8_t enabled)
+{
+    uint8_t nextEnabled = (enabled != 0U) ? 1U : 0U;
+
+    if (nextEnabled == g_gimbal.yawLostSearchEnabled) {
+        return;
+    }
+    g_gimbal.yawLostSearchEnabled = nextEnabled;
+    if (nextEnabled == 0U) {
+        g_gimbal.yawLostSearchActive = 0U;
+        g_gimbal.controlPending = 1U;
+    }
+    RtosApp_NotifyGimbal();
+}
+
+uint8_t Gimbal_IsLostTargetSearchActive(void)
+{
+    return g_gimbal.yawLostSearchActive;
+}
+
 uint8_t Gimbal_IsYawTrackingActive(void)
 {
     const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
     uint16_t threshold = (g_gimbal.axisActiveX != 0U) ?
         config->deadbandX : config->restartDeadbandX;
 
+    if (g_gimbal.yawLostSearchActive != 0U) {
+        return 1U;
+    }
     if ((g_gimbal.enabled == 0U) || (g_gimbal.hasVision == 0U)) {
         return (uint8_t)((g_gimbal.yawFeedForwardSps != 0) ? 1U : 0U);
     }

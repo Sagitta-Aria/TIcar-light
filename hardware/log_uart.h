@@ -4,16 +4,16 @@
 #include "board_config.h"
 #include <stdint.h>
 
-/* LogUart_Init：初始化 Type-C CH340 日志通道的软件状态。 */
+/* LogUart_Init：初始化UART0日志TX；H7占用PA11时不启用文本RX。 */
 void LogUart_Init(void);
 
 /* LogUart_Task：日志串口后台任务入口，当前发送为同步有限等待。 */
 void LogUart_Task(void);
 
-/* LogUart_HandleUARTInterrupt：UART0 ISR入口，只缓存接收字节。 */
+/* LogUart_HandleUARTInterrupt：仅在CAR_ENABLE_LOG_UART_RX启用时缓存文本。 */
 void LogUart_HandleUARTInterrupt(void);
 
-/* LogUart_TryReadByte：从UART0接收环形缓冲取一个字节。 */
+/* LogUart_TryReadByte：文本RX关闭时固定返回0。 */
 uint8_t LogUart_TryReadByte(uint8_t *data);
 
 /* LogUart_ClearRx：清空软件接收缓冲和累计错误计数。 */

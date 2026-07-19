@@ -59,11 +59,13 @@ typedef struct {
     uint8_t gimbalState;
     uint8_t gimbalHoldEnabled;
     uint8_t gimbalFeedForwardEnabled;
+    uint8_t gimbalFeedbackFresh;
+    uint8_t gimbalFeedForwardFresh;
     uint16_t gimbalCalibrationCount;
     uint16_t gimbalCalibrationTarget;
     int32_t gimbalYawX100;
     int32_t gimbalRateX100PerSec;
-    int32_t gimbalStepError;
+    int32_t gimbalAngleErrorX100;
     int16_t gimbalCommandSps;
 } TuningConsoleDisplayStatus;
 

@@ -60,6 +60,10 @@ void Motor_SetChassisCommand(int16_t leftCps, int16_t rightCps);
 void Motor_SetChassisPeriodCommand(int16_t leftCounts,
     int16_t rightCounts);
 
+/* 分别允许左右轮在零目标时按编码反馈输出反向阻尼PWM。 */
+void Motor_SetChassisZeroTargetBrake(uint8_t leftEnabled,
+    uint8_t rightEnabled);
+
 /*
  * Motor_SetAllStop：底盘PWM清零，并停止两路云台STEP输出。
  * 使用场景：状态机切换、测试结束、异常停车。

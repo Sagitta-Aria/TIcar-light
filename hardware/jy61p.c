@@ -260,7 +260,7 @@ void JY61P_PrintTask(void)
             return;
         }
         g_jy61p.waitTicks = 0U;
-        LOG_LINE("jy61p wait");
+        LOG_LINE("jy61 feedforward wait");
         return;
     }
 
@@ -270,7 +270,7 @@ void JY61P_PrintTask(void)
     }
     g_jy61p.lastPrintedFrameCount = attitude.angleFrameCount;
 
-    LogUart_SendString("jy61p ");
+    LogUart_SendString("jy61_ff ");
     JY61P_PrintAngle("roll=", attitude.rollX100);
     JY61P_PrintAngle(" pitch=", attitude.pitchX100);
     JY61P_PrintAngle(" yaw=", attitude.yawX100);

@@ -69,6 +69,12 @@ void Gimbal_SetYawFeedForward(int16_t speedSps);
 /* 写入姿态环的电机方向补偿速度；只允许 Gimbal 固定周期任务调用。 */
 void Gimbal_SetYawAttitudeCompensation(int16_t speedSps);
 
+/* Task4首帧锁定后允许视觉超时触发左右摆动重搜；其他任务保持关闭。 */
+void Gimbal_SetLostTargetSearchEnabled(uint8_t enabled);
+
+/* Task4 当前正处于丢目标左右搜索时返回1。 */
+uint8_t Gimbal_IsLostTargetSearchActive(void);
+
 /* 视觉或任务基础命令正在主动转动 yaw 时返回1，供姿态环跟踪参考点。 */
 uint8_t Gimbal_IsYawTrackingActive(void);
 

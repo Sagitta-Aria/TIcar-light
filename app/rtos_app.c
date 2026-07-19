@@ -12,8 +12,21 @@
 #include "state_machine.h"
 #include "vision.h"
 
+/*
+ * RTOS 应用调度总览
+ *
+ * 1. 所有任务在启动时一次性创建，此后永久存在；比赛 Task1~9 只是
+ *    StateMachine 的业务状态，不是 FreeRTOS 任务。
+ * 2. CarControl/Gimbal 是最高优先级实时控制任务；Input/Mission 处理
+ *    离散事件；Comm/UI 在较低优先级执行通信维护和显示。
+ * 3. 直接任务通知相当于轻量“唤醒铃”：只表示有工作，不保存事件内容。
+ *    必须逐个处理的 CarEvent 单独放入 g_eventQueue，防止事件被合并。
+ * 4. 周期任务使用 xTaskDelayUntil 或带超时的 ulTaskNotifyTake，空闲时均
+ *    处于阻塞态；CPU 最终运行 FreeRTOS Idle 任务，而不是轮询所有任务。
+ */
 #define RTOS_EVENT_QUEUE_LENGTH          (8U)
 
+/* FreeRTOS 数值越大优先级越高；configMAX_PRIORITIES=7，合法范围为 0~6。 */
 #define RTOS_CONTROL_PRIORITY            (6U)
 #define RTOS_GIMBAL_PRIORITY             (6U)
 #define RTOS_INPUT_PRIORITY              (4U)
@@ -27,6 +40,7 @@
     ((CAR_WATCHDOG_UI_TIMEOUT_MS + CAR_WATCHDOG_CHECK_PERIOD_MS - 1U) / \
         CAR_WATCHDOG_CHECK_PERIOD_MS)
 
+/* 栈深度单位是 StackType_t（本 Cortex-M0+ 工程中为 32 位字），不是字节。 */
 #define RTOS_CONTROL_STACK_WORDS         (128U)
 #define RTOS_GIMBAL_STACK_WORDS          (256U)
 #define RTOS_INPUT_STACK_WORDS           (128U)
@@ -34,6 +48,7 @@
 #define RTOS_COMM_STACK_WORDS            (256U)
 #define RTOS_UI_STACK_WORDS              (384U)
 
+/* StaticTask_t 保存内核任务控制块；实际任务栈由下一组数组提供。 */
 static StaticTask_t g_controlTaskControl;
 static StaticTask_t g_gimbalTaskControl;
 static StaticTask_t g_inputTaskControl;
@@ -54,6 +69,10 @@ static StackType_t g_missionTaskStack[RTOS_MISSION_STACK_WORDS];
 static StackType_t g_commTaskStack[RTOS_COMM_STACK_WORDS];
 static StackType_t g_uiTaskStack[RTOS_UI_STACK_WORDS];
 
+/*
+ * 队列只传递 CarEvent；TaskHandle_t 用于直接通知或挂起指定任务。
+ * volatile 标志会跨任务访问，但实际修改点都由任务调度顺序约束。
+ */
 static StaticQueue_t g_eventQueueControl;
 static uint8_t g_eventQueueStorage[
     RTOS_EVENT_QUEUE_LENGTH * sizeof(CarEvent)];
@@ -124,6 +143,7 @@ static void RtosApp_WatchdogTask(void *parameter)
 }
 #endif
 
+/* 控制任务可被快事件提前唤醒，但周期控制仍必须等满 20 ms 截止时间。 */
 static TickType_t RtosApp_GetControlWaitTicks(TickType_t lastControlTime)
 {
     TickType_t period = pdMS_TO_TICKS(CHASSIS_CONTROL_PERIOD_MS);
@@ -132,6 +152,13 @@ static TickType_t RtosApp_GetControlWaitTicks(TickType_t lastControlTime)
     return (elapsed >= period) ? 0U : period - elapsed;
 }
 
+/*
+ * CarControl（优先级 6）：
+ * - 常规路径每 CHASSIS_CONTROL_PERIOD_MS（当前 20 ms）执行一次底盘控制；
+ * - TIMG0 识别到转弯/回线语义事件时可通过通知提前唤醒，只处理快事件，
+ *   不会提前读取并清零编码器窗口，也不会提前运行速度 PI；
+ * - Task2/3/7/8 期间由 Mission 挂起，恢复时重置周期基准，避免补跑旧周期。
+ */
 static void RtosApp_ControlTask(void *parameter)
 {
     TickType_t lastControlTime = xTaskGetTickCount();
@@ -169,16 +196,18 @@ static void RtosApp_ControlTask(void *parameter)
     }
 }
 
+/*
+ * Gimbal（优先级 6）：完整视觉帧通知到达时立即抢占执行；没有通知时
+ * 最多等待 BODY_MOTION_PERIOD_MS（当前 10 ms），保证姿态矫正持续更新。
+ */
 static void RtosApp_GimbalTask(void *parameter)
 {
-    TickType_t lastWakeTime = xTaskGetTickCount();
     uint32_t frameCount;
 
     (void)parameter;
     for (;;) {
-        (void)xTaskDelayUntil(&lastWakeTime,
+        (void)ulTaskNotifyTake(pdTRUE,
             pdMS_TO_TICKS(BODY_MOTION_PERIOD_MS));
-        (void)ulTaskNotifyTake(pdTRUE, 0U);
         frameCount = Vision_GetFrameCount();
         App_GimbalStep();
         if (Vision_GetFrameCount() != frameCount) {
@@ -188,6 +217,7 @@ static void RtosApp_GimbalTask(void *parameter)
     }
 }
 
+/* 纯云台任务和Task9手推测试不需要底盘周期，由Mission统一挂起CarControl。 */
 static uint8_t RtosApp_ShouldSuspendControl(void)
 {
     uint8_t missionId;
@@ -198,10 +228,10 @@ static uint8_t RtosApp_ShouldSuspendControl(void)
 
     missionId = StateMachine_GetMissionId();
     return (uint8_t)((missionId == 2U) || (missionId == 3U) ||
-        (missionId == 7U) || (missionId == 8U));
+        (missionId == 7U) || (missionId == 8U) || (missionId == 9U));
 }
 
-/* Task2/3/7/8 是纯云台任务，运行时停止底盘控制调度。 */
+/* Task2/3/7/8是纯云台任务；Task9只采编码器，运行时停止底盘控制调度。 */
 static void RtosApp_UpdateControlTaskState(void)
 {
     uint8_t shouldSuspend = RtosApp_ShouldSuspendControl();
@@ -217,6 +247,11 @@ static void RtosApp_UpdateControlTaskState(void)
     }
 }
 
+/*
+ * Input（优先级 4）：GPIO 按键边沿从 ISR 唤醒本任务。任务被唤醒后每
+ * 1 ms 执行消抖/长按检测，直到按键释放且事件取空，再无限期阻塞。
+ * UI 只需一次刷新通知；状态切换事件则进入队列并唤醒 Mission。
+ */
 static void RtosApp_InputTask(void *parameter)
 {
     CarEvent event;
@@ -243,6 +278,7 @@ static void RtosApp_InputTask(void *parameter)
     }
 }
 
+/* Mission 通常由事件唤醒；Task3 准备期和 Task4 非循迹阶段需要 1 ms 步进。 */
 static uint8_t RtosApp_IsMissionPeriodic(void)
 {
     uint8_t missionId;
@@ -273,6 +309,11 @@ static TickType_t RtosApp_GetMissionWaitTicks(TickType_t lastPeriodicTime)
     return (elapsed >= period) ? 0U : period - elapsed;
 }
 
+/*
+ * Mission（优先级 3）：先排空 CarEvent 队列并驱动状态切换，再按当前比赛
+ * 阶段决定是否执行 1 ms 周期步骤，最后同步 CarControl 的挂起/恢复状态。
+ * 通知只负责唤醒；真正不能丢的事件均从队列读取。
+ */
 static void RtosApp_MissionTask(void *parameter)
 {
     CarEvent event;
@@ -310,6 +351,7 @@ static void RtosApp_MissionTask(void *parameter)
     }
 }
 
+/* Comm（优先级 2）：每 5 ms 维护外部 Link、串口调参和低频日志。 */
 static void RtosApp_CommTask(void *parameter)
 {
     TickType_t lastWakeTime = xTaskGetTickCount();
@@ -321,6 +363,11 @@ static void RtosApp_CommTask(void *parameter)
     }
 }
 
+/*
+ * UI（优先级 1）：状态变化通知可立即触发重绘，同时最多每 20 ms 醒来做
+ * Board housekeeping；Task5/6/8/9动态页另以100 ms限速刷新。显示和板级
+ * 恢复都放在最低业务优先级，避免阻塞控制任务。
+ */
 static void RtosApp_UiTask(void *parameter)
 {
     TickType_t lastHousekeepingTime = xTaskGetTickCount();
@@ -355,7 +402,8 @@ static void RtosApp_UiTask(void *parameter)
         dynamicUi = (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
             ((StateMachine_GetMissionId() == 5U) ||
                 (StateMachine_GetMissionId() == 6U) ||
-                (StateMachine_GetMissionId() == 8U)));
+                (StateMachine_GetMissionId() == 8U) ||
+                (StateMachine_GetMissionId() == 9U)));
         if (dynamicUi == 0U) {
             lastDynamicUiTime = now;
         } else if ((now - lastDynamicUiTime) >=
@@ -367,6 +415,11 @@ static void RtosApp_UiTask(void *parameter)
     }
 }
 
+/*
+ * 启动前一次性创建队列、任务控制块和任务栈，全程不使用 FreeRTOS 堆。
+ * 末尾的四次通知让事件驱动任务在调度器启动后至少运行一次，建立初始
+ * 输入、状态机、云台和 UI 状态；Comm/CarControl 本身已有周期唤醒路径。
+ */
 static void RtosApp_CreateObjects(void)
 {
     g_controlTaskSuspended = 0U;
@@ -416,6 +469,7 @@ static void RtosApp_CreateObjects(void)
 #endif
 }
 
+/* 任务上下文通知：计数可合并，接收方 ulTaskNotifyTake(pdTRUE, ...) 会清零。 */
 static void RtosApp_NotifyTask(TaskHandle_t task)
 {
     if (task != 0) {
@@ -423,6 +477,7 @@ static void RtosApp_NotifyTask(TaskHandle_t task)
     }
 }
 
+/* ISR 通知后若有更高优先级任务就绪，要求在中断退出点立即完成抢占。 */
 static void RtosApp_NotifyTaskFromISR(TaskHandle_t task)
 {
     BaseType_t higherPriorityTaskWoken = pdFALSE;
@@ -463,6 +518,7 @@ void RtosApp_NotifyInputFromISR(void)
     RtosApp_NotifyTaskFromISR(g_inputTaskHandle);
 }
 
+/* vTaskStartScheduler() 成功后不会返回；返回只能表示内核启动失败。 */
 void RtosApp_StartScheduler(void)
 {
     RtosApp_CreateObjects();

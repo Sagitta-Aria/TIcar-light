@@ -19,42 +19,31 @@ static uint8_t g_missionId;
 static uint8_t g_mission1LapCount = 1U;
 static uint8_t g_mission2Distance;
 static uint8_t g_mission3Distance;
+static CarMission4Route g_mission4Route = CAR_MISSION4_POINT_ONE_LAP;
 static uint8_t g_mission7Distance;
 static CarChassisDriveMode g_mission6DriveMode;
 static uint16_t g_mission6DriveSpeed;
 static CarMission4Stage g_mission4Stage = CAR_MISSION4_STAGE_IDLE;
 static uint32_t g_mission4Flag;
-static uint32_t g_mission4LastVisionFrame;
 static int32_t g_mission4ExtraLeftBase;
 static int32_t g_mission4ExtraRightBase;
 static int32_t g_mission4YawTurnBase;
-static uint8_t g_mission4StableFrames;
 static uint8_t g_mission4ExtraActive;
 static uint8_t g_mission4YawTurnActive;
 static uint8_t g_missionGimbalPrepId;
-static uint16_t g_missionGimbalPrepWaitTicks;
-static int32_t g_missionGimbalPrepYawBase;
 static MotorNoYawState g_mission4LastNoYawState = MOTOR_NO_YAW_STATE_IDLE;
 
 typedef enum {
     MISSION_GIMBAL_PREP_IDLE = 0,
     MISSION_GIMBAL_PREP_YAW,
-    MISSION_GIMBAL_PREP_WAIT,
     MISSION_GIMBAL_PREP_DONE
 } MissionGimbalPrepStage;
 
 static MissionGimbalPrepStage g_missionGimbalPrepStage;
 
-#define MISSION4_LOCK_STABLE_FRAMES     (5U)
-#define MISSION4_LOCK_EXTRA_DEADBAND    (20U)
-#define MISSION4_LAP_TURNS              (4U)
-#define MISSION4_EXTRA_ENCODER_COUNTS   (12000U)
-#define MISSION_GIMBAL_PREP_YAW_STEPS   (2000U)
-#define MISSION_GIMBAL_PREP_YAW_SPEED_SPS (5000U)
-#define MISSION_GIMBAL_PREP_WAIT_MS     (500U)
-#define MISSION_GIMBAL_PREP_WAIT_TICKS \
-    ((MISSION_GIMBAL_PREP_WAIT_MS + CAR_APP_LOOP_DELAY_MS - 1U) / \
-        CAR_APP_LOOP_DELAY_MS)
+#if (CAR_MISSION4_EXTRA_ENCODER_COUNTS == 0U)
+#error "CAR_MISSION4_EXTRA_ENCODER_COUNTS must be greater than zero"
+#endif
 
 typedef struct {
     uint32_t yawSteps;
@@ -86,7 +75,7 @@ static const Mission4YawConfig g_mission4YawConfigs[3] = {
 
 static void StateMachine_Enter(CarState nextState);
 
-/* 作用：把菜单任务事件转换成 1~8 的任务编号。 */
+/* 作用：把菜单任务事件转换成 1~9 的任务编号。 */
 static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
 {
     switch (event) {
@@ -106,20 +95,28 @@ static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
         return 7U;
     case CAR_EVENT_MISSION_8_START:
         return 8U;
+    case CAR_EVENT_MISSION_9_START:
+        return 9U;
     default:
         return 0U;
     }
-}
-
-static uint16_t StateMachine_Abs16(int16_t value)
-{
-    return (value < 0) ? (uint16_t)(-(int32_t)value) : (uint16_t)value;
 }
 
 static uint32_t StateMachine_AbsStepDelta(int32_t now, int32_t base)
 {
     return (now >= base) ? (uint32_t)(now - base) :
         (uint32_t)(base - now);
+}
+
+static uint32_t StateMachine_GetMission4TargetTurns(void)
+{
+    return (g_mission4Route == CAR_MISSION4_POINT_TWO_LAPS) ? 8U : 4U;
+}
+
+static StaticConfigMode StateMachine_GetMission4VisionMode(void)
+{
+    return (g_mission4Route == CAR_MISSION4_CIRCLE_ONE_LAP) ?
+        STATICCONFIG_MODE_CIRCLE : STATICCONFIG_MODE_CENTER;
 }
 
 /* 作用：Task4 一圈后的延长段，用左右编码器count绝对增量平均值计距离。 */
@@ -152,36 +149,33 @@ static const Mission4YawConfig *StateMachine_GetMission4YawConfig(uint32_t flag)
         (uint8_t)StateMachine_GetMission4Distance(flag)];
 }
 
-/* 作用：Task4 始终追中心点，只按当前位置切换近/中/远参数。 */
+/* 作用：Task4 按子菜单选择点/圆误差，并按转向次数切近/中/远参数。 */
 static void StateMachine_ApplyMission4GimbalConfig(uint32_t flag)
 {
     StaticConfig_SetActiveByDistanceMode(
         StateMachine_GetMission4Distance(flag),
-        STATICCONFIG_MODE_CENTER);
+        StateMachine_GetMission4VisionMode());
 }
 
 static void StateMachine_ResetMission4(void)
 {
     g_mission4Stage = CAR_MISSION4_STAGE_IDLE;
     g_mission4Flag = 0U;
-    g_mission4LastVisionFrame = 0U;
     g_mission4ExtraLeftBase = 0;
     g_mission4ExtraRightBase = 0;
     g_mission4YawTurnBase = 0;
-    g_mission4StableFrames = 0U;
     g_mission4ExtraActive = 0U;
     g_mission4YawTurnActive = 0U;
     g_mission4LastNoYawState = MOTOR_NO_YAW_STATE_IDLE;
     Gimbal_SetYawFeedForward(0);
     Gimbal_SetYawAttitudeCompensation(0);
+    Gimbal_SetLostTargetSearchEnabled(0U);
     GimbalAttitude_SetFeedForwardEnabled(0U);
 }
 
 static void StateMachine_ResetMissionGimbalPrep(void)
 {
     g_missionGimbalPrepId = 0U;
-    g_missionGimbalPrepWaitTicks = 0U;
-    g_missionGimbalPrepYawBase = 0;
     g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_IDLE;
 }
 
@@ -201,18 +195,17 @@ static void StateMachine_StopRuntimeModules(void)
     StateMachine_ResetMissionGimbalPrep();
 }
 
-/* 作用：启动一段 5000 step yaw 搜索。 */
+/* 作用：Task3/Task4 共用平滑 yaw 搜索，收到首帧前持续转动。 */
 static void StateMachine_StartMissionGimbalYawSegment(void)
 {
-    g_missionGimbalPrepWaitTicks = 0U;
-    g_missionGimbalPrepYawBase = Motor_GetStepCount(MOTOR_GIMBAL_1);
     g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_YAW;
 
+    Gimbal_ResetRamp();
     Motor_Set(MOTOR_GIMBAL_1, MOTOR_FORWARD,
-        (uint16_t)MISSION_GIMBAL_PREP_YAW_SPEED_SPS);
+        (uint16_t)CAR_GIMBAL_SEARCH_YAW_SPEED_SPS);
 }
 
-/* 作用：Task3/Task4 正式追踪前，先静止等视觉；没找到再循环 yaw 搜索目标。 */
+/* 作用：Task3/Task4 启动同一套持续 yaw 搜点流程。 */
 static void StateMachine_StartMissionGimbalPrep(uint8_t missionId)
 {
     g_missionGimbalPrepId = missionId;
@@ -221,12 +214,7 @@ static void StateMachine_StartMissionGimbalPrep(uint8_t missionId)
     Gimbal_SetEnabled(0U);
     MotorEnable_SetGimbal(1U);
 
-    if ((missionId == 3U) || (missionId == 4U)) {
-        g_missionGimbalPrepWaitTicks = 0U;
-        g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_WAIT;
-    } else {
-        StateMachine_StartMissionGimbalYawSegment();
-    }
+    StateMachine_StartMissionGimbalYawSegment();
 }
 
 static uint8_t StateMachine_ClampMission1LapCount(uint8_t lapCount)
@@ -265,41 +253,18 @@ static int16_t StateMachine_DrivePercentToPwm(uint16_t percent)
         100U);
 }
 
-static uint8_t StateMachine_IsMission4Locked(void)
-{
-    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
-    uint32_t limitX = (uint32_t)config->deadbandX +
-        (uint32_t)MISSION4_LOCK_EXTRA_DEADBAND;
-    uint32_t limitY = (uint32_t)config->deadbandY +
-        (uint32_t)MISSION4_LOCK_EXTRA_DEADBAND;
-
-    if (Vision_HasFrame() == 0U) {
-        return 0U;
-    }
-
-    return (uint8_t)(((uint32_t)StateMachine_Abs16(Gimbal_GetErrorX()) <=
-        limitX) &&
-        ((uint32_t)StateMachine_Abs16(Gimbal_GetErrorY()) <= limitY));
-}
-
-static uint8_t StateMachine_IsMission4AttitudeReady(void)
-{
-    GimbalAttitudeSnapshot snapshot;
-
-    GimbalAttitude_GetSnapshot(&snapshot);
-    return (uint8_t)((snapshot.motion.state == BODY_MOTION_READY) ? 1U : 0U);
-}
-
 static void StateMachine_StartMission4Line(void)
 {
     g_mission4Flag = 0U;
     g_mission4ExtraActive = 0U;
     g_mission4YawTurnActive = 0U;
     StateMachine_ApplyMission4GimbalConfig(g_mission4Flag);
+    /* H7反馈在整个LINE阶段保持开启；JY61前馈由转弯子状态单独开门。 */
     GimbalAttitude_SetFeedForwardEnabled(0U);
     GimbalAttitude_SetReferenceTracking(0U);
     GimbalAttitude_SetHoldEnabled(1U);
-    MotorNoYaw_StartMission4();
+    Gimbal_SetLostTargetSearchEnabled(1U);
+    MotorNoYaw_Start();
     g_mission4LastNoYawState = MotorNoYaw_GetState();
     g_mission4Stage = CAR_MISSION4_STAGE_LINE;
 }
@@ -321,16 +286,18 @@ static int16_t StateMachine_GetMission4YawBaseCommand(void)
         (int32_t)CAR_MISSION4_GIMBAL_YAW_BASE_SPEED_SPS);
 }
 
-static int16_t StateMachine_GetMission4YawTurnCommand(int16_t baseCommand)
+static int16_t StateMachine_GetMission4YawTurnCommand(int16_t baseCommand,
+    MotorNoYawState turnState)
 {
     const Mission4YawConfig *config =
         StateMachine_GetMission4YawConfig(g_mission4Flag);
     int32_t command = (int32_t)config->yawSpeedSps;
+    int32_t direction = (baseCommand < 0) ? -1L : 1L;
 
-    if (baseCommand < 0) {
-        command = -command;
+    if (turnState == MOTOR_NO_YAW_STATE_TURN_LEFT) {
+        direction = -direction;
     }
-    return StateMachine_ClampMission4YawCommand(command);
+    return StateMachine_ClampMission4YawCommand(command * direction);
 }
 
 static void StateMachine_SetMission4YawTurnRamp(uint8_t enabled)
@@ -349,7 +316,8 @@ static void StateMachine_SetMission4YawTurnRamp(uint8_t enabled)
 
 static uint8_t StateMachine_IsMission4TurnState(MotorNoYawState state)
 {
-    return (uint8_t)((state == MOTOR_NO_YAW_STATE_TURN_RIGHT) ? 1U : 0U);
+    return (uint8_t)(((state == MOTOR_NO_YAW_STATE_TURN_LEFT) ||
+        (state == MOTOR_NO_YAW_STATE_TURN_RIGHT)) ? 1U : 0U);
 }
 
 static uint8_t StateMachine_IsMission4AttitudeFeedForwardState(
@@ -368,7 +336,8 @@ static void StateMachine_UpdateMission4YawFeedForward(void)
     int16_t yawCommand = baseCommand;
 
     GimbalAttitude_SetFeedForwardEnabled(
-        StateMachine_IsMission4AttitudeFeedForwardState(noYawState));
+        (uint8_t)(StateMachine_IsMission4AttitudeFeedForwardState(noYawState) ||
+            (Gimbal_IsLostTargetSearchActive() != 0U)));
 
     if ((StateMachine_IsMission4TurnState(noYawState) != 0U) &&
         (StateMachine_IsMission4TurnState(g_mission4LastNoYawState) == 0U)) {
@@ -386,7 +355,8 @@ static void StateMachine_UpdateMission4YawFeedForward(void)
         if (StateMachine_AbsStepDelta(Motor_GetStepCount(MOTOR_GIMBAL_1),
             g_mission4YawTurnBase) < (uint32_t)
             StateMachine_GetMission4YawConfig(g_mission4Flag)->yawSteps) {
-            yawCommand = StateMachine_GetMission4YawTurnCommand(baseCommand);
+            yawCommand = StateMachine_GetMission4YawTurnCommand(baseCommand,
+                noYawState);
         } else {
             g_mission4YawTurnActive = 0U;
             StateMachine_SetMission4YawTurnRamp(0U);
@@ -397,77 +367,34 @@ static void StateMachine_UpdateMission4YawFeedForward(void)
     g_mission4LastNoYawState = noYawState;
 }
 
-/* 作用：搜到 K230 坐标后，真正进入视觉云台闭环。 */
+/* 作用：停下搜索，并用刚收到的首帧立即切入视觉云台闭环。 */
 static void StateMachine_StartMissionGimbalTrack(void)
 {
+    int16_t rawX = Vision_GetRawX();
+    int16_t rawY = Vision_GetRawY();
+
+    Motor_Set(MOTOR_GIMBAL_1, MOTOR_COAST, 0U);
     Gimbal_SetTarget(0, 0);
     Gimbal_SetEnabled(1U);
+    /* Gimbal_SetEnabled 会清空旧输入，重放首帧才能从这一帧开始跟随。 */
+    Gimbal_UpdateFromCameraError(rawX, rawY);
 
     if (g_missionGimbalPrepId == 4U) {
-        g_mission4LastVisionFrame = Vision_GetFrameCount();
-        g_mission4StableFrames = 0U;
         g_mission4Stage = CAR_MISSION4_STAGE_TRACK;
     }
 
     g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_DONE;
+    if (g_missionGimbalPrepId == 4U) {
+        StateMachine_StartMission4Line();
+    }
 }
 
-/* 作用：Task3/Task4 先静止识别 500ms；之后没有坐标就继续下一段 yaw。 */
+/* 作用：Task3/Task4 持续平滑搜索到首帧，然后立即切入追踪。 */
 static void StateMachine_TaskMissionGimbalPrep(void)
 {
-    uint32_t yawSteps;
-
-    if (g_missionGimbalPrepStage == MISSION_GIMBAL_PREP_YAW) {
-        yawSteps = StateMachine_AbsStepDelta(
-            Motor_GetStepCount(MOTOR_GIMBAL_1),
-            g_missionGimbalPrepYawBase);
-        if (yawSteps < (uint32_t)MISSION_GIMBAL_PREP_YAW_STEPS) {
-            return;
-        }
-
-        Motor_Set(MOTOR_GIMBAL_1, MOTOR_COAST, 0U);
-        g_missionGimbalPrepWaitTicks = 0U;
-        g_missionGimbalPrepStage = MISSION_GIMBAL_PREP_WAIT;
-        return;
-    }
-
-    if (g_missionGimbalPrepStage == MISSION_GIMBAL_PREP_WAIT) {
-        if (Vision_HasFrame() != 0U) {
-            StateMachine_StartMissionGimbalTrack();
-            return;
-        }
-
-        if (g_missionGimbalPrepWaitTicks <
-            (uint16_t)MISSION_GIMBAL_PREP_WAIT_TICKS) {
-            ++g_missionGimbalPrepWaitTicks;
-            return;
-        }
-
-        StateMachine_StartMissionGimbalYawSegment();
-    }
-}
-
-/* 作用：Task4 先等云台连续锁住几帧，再启动 NO YAW 循迹。 */
-static void StateMachine_TaskMission4Track(void)
-{
-    uint32_t frameCount = Vision_GetFrameCount();
-
-    if (frameCount == g_mission4LastVisionFrame) {
-        return;
-    }
-    g_mission4LastVisionFrame = frameCount;
-
-    if (StateMachine_IsMission4Locked() != 0U) {
-        if (g_mission4StableFrames < MISSION4_LOCK_STABLE_FRAMES) {
-            ++g_mission4StableFrames;
-        }
-    } else {
-        g_mission4StableFrames = 0U;
-    }
-
-    if ((g_mission4StableFrames >= MISSION4_LOCK_STABLE_FRAMES) &&
-        (StateMachine_IsMission4AttitudeReady() != 0U)) {
-        StateMachine_StartMission4Line();
+    if ((g_missionGimbalPrepStage == MISSION_GIMBAL_PREP_YAW) &&
+        (Vision_HasFrame() != 0U)) {
+        StateMachine_StartMissionGimbalTrack();
     }
 }
 
@@ -475,6 +402,7 @@ static void StateMachine_TaskMission4Track(void)
 static void StateMachine_TaskMission4Line(void)
 {
     uint32_t flag;
+    uint32_t targetTurns = StateMachine_GetMission4TargetTurns();
 
     MotorNoYaw_Task();
     if (MotorNoYaw_IsRunning() == 0U) {
@@ -494,7 +422,7 @@ static void StateMachine_TaskMission4Line(void)
     }
 
     if ((g_mission4ExtraActive == 0U) &&
-        (flag >= (uint32_t)MISSION4_LAP_TURNS)) {
+        (flag >= targetTurns)) {
         g_mission4ExtraLeftBase = Motor_GetStepCount(MOTOR_CHASSIS_LEFT);
         g_mission4ExtraRightBase = Motor_GetStepCount(MOTOR_CHASSIS_RIGHT);
         g_mission4ExtraActive = 1U;
@@ -503,7 +431,7 @@ static void StateMachine_TaskMission4Line(void)
 
     if ((g_mission4ExtraActive != 0U) &&
         (StateMachine_GetMission4ExtraEncoderCounts() >=
-            (uint32_t)MISSION4_EXTRA_ENCODER_COUNTS)) {
+            (uint32_t)CAR_MISSION4_EXTRA_ENCODER_COUNTS)) {
         StateMachine_Enter(CAR_STATE_FINISHED);
     }
 }
@@ -515,9 +443,6 @@ static void StateMachine_TaskMission4(void)
         return;
     }
 
-    if (g_mission4Stage == CAR_MISSION4_STAGE_TRACK) {
-        StateMachine_TaskMission4Track();
-    }
 }
 
 /* 作用：进入任务状态时启动对应正式任务。 */
@@ -543,7 +468,10 @@ static void StateMachine_EnterMission(void)
             STATICCONFIG_MODE_CENTER);
         StateMachine_StartMissionGimbalPrep(3U);
     } else if (g_missionId == 4U) {
-        /* Task4：视觉锁定并完成姿态校准后，启动带 yaw 姿态补偿的 NO YAW。 */
+        /*
+         * Task4：先启动H7姿态辅助，再搜点并进入视觉+循迹；辅助模式
+         * 只计算矫正SPS，最终由Gimbal与视觉yaw命令统一合成输出。
+         */
         StateMachine_ResetMission4();
         StateMachine_ApplyMission4GimbalConfig(0U);
         GimbalAttitude_StartAssist();
@@ -571,10 +499,16 @@ static void StateMachine_EnterMission(void)
         Gimbal_SetTarget(0, 0);
         Gimbal_SetEnabled(1U);
     } else if (g_missionId == 8U) {
-        /* Task8：独立测试完整姿态环，默认打开角速度前馈。 */
+        /* Task8：H7闭环反馈，默认叠加板载JY61底座角速度前馈。 */
         MotorEnable_SetGimbal(1U);
         GimbalAttitude_Start();
         GimbalAttitude_SetFeedForwardEnabled(1U);
+    } else if (g_missionId == 9U) {
+        /* Task9：只保留编码器输入，所有电机输出与使能均关闭。 */
+        Motor_SetAllStop();
+        MotorEnable_SetChassis(0U);
+        MotorEnable_SetGimbal(0U);
+        EncoderMotor_ResetAllCounts();
     }
 }
 
@@ -606,6 +540,7 @@ void StateMachine_Init(void)
     g_missionId = 0U;
     g_mission2Distance = (uint8_t)STATICCONFIG_DISTANCE_NEAR;
     g_mission3Distance = (uint8_t)STATICCONFIG_DISTANCE_NEAR;
+    g_mission4Route = CAR_MISSION4_POINT_ONE_LAP;
     g_mission7Distance = (uint8_t)STATICCONFIG_DISTANCE_NEAR;
     g_mission6DriveMode = (CHASSIS_TASK6_DEFAULT_CLOSED_LOOP != 0U) ?
         CAR_CHASSIS_DRIVE_CLOSED_LOOP : CAR_CHASSIS_DRIVE_OPEN_LOOP;
@@ -787,6 +722,17 @@ void StateMachine_SetMission3Distance(uint8_t distance)
 uint8_t StateMachine_GetMission3Distance(void)
 {
     return g_mission3Distance;
+}
+
+void StateMachine_SetMission4Route(CarMission4Route route)
+{
+    g_mission4Route = ((uint8_t)route < (uint8_t)CAR_MISSION4_ROUTE_COUNT) ?
+        route : CAR_MISSION4_POINT_ONE_LAP;
+}
+
+CarMission4Route StateMachine_GetMission4Route(void)
+{
+    return g_mission4Route;
 }
 
 void StateMachine_SetMission7Distance(uint8_t distance)

@@ -16,10 +16,10 @@ typedef enum {
 /* MotorNoYaw_Init：初始化 NO YAW 灰度触发/转向状态，默认不输出底盘命令。 */
 void MotorNoYaw_Init(void);
 
-/* MotorNoYaw_Start：开始灰度循迹；JY61P只辅助粗略转角，S4回线决定出弯。 */
+/* MotorNoYaw_Start：开始灰度循迹；姿态角只辅助粗略减速，灰度决定出弯。 */
 void MotorNoYaw_Start(void);
 
-/* MotorNoYaw_StartMission4：开始 Task4 专用 NO YAW，参数独立于 Task1。 */
+/* 兼容的 Task4 profile 入口；当前正式 Task4 直接调用 MotorNoYaw_Start。 */
 void MotorNoYaw_StartMission4(void);
 
 /* MotorNoYaw_Stop：停止无 yaw 循迹并将底盘PWM目标清零。 */
@@ -36,7 +36,7 @@ void MotorNoYaw_Task(void);
 uint8_t MotorNoYaw_CalculateTask1LineCommand(uint8_t digitalMask,
     int16_t *leftTargetCounts, int16_t *rightTargetCounts);
 
-/* MotorNoYaw_HandleFastEvent：消费100us快采样形成的入弯和S4回线请求。 */
+/* MotorNoYaw_HandleFastEvent：消费100us快采样形成的左右入弯和回线请求。 */
 void MotorNoYaw_HandleFastEvent(void);
 
 /* MotorNoYaw_TimerSample：TIMG0 100us灰度中断里采样；形成语义事件时返回1。 */

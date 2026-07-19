@@ -9,6 +9,7 @@
 #include "delay.h"
 #include "gimbal.h"
 #include "gimbal_attitude.h"
+#include "h7_gyro_link.h"
 #include "jy61p.h"
 #include "key.h"
 #include "link.h"
@@ -331,6 +332,7 @@ void App_Init(void)
     StaticConfig_Init();
     Gimbal_Init();
     Vision_Init();
+    H7GyroLink_Init();
     JY61P_Init();
     BodyMotion_Init();
     GimbalAttitude_Init();
@@ -415,6 +417,10 @@ void App_GimbalStep(void)
             GimbalAttitude_SetReferenceTracking(0U);
             GimbalAttitude_Task();
         } else {
+            /*
+             * Task4主动转yaw时让H7目标跟随；主动命令停止后，H7重新锁定
+             * 当前角度并把矫正速度叠加到视觉云台输出。
+             */
             GimbalAttitude_SetReferenceTracking(
                 Gimbal_IsYawTrackingActive());
             GimbalAttitude_Task();

@@ -5,14 +5,14 @@ Task5 用于左右编码电机的开环测量和速度 PI 在线测试。测试�
 
 ## 串口和任务入口
 
-- UART0：115200，8-N-1，无流控。
-- MCU TX/RX：PA10/PA11。
+- UART0：115200，8-N-1；当前PA11由H7姿态链路独占。
+- MCU PA10只保留输出，UART0文本RX关闭，因此Type-C在线命令暂不可用。
 - OLED 菜单选择 `Task 5 PID`，按 K2 进入。
 - 进入 Task5 后会停止所有电机并关闭视觉。100 Hz 姿态任务保持运行，默认由底盘调参模式占用执行机构。
 - 长按 K2 退出时，左右 PWM 强制清零、积分清零，并恢复正常任务模式。
 
-Task5 默认处于 `mode chassis`。只有显式发送 `mode gimbal` 后才停止底盘调参、
-启动 JY61 静止校准和云台 yaw 姿态保持；切回 `mode chassis` 会先停止云台。
+Task5默认处于`mode chassis`。只有显式发送`mode gimbal`后才停止底盘调参、
+启动H7反馈的云台yaw保持；板载JY61前馈默认关闭，可用`gff on`单独启用。
 发送 `mode vision` 会停止底盘和姿态环，启动 UART3 视觉解析与二维云台闭环，
 并默认输出 `B` 前缀视觉响应波形。`stop` 同时停止底盘、姿态和视觉云台输出。
 Task8 是独立的云台姿态实验入口，不启动视觉或底盘。
@@ -28,107 +28,103 @@ Task8 是独立的云台姿态实验入口，不启动视觉或底盘。
 
 云台/姿态 FreeRTOS 任务使用 `xTaskDelayUntil` 固定每 10 ms 运行，任务优先级为 6；
 底盘控制任务同为 6，输入/任务/通信/UI 依次为 4/3/2/1。`TIMG6` STEP 中断优先级
-为 0，`TIMG0` 灰度为 1，JY61 UART 为 2。STEP 与灰度不再放在同一个 ISR，
+为0，`TIMG0`灰度为1，H7 UART0和JY61 UART1均为2。STEP与灰度不再放在同一个ISR，
 而且两轴 0 SPS 时 `TIMG6` 会停表，不产生 20 kHz 空中断。
 
-## Task8 姿态估计与控制
+## Task4/Task8双传感器控制
 
-JY61 驱动同时解析 `0x52` 角速度帧和 `0x53` 欧拉角帧。`body_motion` 是唯一的
-姿态计算模块，底盘和云台以后都读取同一份 `BodyMotionSnapshot`，不能各算一份。
-角度单位为 `0.01 deg`，角速度单位为 `0.01 deg/s`，算法为：
+两路传感器必须分开：H7通过UART0/PA11提供云台yaw角度和yaw角速度反馈；板载
+JY61通过UART1/PB7提供底座yaw角速度前馈。两路都解析`0x52`和`0x53`帧，但使用
+独立缓存、帧计数、时间戳和中断。H7已经完成零偏、滤波和姿态解算，M0只做单位
+换算、yaw跨±180度展开和100 ms超时判断，不再次融合。
 
-```text
-omegaFiltered += alpha * (omegaRaw - bias - omegaFiltered)
-yawPredict = yawEstimate + omegaFiltered * frameDt
-yawEstimate = yawPredict + beta * (yawUnwrapped - yawPredict)
-yawControl = yawEstimate + omegaFiltered * (frameAge + predictionTime)
-```
-
-`frameDt` 来自 JY61 帧的 RTOS 时间戳，不假定串口严格等间隔；yaw 在正负 180 度
-处会解包角。启动后先累计 100 个静止角速度样本求零偏，100 Hz 输出时约 1 秒。
-角度或角速度任一超过 100 ms 未更新，立即进入 `STALE`、停止 yaw，并在数据恢复后
-重新抓取保持基准，避免补偿一段不可见运动。
-
-云台控制使用角速度前馈和 STEP 位置误差比例项：
+Task8在首个有效H7反馈到达时锁存当前yaw为目标，10 ms控制公式为：
 
 ```text
-stepReference = step0 + sign * (yawControl - yaw0) * stepsPerRev / 36000
-speedFF = turnGate * sign * yawRateX100 * stepsPerRev / 36000
-          * KffQ1024 / 1024
-speedCommand = clamp(speedFF + KpQ1024 * stepError / 1024)
+rateRef = clamp(gkp / 1024 * (h7YawTarget - h7Yaw))
+rateCorrection = clamp(grkp / 1024 * (rateRef - h7YawRate))
+baseFeedForward = gkff / 1024 * jy61BaseYawRate
+motorRate = rateRef + rateCorrection - baseFeedForward
+speedCommand = clamp(motorRate * gsteps / 360 * gsign)
 ```
 
-`turnGate=0` 时前馈被硬置零，角度反馈仍然工作；只有上层确认检测到转弯后才设为
-1。这里的“检测到”应当使用 S5/S6/S7 直角窗口确认后形成的转弯状态，不能使用
-`grayMask != 0`，因为直线循迹时灰度同样非零。通用姿态环和 Task5 启动默认
-`turnGate=0`，Task8 入口会显式改为 `turnGate=1`，用于独立测试完整姿态环；
-Task4 则由灰度确认后的转弯状态自动控制前馈门。
+H7的角度或角速度任一超过100 ms未更新，立即停止yaw并清除目标；数据恢复后重新
+锁存，不追赶掉线期间的不可见运动。JY61未校准或掉线时只令`baseFeedForward=0`，
+H7反馈环仍继续工作。Task5进入`mode gimbal`时默认`gff off`；Task8入口默认开启
+JY61前馈。
 
-当前实际编译值以 `config/control_config.h` 和 Task5 `gshow` 为准；在线修改只保留
-在 RAM 中。无论 `Kff` 设为多少，`turnGate=0` 时都不会产生角速度前馈。
-`Motor_GetStepCount()` 统计的是已经安排输出的 STEP 脉冲，不是编码器；电机失步无法
-被这个位置项发现。因此它能修正指令斜坡造成的相位误差，但不等于机械角度全闭环。
+Task4调用`GimbalAttitude_StartAssist()`，姿态环不直接写电机，而是把矫正SPS交给
+视觉云台统一合成。收到首帧进入循迹后，H7反馈在整个LINE阶段保持开启；视觉误差
+超出yaw死区，或Task4正在执行主动yaw基础/强转命令时，参考角跟随当前H7角度，
+避免姿态环抵消主动转动。主动yaw停止后重新锁定当前H7角度，并恢复反馈矫正。
+JY61前馈只在灰度确认后的`TURN_APPROACH/TURN_LEFT/TURN_RIGHT/TURN_EXIT`阶段开门。
+Task4中H7超时会清除姿态矫正，视觉闭环仍可继续；Task8中H7超时则直接停止yaw。
 
-3200 step/rev 时，90 度是 800 step；若底盘匀速 1 秒转完 90 度，理想云台速度是
-800 SPS。斜坡值为 `A SPS/ms` 时，从 0 到 800 SPS 需要 `800/A ms`。终点速度
-不能直接当位移；若一秒内从静止加速到 `Vmax` 再降到静止，且能到达限速，理论
-位移为 `Vmax * (1 - Vmax/(1000*A)) step`。实际还要看底盘角速度曲线、负载和
-失步，并通过 Task5 观察 `err/cmd`。
+Task4已经锁定过目标后，视觉连续60 ms没有新帧会进入丢失重搜：以丢失瞬间的yaw
+STEP位置为中心，用400 SPS在正负400 STEP之间往返。搜索期间yaw只执行摆动命令，
+暂停固定随动速度、H7矫正和JY61前馈；收到下一帧后在同一个10 ms控制周期退出搜索
+并恢复视觉追踪。速度和幅度分别由`CAR_MISSION4_GIMBAL_LOST_SEARCH_SPEED_SPS`、
+`CAR_MISSION4_GIMBAL_LOST_SEARCH_AMPLITUDE_STEPS`配置。
+
+`Motor_GetStepCount()`只用于相对启动位置的行程保护，不参与H7姿态反馈计算；
+步进电机失步会被H7角度环观察到，但如果已经顶到机械限位，必须依靠断电保护。
 
 Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 `config/control_config.h` 默认值：
 
 | 命令 | 作用 | 示例 |
 | --- | --- | --- |
-| `mode gimbal` | 停底盘并启动静止校准和 HOLD | `mode gimbal` |
+| `mode gimbal` | 停底盘并启动H7反馈HOLD，JY61前馈默认关闭 | `mode gimbal` |
 | `mode chassis` | 停云台并恢复底盘调参 | `mode chassis` |
 | `mode vision` | 停底盘和姿态环，启动二维视觉云台及 B 波形 | `mode vision` |
-| `gcal` | 重新采集 100 个静止零偏样本 | `gcal` |
+| `gcal` | 重新采集板载JY61的100个静止零偏样本 | `gcal` |
 | `ghold on\|off` | 开启保持或只观察姿态 | `ghold off` |
-| `gff on\|off` | 手动开关角速度前馈门，用于 Task5 独立标定 | `gff off` |
+| `gff on\|off` | 手动开关板载JY61底座角速度前馈 | `gff off` |
 | `gplot on\|off` | 开关 20 ms 云台九通道输出，进入云台模式默认开启 | `gplot on` |
 | `gsteps N` | 电机每机械圈脉冲数 | `gsteps 3200` |
-| `gsign -1\|1` | 补偿方向 | `gsign -1` |
-| `gkff Q1024` | 角速度前馈增益 | `gkff 1024` |
-| `gkp Q1024` | STEP 位置误差比例增益 | `gkp 256` |
-| `glpf Q1024` | 角速度低通 alpha，范围 1..1024 | `glpf 256` |
-| `gbeta Q1024` | yaw 角度校正 beta，范围 1..1024 | `gbeta 10` |
-| `gpred MS` | 附加预测时间，范围 0..100 ms | `gpred 0` |
+| `gsign -1\|1` | yaw电机方向 | `gsign -1` |
+| `gh7sign -1\|1` | H7反馈坐标方向 | `gh7sign -1` |
+| `gjysign -1\|1` | JY61前馈坐标方向 | `gjysign 1` |
+| `gkff Q1024` | JY61底座角速度前馈增益 | `gkff 1024` |
+| `gkp Q1024` | H7 yaw角度外环增益，8192表示8.0 | `gkp 8192` |
+| `grkp Q1024` | H7 yaw角速度反馈增益；0表示关闭，307约为0.3 | `grkp 0` |
+| `glpf Q1024` | 仅JY61前馈角速度低通alpha | `glpf 512` |
+| `gbeta Q1024` | 仅JY61姿态角校正beta | `gbeta 256` |
+| `gpred MS` | 仅JY61前馈估计附加预测时间 | `gpred 10` |
 | `gmax SPS` | yaw 最大命令，不能超过全局 1000 SPS | `gmax 1000` |
-| `gaccel SPS_PER_MS` | STEP 每毫秒斜坡增量 | `gaccel 5` |
-| `glimit STEP` | 相对启动位置限制，0 表示关闭 | `glimit 1200` |
+| `gaccel SPS_PER_MS` | STEP 每毫秒斜坡增量 | `gaccel 100` |
+| `glimit STEP` | 相对启动位置限制，0 表示关闭 | `glimit 6400` |
 | `gshow` | 输出姿态、零偏、误差、命令和全部参数 | `gshow` |
 | `vconfig DIST SOURCE` | 切换 Near/Mid/Far 与 Center/Circle 参数并重启追踪 | `vconfig mid center` |
 | `vplot on\|off` | 开关 20 ms 视觉十通道 B 波形 | `vplot on` |
 | `vshow` | 输出视觉帧、控制误差、两轴命令及当前参数 | `vshow` |
 
-建议先 `mode gimbal` 并保持整车静止，等 OLED 从 `CAL` 进入 `HOLD FF0`；先在
-`gff off` 下确认角度反馈方向和 `gkp`，云台若同向运动先改 `gsign`。再用
-`gff on` 单独测试匀速转动并调整 `gkff`，测试结束恢复 `gff off`。Task4
-已经由确认后的转弯状态自动开门。最后才增加 `gpred` 或加快 `gaccel`；全过程必须
-保留机械行程余量及物理断电手段。
+建议先`mode gimbal`并保持`gff off`，确认OLED显示`HOLD FF0`。轻推云台，H7
+角度误差应驱动电机回到原方向；若发散立即断电，优先核对`gsign`和`gh7sign`，再从
+较小`gkp/grkp`逐步增加。反馈稳定后保持底座静止执行`gcal`，再`gff on`并只转动
+底座，确认JY61前馈方向；方向相反时改`gjysign`。最后才调`gkff`和`gaccel`。
 
 Task5 云台模式每 20 ms 输出一行 `A` 前缀纯数字帧。SerialPlot 使用 ASCII、
 9 通道、逗号分隔，`Filter by Prefix` 选择 `Include` 并填写 `A`：
 
 ```text
-A yaw_est_x100,yaw_control_x100,gyro_raw_x100_s,gyro_filtered_x100_s,
-  cmd_sps,step_sps,step_error,step_count,ff_sps
+A h7_yaw_x100,target_yaw_x100,angle_error_x100,h7_rate_x100_s,
+  jy61_rate_x100_s,rate_ref_x100_s,ff_sps,cmd_sps,step_sps
 ```
 
 各通道含义：
 
 | 通道 | 含义 |
 | ---: | --- |
-| 1 | 融合后的 yaw 姿态角，单位 0.01 deg |
-| 2 | 加入预测时间后的控制角，单位 0.01 deg |
-| 3 | 去零偏前的 JY61 yaw 角速度，单位 0.01 deg/s |
-| 4 | 去零偏、低通后的 yaw 角速度，单位 0.01 deg/s |
-| 5 | 姿态控制器给 STEP 模块的目标速度 `cmd_sps` |
-| 6 | STEP 斜坡后的当前输出频率 `step_sps` |
-| 7 | `referenceStep-currentStep`，属于脉冲指令域误差 |
-| 8 | MCU 已发出的累计有符号 STEP 数 |
-| 9 | 门控后的角速度前馈分量 `ff_sps` |
+| 1 | H7连续yaw反馈，单位0.01 deg |
+| 2 | 锁存的H7 yaw目标，单位0.01 deg |
+| 3 | `target-h7Yaw`角度误差，单位0.01 deg |
+| 4 | H7 yaw角速度反馈，单位0.01 deg/s |
+| 5 | JY61滤波后的底座yaw角速度，单位0.01 deg/s |
+| 6 | H7角度外环生成的目标角速度，单位0.01 deg/s |
+| 7 | JY61前馈对电机命令的有符号SPS分量 |
+| 8 | 姿态控制器给STEP模块的目标速度`cmd_sps` |
+| 9 | STEP斜坡后的当前输出频率`step_sps` |
 
 Task5 视觉模式每 20 ms 输出一行 `B` 前缀纯数字帧。SerialPlot 使用 ASCII、
 10 通道、逗号分隔，`Filter by Prefix` 选择 `Include` 并填写 `B`：
@@ -169,10 +165,13 @@ SerialPlot；结束时发送 `stop`，不能用拔掉串口代替停车。
 
 底盘控制任务始终每 20 ms 读取并清零一次左右编码器窗口计数。串口默认每 500 ms 输出一行状态；执行命令或修改参数时立即回显并刷新。每次修改 `pwm` 或 `target` 后会丢弃第一个混合窗口，再从新的完整 20 ms 窗口累计平均值。
 
-Task1 的 `CAR_MOTOR_NO_YAW_*_COUNTS_PER_PERIOD` 参数与串口
-`target/move` 完全同单位且保留正负号：配置值 `-5` 就是目标 `-5 count/20ms`，不会再先当
-CPS 后发生二次换算。Task4 为兼容现有配置仍写 CPS，但构建时要求能够无损
-换算成整数 count/20ms。
+NO YAW强转当前把内轮目标设为`-1 count/20ms`，通过正常闭环直接产生轻微反向
+作用；左转命令为`(-1, outer)`，右转命令为`(outer, -1)`。强转期间不启用零目标
+阻尼分支，普通停车、出弯和标定也不启用。零目标阻尼接口仍保留供后续单独试验。
+
+Task1 的 `CAR_MOTOR_NO_YAW_*_COUNTS_PER_PERIOD` 与串口 `target/move` 同单位且保留
+正负号。正式 Task4 直接调用 Task1 的 `MotorNoYaw_Start()`；保留的 Task4 profile 宏
+仅作为兼容入口，不参与当前三条 Task4 子菜单路线。
 
 ## 命令
 

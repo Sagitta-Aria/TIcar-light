@@ -22,7 +22,7 @@ typedef enum {
     STATICCONFIG_DISTANCE_COUNT
 } StaticConfigDistance;
 
-/* 视觉模式：CENTER 用前两个误差，CIRCLE 用后两个误差。 */
+/* 视觉模式：CENTER 用前两个误差，CIRCLE 用后两个误差；Task4由子菜单选择。 */
 typedef enum {
     STATICCONFIG_MODE_CENTER = 0,
     STATICCONFIG_MODE_CIRCLE,

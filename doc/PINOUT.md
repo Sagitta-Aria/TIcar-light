@@ -35,9 +35,9 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 | OLED | I2C0 SDA / SCL | PA0 / PA1 | 建议 4.7k～10k 外部上拉至 3.3 V |
 | K1 / K2 | 按键 | PB9 / PB8 | 低有效，内部上拉 |
 | 状态灯 | LED | PA14 | 系统状态指示 |
-| Type-C日志 | UART0 TX / RX | PA10 / PA11 | 115200 |
+| H7云台反馈 / 日志TX | UART0 TX / RX | PA10 / PA11 | PA11接H7 UART7_TX/PE8，PA10仅保留日志TX；必须拆开CH340 TX |
 | K230视觉 | UART3 TX / RX | PB2 / PB3 | 115200 |
-| JY61P航向 | UART1 TX / RX | PB6 / PB7 | 115200，可选的粗略转角/减速辅助；灰度S4决定出弯 |
+| 板载JY61底座前馈 | UART1 TX / RX | PB6 / PB7 | PB7接JY61 TX；PB6仅保留外设TX功能 |
 | HFXT | 晶振 | PA5 / PA6 | 当前软件使用内部32 MHz SYSOSC，硬件位仍保留 |
 | SWD | SWDIO / SWCLK | PA19 / PA20 | 禁止复用 |
 | BSL invoke | 输入 | PA18 | 不要连接会在启动时拉低的外设 |
