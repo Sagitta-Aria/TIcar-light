@@ -69,6 +69,12 @@ void Gimbal_SetYawFeedForward(int16_t speedSps);
 /* 写入姿态环的电机方向补偿速度；只允许 Gimbal 固定周期任务调用。 */
 void Gimbal_SetYawAttitudeCompensation(int16_t speedSps);
 
+/* 高阶段视觉帧启用时，把视觉yaw命令和对应上限放大到1.4倍。 */
+void Gimbal_SetVisionYawBoostEnabled(uint8_t enabled);
+
+/* 当前视觉yaw高阶段增益是否启用。 */
+uint8_t Gimbal_IsVisionYawBoostEnabled(void);
+
 /* Task4首帧锁定后允许视觉超时触发左右摆动重搜；其他任务保持关闭。 */
 void Gimbal_SetLostTargetSearchEnabled(uint8_t enabled);
 

@@ -18,6 +18,7 @@ static volatile uint8_t g_logRxWriteIndex;
 static volatile uint8_t g_logRxReadIndex;
 static volatile uint32_t g_logRxDropCount;
 static volatile uint32_t g_logRxErrorCount;
+static volatile uint8_t g_logTxBusy;
 
 static uint32_t LogUart_EnterCritical(void)
 {
@@ -29,6 +30,27 @@ static uint32_t LogUart_EnterCritical(void)
 static void LogUart_ExitCritical(uint32_t primask)
 {
     __set_PRIMASK(primask);
+}
+
+static uint8_t LogUart_TryLockTx(void)
+{
+    uint32_t primask = LogUart_EnterCritical();
+
+    if (g_logTxBusy != 0U) {
+        LogUart_ExitCritical(primask);
+        return 0U;
+    }
+    g_logTxBusy = 1U;
+    LogUart_ExitCritical(primask);
+    return 1U;
+}
+
+static void LogUart_UnlockTx(void)
+{
+    uint32_t primask = LogUart_EnterCritical();
+
+    g_logTxBusy = 0U;
+    LogUart_ExitCritical(primask);
 }
 
 static void LogUart_PushRxByte(uint8_t data)
@@ -73,6 +95,7 @@ void LogUart_Init(void)
     g_logRxReadIndex = 0U;
     g_logRxDropCount = 0U;
     g_logRxErrorCount = 0U;
+    g_logTxBusy = 0U;
 #if CAR_ENABLE_LOG_UART_RX
     DL_UART_Main_setRXFIFOThreshold(LogUart_INST,
         DL_UART_MAIN_RX_FIFO_LEVEL_ONE_ENTRY);
@@ -189,32 +212,51 @@ uint32_t LogUart_GetRxErrorCount(void)
 
 void LogUart_SendByte(uint8_t data)
 {
-    (void)LogUart_TrySendByte(data);
+    if (LogUart_TryLockTx() != 0U) {
+        (void)LogUart_TrySendByte(data);
+        LogUart_UnlockTx();
+    }
 }
 
-void LogUart_SendBytes(const uint8_t *data, uint16_t length)
+uint8_t LogUart_TrySendBytes(const uint8_t *data, uint16_t length)
 {
     uint16_t i;
+    uint8_t success = 1U;
 
     if (data == 0) {
-        return;
+        return 0U;
+    }
+    if (LogUart_TryLockTx() == 0U) {
+        return 0U;
     }
 
     for (i = 0U; i < length; ++i) {
         if (!LogUart_TrySendByte(data[i])) {
-            return;
+            success = 0U;
+            break;
         }
     }
+    LogUart_UnlockTx();
+    return success;
+}
+
+void LogUart_SendBytes(const uint8_t *data, uint16_t length)
+{
+    (void)LogUart_TrySendBytes(data, length);
 }
 
 void LogUart_SendString(const char *text)
 {
-    while ((text != 0) && (*text != '\0')) {
+    if ((text == 0) || (LogUart_TryLockTx() == 0U)) {
+        return;
+    }
+    while (*text != '\0') {
         if (!LogUart_TrySendByte((uint8_t)*text)) {
-            return;
+            break;
         }
         ++text;
     }
+    LogUart_UnlockTx();
 }
 
 void LogUart_SendUnsigned(uint32_t value)
@@ -222,6 +264,9 @@ void LogUart_SendUnsigned(uint32_t value)
     char digits[10];
     uint8_t count = 0U;
 
+    if (LogUart_TryLockTx() == 0U) {
+        return;
+    }
     do {
         digits[count] = (char)('0' + (value % 10U));
         value /= 10U;
@@ -231,17 +276,24 @@ void LogUart_SendUnsigned(uint32_t value)
     while (count > 0U) {
         --count;
         if (!LogUart_TrySendByte((uint8_t)digits[count])) {
-            return;
+            break;
         }
     }
+    LogUart_UnlockTx();
 }
 
 void LogUart_SendSigned(int32_t value)
 {
+    char digits[10];
+    uint8_t count = 0U;
     uint32_t magnitude;
 
+    if (LogUart_TryLockTx() == 0U) {
+        return;
+    }
     if (value < 0) {
         if (!LogUart_TrySendByte((uint8_t)'-')) {
+            LogUart_UnlockTx();
             return;
         }
         magnitude = (uint32_t)(-(value + 1)) + 1U;
@@ -249,7 +301,18 @@ void LogUart_SendSigned(int32_t value)
         magnitude = (uint32_t)value;
     }
 
-    LogUart_SendUnsigned(magnitude);
+    do {
+        digits[count] = (char)('0' + (magnitude % 10U));
+        magnitude /= 10U;
+        ++count;
+    } while ((magnitude != 0U) && (count < (uint8_t)sizeof(digits)));
+    while (count > 0U) {
+        --count;
+        if (!LogUart_TrySendByte((uint8_t)digits[count])) {
+            break;
+        }
+    }
+    LogUart_UnlockTx();
 }
 
 void LogUart_SendHex32(uint32_t value)
@@ -257,11 +320,19 @@ void LogUart_SendHex32(uint32_t value)
     static const char hex[] = "0123456789ABCDEF";
     int8_t shift;
 
-    LogUart_SendString("0x");
+    if (LogUart_TryLockTx() == 0U) {
+        return;
+    }
+    if (!LogUart_TrySendByte((uint8_t)'0') ||
+        !LogUart_TrySendByte((uint8_t)'x')) {
+        LogUart_UnlockTx();
+        return;
+    }
     for (shift = 28; shift >= 0; shift -= 4) {
         if (!LogUart_TrySendByte(
             (uint8_t)hex[(value >> (uint8_t)shift) & 0x0FU])) {
-            return;
+            break;
         }
     }
+    LogUart_UnlockTx();
 }

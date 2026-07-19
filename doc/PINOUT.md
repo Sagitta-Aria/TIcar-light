@@ -32,10 +32,10 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 
 | 模块 | 信号 | MCU管脚 | 说明 |
 | --- | --- | --- | --- |
-| OLED | I2C0 SDA / SCL | PA0 / PA1 | 建议 4.7k～10k 外部上拉至 3.3 V |
+| 本地OLED（停用） | I2C0 SDA / SCL | PA0 / PA1 | 固件不再初始化或刷新 |
 | K1 / K2 | 按键 | PB9 / PB8 | 低有效，内部上拉 |
 | 状态灯 | LED | PA14 | 系统状态指示 |
-| H7云台反馈 / 日志TX | UART0 TX / RX | PA10 / PA11 | PA11接H7 UART7_TX/PE8，PA10仅保留日志TX；必须拆开CH340 TX |
+| H7云台反馈 / LCD输出 | UART0 TX / RX | PA10 / PA11 | PA11接H7 PE8，PA10接H7 PE7；必须拆开CH340 TX |
 | K230视觉 | UART3 TX / RX | PB2 / PB3 | 115200 |
 | 板载JY61底座前馈 | UART1 TX / RX | PB6 / PB7 | PB7接JY61 TX；PB6仅保留外设TX功能 |
 | HFXT | 晶振 | PA5 / PA6 | 当前软件使用内部32 MHz SYSOSC，硬件位仍保留 |
@@ -58,7 +58,7 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 
 ## 端口冲突核对
 
-当前底盘十个信号与 OLED、三路 UART、七路灰度、两键、状态灯、云台 STEP/DIR、SWD 和 HFXT 均没有重复 PINCM。特别注意以下旧定义已经失效：
+当前底盘十个信号与三路UART、七路灰度、两键、状态灯、云台STEP/DIR、SWD和HFXT均没有重复PINCM。本地OLED管脚保留但不再使用。特别注意以下旧定义已经失效：
 
 - PA12/PA22 不再是底盘 STEP/DIR，而是 PWMB/PWMA。
 - PA13/PB24 不再是底盘 STEP/DIR，而是 Encoder2 A/B。

@@ -6,7 +6,7 @@
 /*
  * staticconfig：云台视觉闭环的集中调参入口。
  *
- * 视觉脚本当前发送 "centerDx,centerDy;circleDx,circleDy\n"。
+ * 视觉脚本当前发送 "centerDx,centerDy;circleDx,circleDy;stageScale\n"。
  * dx/dy 的符号已经是 target - current，进入 MCU 后统一放大为 0.1 像素单位。
  *
  * 调参时优先改 app/staticconfig.c 里的六个 g_task* 结构体：

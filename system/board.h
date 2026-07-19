@@ -15,7 +15,7 @@ void Board_ReportError(BoardErrorCode error);
 uint32_t Board_GetErrors(void);
 uint32_t Board_GetResetCause(void);
 uint8_t Board_HasFatalError(void);
-uint8_t Board_IsOledAvailable(void);
+uint8_t Board_IsDisplayAvailable(void);
 void Board_DebugLedInit(void);
 void Board_DebugLedSet(uint8_t enabled);
 void Board_DebugLedToggle(void);

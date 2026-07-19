@@ -10,6 +10,7 @@
 #include "gimbal.h"
 #include "gimbal_attitude.h"
 #include "h7_gyro_link.h"
+#include "h7_lcd_display.h"
 #include "jy61p.h"
 #include "key.h"
 #include "link.h"
@@ -17,16 +18,11 @@
 #include "menu.h"
 #include "motor.h"
 #include "motor_no_yaw.h"
-#include "oled.h"
 #include "state_machine.h"
 #include "staticconfig.h"
 #include "tuning_console.h"
 #include "vision.h"
 
-#define APP_TASK2_OLED_FONT_SIZE        (12U)
-#define APP_TASK2_OLED_START_X          (6U)
-#define APP_TASK2_OLED_START_Y          (16U)
-#define APP_TASK2_OLED_LINE_STEP        (12U)
 #define APP_TASK2_OLED_MAX_CHARS        (18U)
 #define APP_CAMERA_LASER_DELAY_MS       (1000U)
 
@@ -127,7 +123,7 @@ static void App_ShowFastMissionOnce(uint8_t missionId)
     g_appFastMissionId = missionId;
     Menu_RequestRefresh();
     Menu_Task(StateMachine_GetState());
-    if (Board_IsOledAvailable() == 0U) {
+    if (Board_IsDisplayAvailable() == 0U) {
         g_appFastMissionId = 0U;
     }
 }
@@ -215,7 +211,6 @@ static void App_ShowTask2OledLine(uint8_t index, const char *text)
 {
     char padded[APP_TASK2_OLED_MAX_CHARS + 1U];
     uint8_t i;
-    uint8_t y;
 
     for (i = 0U; i < APP_TASK2_OLED_MAX_CHARS; ++i) {
         padded[i] = ' ';
@@ -229,10 +224,7 @@ static void App_ShowTask2OledLine(uint8_t index, const char *text)
         ++i;
     }
 
-    y = (uint8_t)(APP_TASK2_OLED_START_Y +
-        (index * APP_TASK2_OLED_LINE_STEP));
-    OLED_ShowString(APP_TASK2_OLED_START_X, y, (u8 *)padded,
-        APP_TASK2_OLED_FONT_SIZE);
+    H7LcdDisplay_ShowLine(index, padded);
 }
 
 /* 作用：云台任务只在等待视觉和进入追踪时各刷一次 OLED。 */
@@ -242,7 +234,7 @@ static void App_ShowGimbalOledStatus(uint8_t missionId,
     char title[8];
     const char *statusText;
 
-    if (Board_IsOledAvailable() == 0U) {
+    if (Board_IsDisplayAvailable() == 0U) {
         return;
     }
     if (g_appTask2OledStatus == status) {
@@ -267,8 +259,8 @@ static void App_ShowGimbalOledStatus(uint8_t missionId,
     App_ShowTask2OledLine(1U, statusText);
     App_ShowTask2OledLine(2U, "");
     App_ShowTask2OledLine(3U, "");
-    OLED_Refresh();
-    if (Board_IsOledAvailable() != 0U) {
+    H7LcdDisplay_Refresh();
+    if (Board_IsDisplayAvailable() != 0U) {
         g_appTask2OledStatus = status;
     }
 }
@@ -324,7 +316,7 @@ static void App_ClearFastMission(void)
  */
 void App_Init(void)
 {
-    Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP...", "");
+    Board_ShowBootProgress("LCD LINK", "UART OK", "Gray OK", "APP...", "");
     LOG_LINE("app: init begin");
     delay_ms(100U);
 
@@ -340,12 +332,11 @@ void App_Init(void)
     StateMachine_Init();
 
     LOG_LINE("m0-light-rtos competition init ok");
-    Board_ShowBootProgress("I2C OK", "UART OK", "Gray OK", "APP OK", "");
+    Board_ShowBootProgress("LCD LINK", "UART OK", "Gray OK", "APP OK", "");
     delay_ms(200U);
 
-    if (Board_IsOledAvailable() != 0U) {
-        OLED_Clear();
-    }
+    H7LcdDisplay_Clear();
+    H7LcdDisplay_Refresh();
     Menu_Task(StateMachine_GetState());
 }
 

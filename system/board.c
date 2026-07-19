@@ -3,12 +3,12 @@
 #include "board_config.h"
 #include "delay.h"
 #include "gray.h"
+#include "h7_lcd_display.h"
 #include "interrupt.h"
 #include "key.h"
 #include "link.h"
 #include "log_uart.h"
 #include "motor.h"
-#include "oled.h"
 #include "ti_msp_dl_config.h"
 
 #define BOARD_BOOT_STEP_DELAY_MS    (80U)
@@ -18,19 +18,15 @@
 #define BOARD_FATAL_ERROR_MASK      (BOARD_ERROR_CLOCK)
 /* Board_Task由20ms UI任务调用，50拍约1s翻转一次。 */
 #define BOARD_SIGNAL_BLINK_TICKS    (50U)
-/* 非致命错误用更快频率提示，例如 OLED/I2C 超时。 */
+/* 非致命错误用更快频率提示。 */
 #define BOARD_ERROR_BLINK_TICKS     (10U)
-#define BOARD_OLED_RECOVER_PERIOD_TICKS (200U)
 #define BOARD_RECOVERY_BLINK_CYCLES (16000000U)
 #define BOARD_RECOVERY_POWER_DELAY  (16U)
 #define BOARD_RECOVERY_UART_TIMEOUT (100000U)
 #define BOARD_RECOVERY_UART_TEXT \
     "RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK\r\n"
-#define BOARD_BOOT_FONT_SIZE        (12U)
 #define BOARD_BOOT_MAX_CHARS        (21U)
 #define BOARD_BOOT_VISIBLE_LINES    (4U)
-#define BOARD_BOOT_START_Y          (16U)
-#define BOARD_BOOT_LINE_STEP        (12U)
 
 static uint32_t g_boardErrors;
 static uint32_t g_boardResetCause;
@@ -69,76 +65,23 @@ static void Board_LogResetCause(void)
 }
 #endif
 
-/* 作用：清除已经恢复的板级错误位。 */
-static void Board_ClearError(BoardErrorCode error)
-{
-    g_boardErrors &= ~((uint32_t)error);
-}
-
 /*
- * 作用：同步 OLED 驱动错误和板级 OLED/I2C 错误位。
- * 说明：启动早期 OLED 可能短暂未应答；后续初始化成功后必须清掉旧错误位。
- */
-static uint8_t Board_UpdateOledError(void)
-{
-    if (OLED_HasError() == 0U) {
-        Board_ClearError(BOARD_ERROR_OLED_I2C);
-        return 1U;
-    }
-
-    Board_ReportError(BOARD_ERROR_OLED_I2C);
-    return 0U;
-}
-
-/*
- * 作用：尝试恢复 OLED I2C，并按结果更新板级错误位。
- * 使用场景：启动探针或运行时发现 OLED/I2C 错误后低频自救。
- */
-static uint8_t Board_TryRecoverOled(void)
-{
-    if (OLED_HasError() == 0U) {
-        Board_ClearError(BOARD_ERROR_OLED_I2C);
-        return 1U;
-    }
-
-    if ((OLED_TryRecover() != 0U) && (OLED_HasError() == 0U)) {
-        Board_ClearError(BOARD_ERROR_OLED_I2C);
-        return 1U;
-    }
-
-    Board_ReportError(BOARD_ERROR_OLED_I2C);
-    return 0U;
-}
-
-/*
- * 作用：清掉 OLED 启动探针内容，尤其避免顶部黄色区域残留标题。
+ * 作用：清掉H7 LCD上的上一页启动探针内容。
  * 使用场景：每次刷新启动探针页前调用。
  */
 static void Board_ClearBootArea(void)
 {
-    char blank[BOARD_BOOT_MAX_CHARS + 1U];
-    uint8_t i;
-
-    for (i = 0U; i < BOARD_BOOT_MAX_CHARS; ++i) {
-        blank[i] = ' ';
-    }
-    blank[BOARD_BOOT_MAX_CHARS] = '\0';
-
-    for (i = 0U; i < 5U; ++i) {
-        OLED_ShowLine(i, blank, BOARD_BOOT_FONT_SIZE);
-    }
+    H7LcdDisplay_Clear();
 }
 
 /*
- * 作用：把启动阶段的一行状态写到 OLED 下半区。
+ * 作用：把启动阶段的一行状态写到H7 LCD缓存。
  * 使用场景：排查时钟、I2C、UART、灰度输入、应用层初始化卡在哪一步。
- * 说明：从 y=16 开始显示，避开双色 OLED 顶部黄色区域。
  */
 static void Board_ShowBootLine(uint8_t line, const char *text)
 {
     char buffer[BOARD_BOOT_MAX_CHARS + 1U];
     uint8_t index;
-    uint8_t y;
 
     if (line >= BOARD_BOOT_VISIBLE_LINES) {
         return;
@@ -156,49 +99,36 @@ static void Board_ShowBootLine(uint8_t line, const char *text)
         }
     }
 
-    y = (uint8_t)(BOARD_BOOT_START_Y + (line * BOARD_BOOT_LINE_STEP));
-    OLED_ShowString(0U, y, (u8 *)buffer, BOARD_BOOT_FONT_SIZE);
+    H7LcdDisplay_ShowLine(line, buffer);
 }
 
 /*
- * 作用：在上电阶段先点亮 OLED，显示当前初始化进度。
+ * 作用：在上电阶段缓存并显示当前初始化进度。
  * 使用场景：排查是否卡在时钟初始化、外设初始化或复位边界。
  */
 void Board_ShowBootProgress(const char *clkStatus, const char *i2cStatus,
     const char *uartStatus, const char *adcStatus, const char *appStatus)
 {
-    if (Board_TryRecoverOled() == 0U) {
-        return;
-    }
-    OLED_ColorTurn(0U);
-    OLED_DisplayTurn(0U);
-    if (Board_TryRecoverOled() == 0U) {
-        return;
-    }
     Board_ClearBootArea();
     Board_ShowBootLine(0U, clkStatus);
     Board_ShowBootLine(1U, i2cStatus);
     Board_ShowBootLine(2U, uartStatus);
     Board_ShowBootLine(3U, adcStatus);
-    (void)appStatus;
-    OLED_Refresh();
-    (void)Board_UpdateOledError();
+    if ((appStatus != 0) && (appStatus[0] != '\0')) {
+        H7LcdDisplay_ShowLine(4U, appStatus);
+    }
+    H7LcdDisplay_Refresh();
 }
 
 /*
  * 作用：按初始化顺序显示当前正在执行的步骤。
- * 使用场景：某个外设初始化卡死时，OLED 会停在对应 RUN 行。
+ * 使用场景：某个外设初始化卡死时，H7 LCD会停在对应RUN行。
  */
 static void Board_ShowBootStep(const char *done, const char *running,
     const char *waiting1, const char *waiting2)
 {
-    if (Board_TryRecoverOled() == 0U) {
-        return;
-    }
     Board_ShowBootProgress(done, running, waiting1, waiting2, "");
-    if (OLED_HasError() == 0U) {
-        delay_ms(BOARD_BOOT_STEP_DELAY_MS);
-    }
+    delay_ms(BOARD_BOOT_STEP_DELAY_MS);
 }
 
 #if CAR_RECOVERY_SAFE_BUILD
@@ -344,12 +274,9 @@ uint8_t Board_HasFatalError(void)  //有致命错误返回 1，没有返回 0
     return ((g_boardErrors & BOARD_FATAL_ERROR_MASK) != 0U) ? 1U : 0U;
 }
 
-uint8_t Board_IsOledAvailable(void)
+uint8_t Board_IsDisplayAvailable(void)
 {
-    if ((g_boardErrors & BOARD_ERROR_OLED_I2C) != 0U) {
-        return 0U;
-    }
-    return (OLED_HasError() == 0U) ? 1U : 0U;
+    return H7LcdDisplay_IsReady();
 }
 
 void Board_Init(void)
@@ -379,23 +306,14 @@ void Board_Init(void)
     return;
 #else
     /*
-     * 先只初始化电源、GPIO 和 OLED。
-     * 这样如果系统时钟卡住，屏幕还能停在启动探针页。
+     * 先初始化电源和GPIO；H7 LCD内容先写软件缓存，UART0就绪后统一发出。
      */
     SYSCFG_DL_initPower();
     SYSCFG_DL_GPIO_init();
     Board_DebugLedInit();
-    SYSCFG_DL_OLED_init();
-    OLED_Init();
-    if (Board_UpdateOledError() == 0U) {
-        (void)Board_TryRecoverOled();
-    } else {
-        OLED_ColorTurn(0U);
-        OLED_DisplayTurn(0U);
-        OLED_Clear();
-        Board_ShowBootStep("OK Power GPIO", "RUN Clock", "WAIT UART Gray",
-            "WAIT Drivers");
-    }
+    H7LcdDisplay_Init();
+    Board_ShowBootStep("OK Power GPIO", "RUN Clock", "WAIT UART Gray",
+        "WAIT Drivers");
 
     /*
      * 再初始化系统时钟。
@@ -411,10 +329,7 @@ void Board_Init(void)
 
     Interrupt_Init();
 
-    SYSCFG_DL_OLED_init();
-    OLED_Init();
-    (void)Board_UpdateOledError();
-    Board_ShowBootStep("OK Clock OLED", "RUN Stepper", "WAIT UART Gray",
+    Board_ShowBootStep("OK Clock", "RUN Stepper", "WAIT UART Gray",
         "WAIT Drivers");
 
     /*
@@ -430,6 +345,8 @@ void Board_Init(void)
 #if CAR_ENABLE_LOG_UART
     SYSCFG_DL_LogUart_init();
     LogUart_Init();
+    H7LcdDisplay_SetReady(1U);
+    H7LcdDisplay_Refresh();
     Board_LogResetCause();
     Board_BootProbe("after log uart init");
     LOG_LINE("board uart: log/exchange ok");
@@ -508,7 +425,7 @@ void Board_Init(void)
 
 /*
  * 作用：用板载灯输出系统状态信号。
- * 使用场景：OLED 没接、I2C 卡线或换板测试时，用肉眼判断程序是否还在主循环。
+ * 使用场景：H7 LCD未连接或换板测试时，用肉眼判断程序是否还在主循环。
  * 显示规则：PA14 慢闪表示主循环存活；PA14 快闪表示普通错误；PA14 常亮表示致命错误。
  * 说明：只有 CAR_ENABLE_PA14_DEBUG_LED 为 1 时才真正驱动 PA14。
  */
@@ -516,7 +433,6 @@ uint8_t Board_Task(void)
 {
     static uint32_t signalCounter;
     static uint32_t errorCounter;
-    static uint16_t oledRecoverTicks;
 
 #if CAR_RECOVERY_SAFE_BUILD
     delay_cycles(BOARD_RECOVERY_BLINK_CYCLES);
@@ -527,9 +443,6 @@ uint8_t Board_Task(void)
     return 0U;
 #endif
 
-    /* 运行时 I2C 错误先同步为板级状态；这里只读取一个错误标志。 */
-    (void)Board_UpdateOledError();
-
     if (Board_HasFatalError() != 0U) {
 #if CAR_ENABLE_PA14_DEBUG_LED
         DL_GPIO_setPins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
@@ -538,17 +451,6 @@ uint8_t Board_Task(void)
     }
 
     if (g_boardErrors != BOARD_ERROR_NONE) {
-        if ((g_boardErrors & BOARD_ERROR_OLED_I2C) != 0U) {
-            ++oledRecoverTicks;
-            if (oledRecoverTicks >= BOARD_OLED_RECOVER_PERIOD_TICKS) {
-                oledRecoverTicks = 0U;
-                if (Board_TryRecoverOled() != 0U) {
-                    return 1U;
-                }
-            }
-        } else {
-            oledRecoverTicks = 0U;
-        }
         ++errorCounter;
         if (errorCounter >= BOARD_ERROR_BLINK_TICKS) {
             errorCounter = 0U;
@@ -557,7 +459,6 @@ uint8_t Board_Task(void)
 #endif
         }
     } else {
-        oledRecoverTicks = 0U;
         errorCounter = 0U;
         ++signalCounter;
         if (signalCounter >= BOARD_SIGNAL_BLINK_TICKS) {

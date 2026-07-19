@@ -4,6 +4,7 @@
 #include "task.h"
 
 #include "board_config.h"
+#include "control_config.h"
 #include "motor.h"
 #include "rtos_app.h"
 #include "staticconfig.h"
@@ -45,6 +46,7 @@ typedef struct {
     int8_t yawLostSearchDirection;
     uint8_t yawLostSearchEnabled;
     uint8_t yawLostSearchActive;
+    uint8_t visionYawBoostEnabled;
 } GimbalControl;
 
 static GimbalControl g_gimbal;
@@ -166,6 +168,26 @@ static int16_t Gimbal_ClampCommand(int32_t command)
         return (int16_t)(-(int32_t)CAR_STEPPER_SPEED_MAX_SPS);
     }
     return Gimbal_ClampInt16(command);
+}
+
+/* 高阶段只放大视觉yaw，不放大底座前馈或H7姿态补偿。 */
+static int16_t Gimbal_ApplyVisionYawBoost(int16_t command)
+{
+    int32_t scaled;
+
+    if ((g_gimbal.visionYawBoostEnabled == 0U) || (command == 0)) {
+        return command;
+    }
+
+    scaled = (int32_t)command *
+        (int32_t)GIMBAL_VISION_YAW_BOOST_NUMERATOR;
+    if (scaled > 0) {
+        scaled += (int32_t)GIMBAL_VISION_YAW_BOOST_DENOMINATOR / 2L;
+    } else {
+        scaled -= (int32_t)GIMBAL_VISION_YAW_BOOST_DENOMINATOR / 2L;
+    }
+    scaled /= (int32_t)GIMBAL_VISION_YAW_BOOST_DENOMINATOR;
+    return Gimbal_ClampCommand(scaled);
 }
 
 /* 视觉/任务命令使用逻辑方向，姿态补偿已经是电机方向，统一在这里合成。 */
@@ -328,6 +350,7 @@ static void Gimbal_ApplyControl(void)
         config->kpY, config->kdY, config->gainScale, config->minSpeedY,
         config->maxSpeedY, &g_gimbal.axisActiveY);
 
+    commandX = Gimbal_ApplyVisionYawBoost(commandX);
     commandX = Gimbal_CombineYawCommand(commandX);
     commandY = Gimbal_ApplyReverse(commandY, CAR_GIMBAL_PITCH_REVERSE);
     commandY = Gimbal_LimitPitchCommand(commandY);
@@ -373,6 +396,7 @@ void Gimbal_Init(void)
     g_gimbal.yawLostSearchDirection = 1;
     g_gimbal.yawLostSearchEnabled = 0U;
     g_gimbal.yawLostSearchActive = 0U;
+    g_gimbal.visionYawBoostEnabled = 0U;
     Gimbal_Stop();
 }
 
@@ -585,6 +609,16 @@ void Gimbal_SetYawAttitudeCompensation(int16_t speedSps)
     }
     g_gimbal.yawAttitudeCompensationSps = nextSpeedSps;
     g_gimbal.controlPending = 1U;
+}
+
+void Gimbal_SetVisionYawBoostEnabled(uint8_t enabled)
+{
+    g_gimbal.visionYawBoostEnabled = (enabled != 0U) ? 1U : 0U;
+}
+
+uint8_t Gimbal_IsVisionYawBoostEnabled(void)
+{
+    return g_gimbal.visionYawBoostEnabled;
 }
 
 void Gimbal_SetLostTargetSearchEnabled(uint8_t enabled)

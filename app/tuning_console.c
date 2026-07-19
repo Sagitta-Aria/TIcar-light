@@ -569,6 +569,10 @@ static void TuningConsole_SendStatus(void)
         LogUart_SendSigned(Vision_GetRawX());
         LogUart_SendString(",");
         LogUart_SendSigned(Vision_GetRawY());
+        LogUart_SendString(" stage_x10=");
+        LogUart_SendSigned(Vision_GetStageScaleX10());
+        LogUart_SendString(" yaw_boost=");
+        LogUart_SendUnsigned(Vision_IsYawBoostActive());
         LogUart_SendString(" error=");
         LogUart_SendSigned(Gimbal_GetErrorX());
         LogUart_SendString(",");
@@ -2078,8 +2082,10 @@ void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status)
     status->visionFrameCount = Vision_GetFrameCount();
     status->visionRawX = Vision_GetRawX();
     status->visionRawY = Vision_GetRawY();
+    status->visionStageScaleX10 = Vision_GetStageScaleX10();
     status->visionCommandX = Gimbal_GetCommandX();
     status->visionCommandY = Gimbal_GetCommandY();
+    status->visionYawBoostActive = Vision_IsYawBoostActive();
     status->gimbalState = (uint8_t)gimbal.motion.state;
     status->gimbalHoldEnabled = gimbal.holdEnabled;
     status->gimbalFeedForwardEnabled = gimbal.feedForwardEnabled;

@@ -5,17 +5,13 @@
 #include "control_config.h"
 #include "encoder_motor.h"
 #include "gimbal_attitude.h"
+#include "h7_lcd_display.h"
 #include "motor_no_yaw.h"
-#include "oled.h"
 #include "tuning_console.h"
 
 #define MENU_TASK_COUNT       (9U)
 #define MENU_GIMBAL_DISTANCE_COUNT (3U)
 #define MENU_TASK4_ROUTE_COUNT ((uint8_t)CAR_MISSION4_ROUTE_COUNT)
-#define MENU_OLED_FONT_SIZE   (12U)
-#define MENU_MONO_START_X     (6U)
-#define MENU_MONO_START_Y     (16U)
-#define MENU_MONO_LINE_STEP   (12U)
 #define MENU_MONO_MAX_CHARS   (18U)
 #define MENU_LINE_SIZE        (24U)
 #define MENU_TASK5_REFRESH_TICKS (5U)
@@ -183,7 +179,6 @@ static void Menu_ShowMonoLine(uint8_t index, const char *text)
 {
     char padded[MENU_MONO_MAX_CHARS + 1U];
     uint8_t i;
-    uint8_t y;
 
     for (i = 0U; i < MENU_MONO_MAX_CHARS; ++i) {
         padded[i] = ' ';
@@ -197,15 +192,13 @@ static void Menu_ShowMonoLine(uint8_t index, const char *text)
         ++i;
     }
 
-    y = (uint8_t)(MENU_MONO_START_Y + (index * MENU_MONO_LINE_STEP));
-    OLED_ShowString(MENU_MONO_START_X, y, (u8 *)padded,
-        MENU_OLED_FONT_SIZE);
+    H7LcdDisplay_ShowLine(index, padded);
 }
 
 static void Menu_RenderLines(const char *line0, const char *line1,
     const char *line2, const char *line3)
 {
-    if (Board_IsOledAvailable() == 0U) {
+    if (Board_IsDisplayAvailable() == 0U) {
         return;
     }
 
@@ -213,7 +206,7 @@ static void Menu_RenderLines(const char *line0, const char *line1,
     Menu_ShowMonoLine(1U, line1);
     Menu_ShowMonoLine(2U, line2);
     Menu_ShowMonoLine(3U, line3);
-    OLED_Refresh();
+    H7LcdDisplay_Refresh();
 }
 
 static void Menu_BuildTaskLine(char line[MENU_LINE_SIZE], uint8_t task,
@@ -415,9 +408,14 @@ static void Menu_RenderTask5(void)
         write = line1;
         end = &line1[MENU_LINE_SIZE - 1U];
         if (status.visionHasFrame != 0U) {
-            write = Menu_AppendText(write, end, "FRAME ");
+            write = Menu_AppendText(write, end, "F ");
+            write = Menu_AppendUnsigned(write, end, status.visionFrameCount);
+            write = Menu_AppendText(write, end, " ST");
+            write = Menu_AppendSigned(write, end,
+                status.visionStageScaleX10);
+            write = Menu_AppendText(write, end, " B");
             (void)Menu_AppendUnsigned(write, end,
-                status.visionFrameCount);
+                status.visionYawBoostActive);
         } else {
             (void)Menu_AppendText(write, end, "WAIT FRAME");
         }
@@ -964,7 +962,7 @@ void Menu_Task(CarState state)
     g_forceRefresh = 0U;
     g_refreshTicks = 0U;
     Menu_RenderByState(state);
-    if (Board_IsOledAvailable() == 0U) {
+    if (Board_IsDisplayAvailable() == 0U) {
         g_forceRefresh = 1U;
     }
 }

@@ -7,7 +7,7 @@ Task5 用于左右编码电机的开环测量和速度 PI 在线测试。测试�
 
 - UART0：115200，8-N-1；当前PA11由H7姿态链路独占。
 - MCU PA10只保留输出，UART0文本RX关闭，因此Type-C在线命令暂不可用。
-- OLED 菜单选择 `Task 5 PID`，按 K2 进入。
+- H7 LCD菜单选择 `Task 5 PID`，按K2进入。
 - 进入 Task5 后会停止所有电机并关闭视觉。100 Hz 姿态任务保持运行，默认由底盘调参模式占用执行机构。
 - 长按 K2 退出时，左右 PWM 强制清零、积分清零，并恢复正常任务模式。
 
@@ -16,6 +16,11 @@ Task5默认处于`mode chassis`。只有显式发送`mode gimbal`后才停止底
 发送 `mode vision` 会停止底盘和姿态环，启动 UART3 视觉解析与二维云台闭环，
 并默认输出 `B` 前缀视觉响应波形。`stop` 同时停止底盘、姿态和视觉云台输出。
 Task8 是独立的云台姿态实验入口，不启动视觉或底盘。
+
+UART3视觉行格式为`centerDx,centerDy;circleDx,circleDy;stageScale\n`，五个字段
+均保留一位小数。`stageScale > 60.0`时只把视觉yaw命令和该套参数的`maxSpeedX`
+上限放大到1.4倍；pitch、H7姿态补偿和JY61前馈不放大。Task5视觉页中的
+`ST610 B1`表示阶段标度61.0且Boost已经启用。
 
 ## 定时器与调度
 
@@ -99,7 +104,7 @@ Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 | `vplot on\|off` | 开关 20 ms 视觉十通道 B 波形 | `vplot on` |
 | `vshow` | 输出视觉帧、控制误差、两轴命令及当前参数 | `vshow` |
 
-建议先`mode gimbal`并保持`gff off`，确认OLED显示`HOLD FF0`。轻推云台，H7
+建议先`mode gimbal`并保持`gff off`，确认H7 LCD显示`HOLD FF0`。轻推云台，H7
 角度误差应驱动电机回到原方向；若发散立即断电，优先核对`gsign`和`gh7sign`，再从
 较小`gkp/grkp`逐步增加。反馈稳定后保持底座静止执行`gcal`，再`gff on`并只转动
 底座，确认JY61前馈方向；方向相反时改`gjysign`。最后才调`gkff`和`gaccel`。
@@ -191,7 +196,7 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 | `pwm L R` | 左右轮开环 PWM 百分比，范围 -100..100 | `pwm 15 0` |
 | `target L R` | 闭环目标，范围 -100..100 count/20 ms | `target 12 12` |
 | `move LS RS LD RD` | 以左右速度 LS/RS 行驶有符号编码距离 LD/RD；速度范围 1..100 count/20 ms | `move 50 50 1000 1000` |
-| `gray on\|off` | 开关 Task1 灰度联调；OLED 显示 S1～S7、左右目标和反馈 | `gray on` |
+| `gray on\|off` | 开关 Task1 灰度联调；H7 LCD显示S1～S7、左右目标和反馈 | `gray on` |
 | `start L R` | 实际速度绝对值小于15 count/20ms时使用的 PWM 百分比，范围 0..100 | `start 25 22` |
 | `runstart L R` | 左右轮转动后的运行摩擦 PWM 百分比，范围 0..100 | `runstart 12 11` |
 | `ff L R` | 左右 FF_Q1024 | `ff 28000 29500` |
@@ -199,7 +204,7 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 | `ki L R` | 左右 KI_Q1024 | `ki 8 8` |
 | `ilim L R` | 左右积分输出限幅百分比，范围 0..100 | `ilim 20 20` |
 | `ffcalc P1 C1 P2 C2` | 用两个 PWM 百分比/count 点计算 FF_Q1024 和 runstart | `ffcalc 30 8 50 15` |
-| `oled ff\|start\|speed\|pid\|gray\|gimbal` | 运行时切换 Task5 OLED 测量页面 | `oled start` |
+| `oled ff\|start\|speed\|pid\|gray\|gimbal` | 兼容旧命令名；切换Task5 H7 LCD测量页面 | `oled start` |
 | `avg` | 清空平均值，下一完整窗口重新累计 | `avg` |
 | `clear` | 清空左右积分 | `clear` |
 | `stop` | 立即停止底盘和云台输出 | `stop` |
@@ -207,7 +212,7 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 | `help` | 显示命令摘要 | `help` |
 
 `move` 是非阻塞距离测试命令。LS/RS 是左右轮速度幅值，LD/RD 是有符号 encoder
-count，正数前进、负数后退。执行后 OLED 自动切到 PID 页面，底盘控制任务仍按
+count，正数前进、负数后退。执行后H7 LCD自动切到PID页面，底盘控制任务仍按
 20 ms 周期运行，Task5 通信任务每 5 ms 检查左右累计编码器 count。某一轮先达到
 目标距离时会先停该轮，另一轮继续运行；`stop` 会立即取消距离命令并停车。
 
@@ -254,7 +259,7 @@ SerialPlot 选择 `ASCII`，通道数设为 `9`，列分隔符选择 `comma`，`
 4. 采集 50 个完整的 20 ms 编码器窗口，共 1000 ms，并用这 50 个窗口求平均值。
 5. 打印该点的 `pwm_pct/pwm_raw/sum/n/avg_x1000`，然后自动停车。
 
-Task5 OLED 页面可以在运行时切换，不需要重新烧录：
+Task5 H7 LCD页面可以在运行时切换，不需要重新烧录；命令名`oled`为兼容保留：
 
 - `oled ff`：显示最终左右 FF 和已保存的 runstart 百分比。FF 使用
   `FF_Q1024 / 1024` 的三位小数，例如内部值 `35109` 显示为 `34.286`。
@@ -265,14 +270,14 @@ Task5 OLED 页面可以在运行时切换，不需要重新烧录：
   Task1 的基础速度、差速增益和上下限更新左右闭环目标。`T` 是左右目标
   count/20ms，`F` 是左右实际反馈；没有任何灰度输入时目标立即置零。
   当灰度给出的左右原始目标完全相同时，正常闭环会用本周期左右反馈的平均值
-  做直线同步修正；OLED/SerialPlot 的 `T` 显示修正后的有效目标。有灰度差速时
+  做直线同步修正；H7 LCD/SerialPlot的`T`显示修正后的有效目标。有灰度差速时
   不做该修正，Task5 的 `target/move` 独立标定模式也不受影响。
   使用 `gray off` 或 `stop` 停车并退出灰度联调。
 
 测 start 时先发送 `oled start`，每次都先用 `pwm 0 0` 让车轮完全停止，
 再用 `pwm 5 0`、`pwm 7 0` 等逐级测试左轮；右轮使用 `pwm 0 5`、
 `pwm 0 7`。取重复测试都能可靠启动的最小百分比，最后用一次
-`start LEFT RIGHT` 保存，OLED 的 `Start` 行会显示最终值。
+`start LEFT RIGHT` 保存，H7 LCD的`Start`行会显示最终值。
 
 runstart 和 FF 必须使用两个已经稳定转动的点，不能拿刚好能起步的临界点拟合。
 每个车轮独立保存自己的第一个点，第二次有效采样后按精确的 `sum/n` 计算

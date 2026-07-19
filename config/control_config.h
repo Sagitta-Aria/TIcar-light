@@ -4,6 +4,20 @@
 /* ---------- Task4/Task8 固定控制周期 ---------- */
 #define BODY_MOTION_PERIOD_MS                       (10U)
 
+/* ---------- 视觉阶段标度：高阶段允许更激进的yaw追点 ---------- */
+#define VISION_STAGE_YAW_BOOST_THRESHOLD_X10        (600)  /* 严格大于60.0才启用。 */
+#define GIMBAL_VISION_YAW_BOOST_NUMERATOR            (14U) /* K = 14 / 10 = 1.4。 */
+#define GIMBAL_VISION_YAW_BOOST_DENOMINATOR          (10U)
+
+#if (GIMBAL_VISION_YAW_BOOST_DENOMINATOR == 0U)
+#error "GIMBAL_VISION_YAW_BOOST_DENOMINATOR must be non-zero"
+#endif
+
+#if (GIMBAL_VISION_YAW_BOOST_NUMERATOR < \
+    GIMBAL_VISION_YAW_BOOST_DENOMINATOR)
+#error "GIMBAL_VISION_YAW_BOOST gain must be at least 1.0"
+#endif
+
 /* ---------- 板载JY61：底座姿态估计与角速度前馈 ---------- */
 #define BODY_MOTION_CALIBRATION_SAMPLES             (100U)  /* 静止零偏样本数。 */
 #define BODY_MOTION_GYRO_ALPHA_Q1024                (512U)  /* JY61角速度低通；越大响应越快。 */

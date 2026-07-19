@@ -12,7 +12,7 @@ D:\Ti\m0-light-rtos
 
 ## 比赛任务
 
-OLED 菜单包含五个比赛入口、一个联合标定入口、一个底盘测试入口、一个云台姿态实验入口和一个编码器手推测试入口：
+H7 LCD菜单包含五个比赛入口、一个联合标定入口、一个底盘测试入口、一个云台姿态实验入口和一个编码器手推测试入口：
 
 | 任务 | 当前流程 |
 | --- | --- |
@@ -24,7 +24,7 @@ OLED 菜单包含五个比赛入口、一个联合标定入口、一个底盘测
 | Task 6 Drive | 进入后选择开环/闭环和 10～100 速度；开环单位为 PWM%，闭环单位为 count/20ms，左右轮使用相同命令 |
 | Task 7 Circle | 选择 Near/Mid/Far；不循迹，复用 Task2 的直接追踪流程，但使用对应距离的圆点参数 |
 | Task 8 IMU | H7通过UART0/PA11提供云台yaw角度与角速度反馈，板载JY61通过UART1/PB7提供底座角速度前馈；不启动底盘、视觉或Task4流程 |
-| Task 9 Encoder | 关闭底盘和云台电机使能，进入时清零左右累计编码器；OLED显示左右原始count以及与Task4延长段相同的平均绝对count |
+| Task 9 Encoder | 关闭底盘和云台电机使能，进入时清零左右累计编码器；H7 LCD显示左右原始count以及与Task4延长段相同的平均绝对count |
 
 按键沿用 MSPM0 原板的两键逻辑：K1 切换任务或子项，K2 确认；任务中长按 K2 停止，子菜单长按 K2 返回。
 
@@ -45,7 +45,7 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 | Input | 4 | GPIO按键边沿；按住期间 1 ms | 按键消抖、长按计时并向静态事件队列投递事件 |
 | Mission | 3 | 任务/视觉通知；Task3连续搜索和Task4非循迹阶段 1 ms | 处理比赛状态切换及非底盘周期流程；Task1/Task4-LINE 交给 CarControl |
 | Comm | 2 | 5 ms | UART Link状态、Task5串口命令和低频日志维护 |
-| UI | 1 | UI变化通知；20 ms板级维护 | OLED只在状态变化或Task5/6/8/9动态页刷新；状态灯和OLED恢复保持周期维护 |
+| UI | 1 | UI变化通知；20 ms板级维护 | H7 LCD只发送变化行；状态灯保持周期维护 |
 
 关键调度配置：
 
@@ -53,9 +53,9 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 - tick 为 1 kHz，tickless idle 关闭；空闲任务不让 MCU 进入睡眠。
 - 全部任务、栈和事件队列静态分配；动态内存关闭。
 - `vTaskDelete()` 关闭，任务不会在运行期被删除。
-- OLED整屏刷新按8字节I2C FIFO分包，不再逐像素字节启动事务；I2C恢复会保留软件显存，恢复成功后让UI缓存失效并立即重绘。
+- 本地OLED不再初始化；菜单、任务状态、启动进度和Task5动态页经UART0/PA10发送`@L0`~`@L9`固定行命令到H7 LCD。
 - Watchdog参数集中在`config/board_config.h`的`CAR_WATCHDOG_*`宏；当前`CAR_ENABLE_UI_WATCHDOG=0`关闭监督。启用后，UI约2秒无心跳会停止喂狗，WWDT0再经过约1秒复位整机，调试器暂停内核时同步暂停。
-- WWDT0违规在MSPM0G3507上产生SYSRST，不会给外部OLED断电。启动日志会输出`reset cause raw=`及WWDT0、CPU LOCKUP、BOR等原因，用于区分MCU复位和单纯OLED黑屏。
+- WWDT0违规在MSPM0G3507上产生SYSRST，不会给外部H7断电。启动日志会输出`reset cause raw=`及WWDT0、CPU LOCKUP、BOR等原因。
 - Gimbal任务始终以10 ms运行。H7的已处理yaw/角速度直接进入反馈环，板载JY61只在`body_motion`中做底座角速度前馈估计。Task4直线阶段关闭JY61前馈但保留H7反馈，灰度确认进入转弯流程后才开启前馈；视觉主动纠偏时H7姿态参考同步跟随，避免两个闭环互相抵消。Task1/Task6没有云台命令时STEP定时器保持停止。Task2/Task3/Task7/Task8进入后停车并挂起CarControl；Task8不启动视觉。Task6保留CarControl以刷新编码器反馈或运行20ms速度环。
 - TIMG6按需承担20 kHz云台STEP；TIMG0只在Task1/Task4循迹时承担10 kHz灰度采样。TIMA0底盘20 kHz PWM不产生周期中断。
 - UART3 ISR只在收到完整视觉行后记录通知；Gimbal在下一次固定10 ms边界消费最新帧，不累积过期控制帧。
@@ -93,11 +93,15 @@ Task2/Task3 使用对应中心参数，Task7 使用对应圆点参数。Task6 �
 
 原云台 EN 脚 PA31/PB19 已被底盘方向和编码器占用，软件 EN 接口只保留状态机兼容语义。当前配置假设驱动器 EN 低有效，实际接线需将 EN 固定到有效电平。
 
-K230 视觉通信使用 UART3，115200 bit/s，PB2 为 MCU TX，PB3 为 MCU RX。视觉帧格式沿用 `light-car1.0ccs`：
+K230 视觉通信使用 UART3，115200 bit/s，PB2 为 MCU TX，PB3 为 MCU RX。视觉帧格式为：
 
 ```text
-centerDx,centerDy;circleDx,circleDy
+centerDx,centerDy;circleDx,circleDy;stageScale
 ```
+
+五个字段均保留一位小数。第五字段`stageScale`严格大于`60.0`时，视觉产生的yaw
+命令及对应速度上限乘`K=1.4`；等于`60.0`不放大。pitch、H7姿态补偿和JY61前馈
+不参与该倍增。阈值和K在`config/control_config.h`配置。
 
 云台反馈由达妙H7板载BMI088提供。H7完成零偏、Kalman角速度滤波和Mahony姿态
 更新后，从UART7/PE8输出3.3 V TTL的JY61兼容帧；M0的UART0/PA11使用独立
@@ -105,8 +109,9 @@ centerDx,centerDy;circleDx,circleDy
 板载JY61保留在UART1/PB7，经`body_motion`提供底座yaw角速度前馈和Task1转弯辅助。
 直连接线、协议和启动时序见 `doc/H7_GYRO_LINK.md`。
 
-地猛星的PA11与板载CH340 TX同网，接H7前必须拆开CH340 TX。当前UART0文本RX已
-关闭，Task5仍可从PA10输出状态，但不能再从Type-C接收在线调参命令。
+地猛星的PA11与板载CH340 TX同网，接H7前必须拆开CH340 TX。UART0全双工连接：
+PA11接H7 PE8接收姿态，PA10接H7 PE7发送LCD命令和日志。H7只处理`@`开头的显示
+命令并忽略普通日志。UART0文本RX关闭，不能再从Type-C接收在线调参命令。
 
 ## 灰度快路径
 
@@ -135,7 +140,7 @@ D:\Ti\m0-light-rtos\Debug\codex-build\m0-light-rtos.out
 
 ## 首次上板顺序
 
-1. 断开电机动力电源，只确认 OLED、按键、UART 和任务菜单。
+1. 断开电机动力电源，只确认H7 LCD、按键、UART和任务菜单。
 2. 保持电机动力断开，分别确认UART0/PA11的H7反馈和UART1/PB7的JY61前馈持续刷新；手动跨过H7 yaw的±180度检查连续展开。
 3. 架空左右轮，先用低限幅验证 A/B 电机方向和编码器正负号。
 4. 标定每侧 `FF`，再调 `KP/KI`，最后提高目标速度。

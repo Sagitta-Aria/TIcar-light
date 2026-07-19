@@ -25,6 +25,9 @@ uint32_t LogUart_GetRxErrorCount(void);
 /* LogUart_SendByte：向 Type-C 日志串口发送 1 个字节，内部带超时。 */
 void LogUart_SendByte(uint8_t data);
 
+/* 原子尝试发送完整字节串；UART0正被其它任务使用时整条返回失败。 */
+uint8_t LogUart_TrySendBytes(const uint8_t *data, uint16_t length);
+
 /* LogUart_SendBytes：向 Type-C 日志串口发送连续数据，内部带超时。 */
 void LogUart_SendBytes(const uint8_t *data, uint16_t length);
 
