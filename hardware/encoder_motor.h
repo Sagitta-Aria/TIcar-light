@@ -10,7 +10,8 @@
 typedef enum {
     ENCODER_MOTOR_MODE_NORMAL = 0,
     ENCODER_MOTOR_MODE_CALIBRATION_OPEN_LOOP,
-    ENCODER_MOTOR_MODE_CALIBRATION_CLOSED_LOOP
+    ENCODER_MOTOR_MODE_CALIBRATION_CLOSED_LOOP,
+    ENCODER_MOTOR_MODE_CROSS_COUPLED_PWM
 } EncoderMotorMode;
 
 typedef struct {
@@ -40,9 +41,12 @@ typedef struct {
 
 void EncoderMotor_Init(void);
 void EncoderMotor_SetTargets(int16_t leftCps, int16_t rightCps);
-/* 正常闭环目标，单位与 Task5 target/move 相同：encoder count/控制周期。 */
+/* 正常闭环目标，单位与Task5相同：固定encoder count/20ms速度刻度。 */
 void EncoderMotor_SetPeriodTargets(int16_t leftCounts,
     int16_t rightCounts);
+/* 直接PWM命令；底层按最新左右编码速度差做交叉同步修正。 */
+void EncoderMotor_SetCrossCoupledPwm(int16_t leftPwm, int16_t rightPwm,
+    int32_t syncGainQ1024, uint16_t syncLimitPwm);
 /* 仅在目标为0时允许按编码反馈输出反向阻尼PWM。 */
 void EncoderMotor_SetZeroTargetBrake(uint8_t motorIndex, uint8_t enabled);
 void EncoderMotor_SetTarget(uint8_t motorIndex, int16_t targetCps);

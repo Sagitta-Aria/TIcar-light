@@ -127,6 +127,13 @@ void Motor_SetChassisPeriodCommand(int16_t leftCounts, int16_t rightCounts)
     EncoderMotor_SetPeriodTargets(leftCounts, rightCounts);
 }
 
+void Motor_SetChassisCrossCoupledPwm(int16_t leftPwm, int16_t rightPwm,
+    int32_t syncGainQ1024, uint16_t syncLimitPwm)
+{
+    EncoderMotor_SetCrossCoupledPwm(leftPwm, rightPwm, syncGainQ1024,
+        syncLimitPwm);
+}
+
 void Motor_SetChassisZeroTargetBrake(uint8_t leftEnabled,
     uint8_t rightEnabled)
 {

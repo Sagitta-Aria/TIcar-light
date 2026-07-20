@@ -149,12 +149,12 @@ static void App_UpdateDirectGimbalCommand(void)
     g_appDirectGimbalCommandSent = 1U;
 }
 
-/* 作用：Task2/Task3/Task4 收到首帧后非阻塞等待 1s，再发送一次 F。 */
+/* 作用：Task2/Task3 收到首帧后非阻塞等待 1s，再发送一次 F。 */
 static void App_UpdateCameraLaserCommand(uint8_t missionId)
 {
     TickType_t now;
 
-    if ((missionId != 2U) && (missionId != 3U) && (missionId != 4U)) {
+    if ((missionId != 2U) && (missionId != 3U)) {
         return;
     }
 
@@ -285,7 +285,7 @@ static void App_ShowTask7OledStatus(AppTask2OledStatus status)
     App_ShowGimbalOledStatus(7U, status);
 }
 
-/* 作用：Task3 打靶时走快路径，三档距离都直接追中心点。 */
+/* 作用：Task3 打靶时走快路径，使用点模式并由视觉长度连续拟合yaw K。 */
 static uint8_t App_IsTask3GimbalRunning(void)
 {
     return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
@@ -389,7 +389,7 @@ void App_CommStep(void)
     } else {
         g_appDirectGimbalCommandSent = 0U;
     }
-    if ((missionId == 2U) || (missionId == 3U) || (missionId == 4U)) {
+    if ((missionId == 2U) || (missionId == 3U)) {
         App_UpdateCameraLaserCommand(missionId);
     } else {
         App_ResetCameraLaserCommand();
@@ -401,7 +401,7 @@ void App_CommStep(void)
 void App_GimbalStep(void)
 {
     BodyMotion_Task();
-    Vision_Task();
+    App_VisionInputStep();
     if (GimbalAttitude_IsActive() != 0U) {
         if (GimbalAttitude_DrivesMotorDirectly() != 0U) {
             Gimbal_SetYawAttitudeCompensation(0);
@@ -409,11 +409,10 @@ void App_GimbalStep(void)
             GimbalAttitude_Task();
         } else {
             /*
-             * Task4主动转yaw时让H7目标跟随；主动命令停止后，H7重新锁定
-             * 当前角度并把矫正速度叠加到视觉云台输出。
+             * Task4在TURN_LEFT/TURN_RIGHT关闭视觉输入并打开姿态HOLD；每次
+             * 入弯重新锁存H7参考角，灰度回线进入TURN_EXIT后恢复下一帧视觉。
              */
-            GimbalAttitude_SetReferenceTracking(
-                Gimbal_IsYawTrackingActive());
+            GimbalAttitude_SetReferenceTracking(0U);
             GimbalAttitude_Task();
             if (Gimbal_IsEnabled() != 0U) {
                 Gimbal_SetYawAttitudeCompensation(
@@ -428,6 +427,12 @@ void App_GimbalStep(void)
         Gimbal_Task();
     }
     Motor_Task();
+}
+
+/* 只消费一帧UART3视觉输入，不运行姿态、云台输出或STEP斜坡。 */
+void App_VisionInputStep(void)
+{
+    Vision_Task();
 }
 
 void App_UiStep(void)

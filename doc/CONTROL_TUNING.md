@@ -18,9 +18,9 @@ Task5默认处于`mode chassis`。只有显式发送`mode gimbal`后才停止底
 Task8 是独立的云台姿态实验入口，不启动视觉或底盘。
 
 UART3视觉行格式为`centerDx,centerDy;circleDx,circleDy;stageScale\n`，五个字段
-均保留一位小数。`stageScale > 60.0`时只把视觉yaw命令和该套参数的`maxSpeedX`
-上限放大到1.4倍；pitch、H7姿态补偿和JY61前馈不放大。Task5视觉页中的
-`ST610 B1`表示阶段标度61.0且Boost已经启用。
+均保留一位小数。`stageScale`作为目标表观长度，在30.0~140.0之间把视觉yaw K
+从0.8线性拟合到1.6，超界钳位；pitch、H7姿态补偿、JY61前馈和固定yaw不缩放。
+Task5视觉页中的`ST610 K1050`表示长度61.0、当前K为1050/1024。
 
 ## 定时器与调度
 
@@ -31,7 +31,8 @@ UART3视觉行格式为`centerDx,centerDy;circleDx,circleDy;stageScale\n`，五�
 | `TIMG0` | 数字灰度 100 us 快采样 | 仅 Task1/Task4 正式循迹时开启 |
 | `TIMG7/TIMA1/TIMG8/TIMG12` | 空闲 | 无 |
 
-云台/姿态 FreeRTOS 任务使用 `xTaskDelayUntil` 固定每 10 ms 运行，任务优先级为 6；
+云台/姿态FreeRTOS任务按绝对10 ms截止点运行，完整视觉帧可提前唤醒且不推迟
+下一截止点，任务优先级为6；
 底盘控制任务同为 6，输入/任务/通信/UI 依次为 4/3/2/1。`TIMG6` STEP 中断优先级
 为0，`TIMG0`灰度为1，H7 UART0和JY61 UART1均为2。STEP与灰度不再放在同一个ISR，
 而且两轴 0 SPS 时 `TIMG6` 会停表，不产生 20 kHz 空中断。
@@ -59,11 +60,19 @@ H7反馈环仍继续工作。Task5进入`mode gimbal`时默认`gff off`；Task8�
 JY61前馈。
 
 Task4调用`GimbalAttitude_StartAssist()`，姿态环不直接写电机，而是把矫正SPS交给
-视觉云台统一合成。收到首帧进入循迹后，H7反馈在整个LINE阶段保持开启；视觉误差
-超出yaw死区，或Task4正在执行主动yaw基础/强转命令时，参考角跟随当前H7角度，
-避免姿态环抵消主动转动。主动yaw停止后重新锁定当前H7角度，并恢复反馈矫正。
-JY61前馈只在灰度确认后的`TURN_APPROACH/TURN_LEFT/TURN_RIGHT/TURN_EXIT`阶段开门。
-Task4中H7超时会清除姿态矫正，视觉闭环仍可继续；Task8中H7超时则直接停止yaw。
+云台统一输出。进入`TURN_LEFT`/`TURN_RIGHT`时清除旧视觉误差、D和视觉前馈状态，
+暂停视觉yaw/pitch控制，同时锁存当下H7 yaw并开启H7反馈与JY61底座角速度前馈。
+UART视觉帧仍持续解析和计数，但转向期间不写入Gimbal控制器。转向侧最外灰度重新
+连续命中后，底盘立即进入`TURN_EXIT`，但姿态矫正和视觉屏蔽继续保持80 ms。延时
+结束后关闭姿态矫正，并从下一帧新视觉数据恢复追踪，不复用转向前、转向期间或
+释放延时内的旧误差。延时时间由`CAR_MISSION4_GIMBAL_CORRECTION_RELEASE_DELAY_MS`
+配置。Task4中H7超时只会清除姿态矫正；
+Task8中H7超时则直接停止yaw。
+
+调度上，Task4转向阶段和80 ms释放延时内的H7/JY61补偿只由绝对10 ms截止点触发，
+即使UART3完全没有视觉帧也会持续运行。此时视觉完整帧通知只提前唤醒任务消费并
+丢弃该帧，不运行`BodyMotion/GimbalAttitude/Gimbal/Motor`控制链。释放延时结束后
+恢复完整帧立即抢占式视觉控制，同时固定10 ms截止点继续负责姿态维护和超时处理。
 
 Task4已经锁定过目标后，视觉连续60 ms没有新帧会进入丢失重搜：以丢失瞬间的yaw
 STEP位置为中心，用400 SPS在正负400 STEP之间往返。搜索期间yaw只执行摆动命令，
@@ -100,9 +109,14 @@ Task5 云台调参命令如下；参数只保存在 RAM，复位后恢复
 | `gaccel SPS_PER_MS` | STEP 每毫秒斜坡增量 | `gaccel 100` |
 | `glimit STEP` | 相对启动位置限制，0 表示关闭 | `glimit 6400` |
 | `gshow` | 输出姿态、零偏、误差、命令和全部参数 | `gshow` |
-| `vconfig DIST SOURCE` | 切换 Near/Mid/Far 与 Center/Circle 参数并重启追踪 | `vconfig mid center` |
+| `vconfig SOURCE` | 切换唯一Point/Circle参数并重启追踪 | `vconfig center` |
 | `vplot on\|off` | 开关 20 ms 视觉十通道 B 波形 | `vplot on` |
 | `vshow` | 输出视觉帧、控制误差、两轴命令及当前参数 | `vshow` |
+
+视觉控制参数集中在`app/staticconfig.c`。`kffX/kffY`使用滤波后的相邻帧误差变化
+估算目标运动趋势，绕过位置死区后与P/D反馈相加；最终仍受各轴`maxSpeed`、全局
+STEP上限和pitch行程限制。当前point与circle的Kff均取对应Kp的约1/4，相当于先给
+约0.25帧的预测量。若B波形出现过冲或换向抖动，先减小Kff，再调整Kd。
 
 建议先`mode gimbal`并保持`gff off`，确认H7 LCD显示`HOLD FF0`。轻推云台，H7
 角度误差应驱动电机回到原方向；若发散立即断电，优先核对`gsign`和`gh7sign`，再从
@@ -168,15 +182,50 @@ SerialPlot；结束时发送 `stop`，不能用拔掉串口代替停车。
 计算实际角度和角速度。只有驱动器通信返回实际位置，或外部绝对编码器连续回传
 位置并接入控制器后，`step_error` 才能升级为真正的机械角度误差。
 
-底盘控制任务始终每 20 ms 读取并清零一次左右编码器窗口计数。串口默认每 500 ms 输出一行状态；执行命令或修改参数时立即回显并刷新。每次修改 `pwm` 或 `target` 后会丢弃第一个混合窗口，再从新的完整 20 ms 窗口累计平均值。
+底盘控制任务每10 ms读取并清零一次左右编码器窗口计数。为保留既有标定和
+Task5命令单位，原始10 ms计数在控制器入口乘2，统一表示为等效`count/20ms`。
+串口默认每500 ms输出一行状态；修改`pwm`或`target`后会丢弃第一个混合窗口，
+再从新的完整10 ms窗口累计平均值。
 
 NO YAW强转当前把内轮目标设为`-1 count/20ms`，通过正常闭环直接产生轻微反向
 作用；左转命令为`(-1, outer)`，右转命令为`(outer, -1)`。强转期间不启用零目标
 阻尼分支，普通停车、出弯和标定也不启用。零目标阻尼接口仍保留供后续单独试验。
 
-Task1 的 `CAR_MOTOR_NO_YAW_*_COUNTS_PER_PERIOD` 与串口 `target/move` 同单位且保留
-正负号。正式 Task4 直接调用 Task1 的 `MotorNoYaw_Start()`；保留的 Task4 profile 宏
-仅作为兼容入口，不参与当前三条 Task4 子菜单路线。
+普通循迹由`CAR_MOTOR_NO_YAW_USE_SPEED_PID`选择输出结构：`1`使用灰度目标速度和
+双轮PID，`0`使用直接PWM方案。配置按算法和任务隔离成四组：
+
+- `TASK1_PID_*`：Task1目标速度、灰度P/D、权重和限幅。
+- `TASK4_PID_*`：Task4独立的目标速度、灰度P/D、权重和限幅。
+- `TASK1_PWM_*`：Task1基准PWM、灰度、权重和编码器交叉同步。
+- `TASK4_PWM_*`：Task4独立的基准PWM、灰度、权重和编码器交叉同步。
+
+正式Task4调用`MotorNoYaw_StartMission4()`，不再通过Task1 profile运行。强转和出弯
+参数也按Task1/Task4保存独立数值，但两种普通循迹算法共用本任务自己的强转参数。
+当前总开关为`1`；切换为`0`后，直接PWM先由当前任务配置生成原始命令：
+
+```text
+grayCorrection = lineError * TASKx_PWM_GRAY_GAIN / 100
+leftPwmCommand  = TASKx_PWM_BASE_COUNTS - grayCorrection
+rightPwmCommand = TASKx_PWM_BASE_COUNTS + grayCorrection
+```
+
+当前Task1/Task4的PWM基准都独立设为240 count（20%）；Task1灰度增益为2，
+Task4灰度增益为1。
+底层每10 ms读取最新编码速度，归一化为等效`count/20ms`后再用当前任务的同步参数处理：
+
+```text
+syncCorrection = (leftFeedback - rightFeedback) * 3072 / 1024
+leftPwmOutput   = leftPwmCommand - syncCorrection
+rightPwmOutput  = rightPwmCommand + syncCorrection
+```
+
+`CAR_MOTOR_NO_YAW_ENABLE_CROSS_SYNC=0`会全局关闭左右编码速度交叉，只保留灰度差速；
+设为`1`时，两组同步修正仍使用各自参数和单侧120 PWM count限幅，并且只有S4确认
+压线且左右命令非零、同向时才生效。S4离线、单轮搜线、异向命令和Task5普通开环
+标定都不启用同步。
+Task5 `gray on`会跟随总开关并使用Task1对应的PID或PWM配置。直角强转和出弯仍调用
+目标速度闭环，不会被同步器强行拉成同速。切回`USE_SPEED_PID=1`后，Task1和Task4
+分别恢复自己的PID参数。
 
 ## 命令
 
@@ -191,12 +240,12 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 | 命令 | 作用 | 示例 |
 | --- | --- | --- |
 | `mode chassis\|gimbal\|vision` | 在底盘、姿态和视觉云台调试之间安全切换 | `mode chassis` |
-| `set L R` | 输出 PWM 百分比，稳定 4 秒后采集 50 个窗口；第二个点自动计算并应用 FF 和 runstart | `set 30 0` |
+| `set L R` | 输出 PWM 百分比，稳定4秒后采集100个10 ms窗口；第二个点自动计算并应用FF和runstart | `set 30 0` |
 | `set clear` | 清除左右已保存的第一个采样点并停车 | `set clear` |
 | `pwm L R` | 左右轮开环 PWM 百分比，范围 -100..100 | `pwm 15 0` |
 | `target L R` | 闭环目标，范围 -100..100 count/20 ms | `target 12 12` |
 | `move LS RS LD RD` | 以左右速度 LS/RS 行驶有符号编码距离 LD/RD；速度范围 1..100 count/20 ms | `move 50 50 1000 1000` |
-| `gray on\|off` | 开关 Task1 灰度联调；H7 LCD显示S1～S7、左右目标和反馈 | `gray on` |
+| `gray on\|off` | 按总开关运行Task1灰度联调；H7 LCD显示S1～S7、PWM和反馈 | `gray on` |
 | `start L R` | 实际速度绝对值小于15 count/20ms时使用的 PWM 百分比，范围 0..100 | `start 25 22` |
 | `runstart L R` | 左右轮转动后的运行摩擦 PWM 百分比，范围 0..100 | `runstart 12 11` |
 | `ff L R` | 左右 FF_Q1024 | `ff 28000 29500` |
@@ -213,7 +262,7 @@ TIMA0 周期为 1600，软件限幅暂为 1200，因此当前 `30%=360 count`。
 
 `move` 是非阻塞距离测试命令。LS/RS 是左右轮速度幅值，LD/RD 是有符号 encoder
 count，正数前进、负数后退。执行后H7 LCD自动切到PID页面，底盘控制任务仍按
-20 ms 周期运行，Task5 通信任务每 5 ms 检查左右累计编码器 count。某一轮先达到
+10 ms周期运行，Task5通信任务每5 ms检查左右累计编码器count。某一轮先达到
 目标距离时会先停该轮，另一轮继续运行；`stop` 会立即取消距离命令并停车。
 
 周期状态行示例：
@@ -222,7 +271,10 @@ count，正数前进、负数后退。执行后H7 LCD自动切到PID页面，底
 D mode=open set=idle gray=0 gray_mask=0 startup=0,0 pwm_pct=30,0 pwm_raw=360,0 target=0,0 count=8,0 avg=8,0 sum=198,0 pwm_a_cc=1240 irq_pa13=0 irq_pb24=0 level_pa13=1 level_pb24=1 n=24
 ```
 
-`count` 是最近一个 20 ms 窗口；`avg` 是本次换点后有效窗口的整数平均值；`sum/n` 是未取整的精确平均值；`n` 是已计入平均的窗口数。`pwm_a_cc` 是 TIMA0 CCP1 当前硬件比较寄存器值，向下计数 PWM 下应满足 `pwm_a_cc = 1600 - abs(pwm_raw_left)`；它不是 PA22 电平的串口采样波形。
+`count`是最近一个10 ms原始窗口乘2后的等效`count/20ms`；`avg`是这些等效值的
+整数平均值；`sum/n`是未取整的精确平均值；`n`是已计入平均的窗口数。
+`pwm_a_cc`是TIMA0 CCP1当前硬件比较寄存器值，向下计数PWM下应满足
+`pwm_a_cc = 1600 - abs(pwm_raw_left)`；它不是PA22电平的串口采样波形。
 
 Task5 的 `D` 状态行还会输出 `irq_pa13`、`irq_pb24`、`level_pa13` 和
 `level_pb24`。`startup=1` 表示对应轮有非零目标且实际速度绝对值小于15，正在使用
@@ -256,17 +308,17 @@ SerialPlot 选择 `ASCII`，通道数设为 `9`，列分隔符选择 `comma`，`
 1. 把百分比换算成 raw count，立即输出指定左右 PWM。
 2. 等待 4000 ms，让机械速度充分稳定。
 3. 丢弃切换产生的混合窗口。
-4. 采集 50 个完整的 20 ms 编码器窗口，共 1000 ms，并用这 50 个窗口求平均值。
+4. 采集100个完整的10 ms编码器窗口，共1000 ms，并用归一化后的等效`count/20ms`求平均值。
 5. 打印该点的 `pwm_pct/pwm_raw/sum/n/avg_x1000`，然后自动停车。
 
 Task5 H7 LCD页面可以在运行时切换，不需要重新烧录；命令名`oled`为兼容保留：
 
 - `oled ff`：显示最终左右 FF 和已保存的 runstart 百分比。FF 使用
   `FF_Q1024 / 1024` 的三位小数，例如内部值 `35109` 显示为 `34.286`。
-- `oled start`：显示最近 20 ms 左右编码器 count，以及保存的 start/runstart 百分比。
+- `oled start`：显示最近10 ms窗口换算出的等效`count/20ms`，以及保存的start/runstart百分比。
 - `oled speed`：显示当前 PWM、平均count/20ms及换算后的count/s。
 - `oled pid`：显示左右目标count/20ms、反馈count/20ms和输出PWM百分比。
-- `gray on`：自动切到 `oled gray`，每20ms直接读取 S1～S7，并使用
+- `gray on`：自动切到`oled gray`，每10 ms读取S1～S7，并使用
   Task1 的基础速度、差速增益和上下限更新左右闭环目标。`T` 是左右目标
   count/20ms，`F` 是左右实际反馈；没有任何灰度输入时目标立即置零。
   当灰度给出的左右原始目标完全相同时，正常闭环会用本周期左右反馈的平均值
@@ -392,7 +444,7 @@ target LEFT_COUNT RIGHT_COUNT
 
 ```text
 error = targetCount - feedbackCount
-integralScaled += KI_Q1024 * error
+integralScaled += KI_Q1024 * error * 10 / 20
 
 startupActive = targetCount != 0 && abs(feedbackCount) < 15
 selectedStart = startupActive ? startPwm : runStartPwm
@@ -402,7 +454,7 @@ PWM = sign(targetCount) * selectedStart
     + integralScaled / 1024
 ```
 
-每个20 ms控制周期都按实际编码器速度绝对值重新选择：小于15时使用
+每个10 ms控制周期都按等效`count/20ms`反馈绝对值重新选择：小于15时使用
 `startPwm`，等于或大于15时使用 `runStartPwm`。正反转采用同一阈值；目标为0时
 PWM仍直接清零，不会因为低速而输出 `startPwm`。
 

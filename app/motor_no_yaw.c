@@ -17,14 +17,17 @@
 #define MOTOR_NO_YAW_S6_MASK        (0x02U)
 #define MOTOR_NO_YAW_S7_MASK        (0x01U)
 
-#define MOTOR_NO_YAW_LEFT_RETURN_MASK  MOTOR_NO_YAW_S1_MASK
-#define MOTOR_NO_YAW_RIGHT_RETURN_MASK MOTOR_NO_YAW_S7_MASK
-#define MOTOR_NO_YAW_LEFT_TURN_MASK \
-    (MOTOR_NO_YAW_S1_MASK | MOTOR_NO_YAW_S2_MASK)
-#define MOTOR_NO_YAW_RIGHT_TURN_MASK \
-    (MOTOR_NO_YAW_S6_MASK | MOTOR_NO_YAW_S7_MASK)
+#define MOTOR_NO_YAW_LEFT_TURN_NEAR_MASK   MOTOR_NO_YAW_S2_MASK
+#define MOTOR_NO_YAW_LEFT_TURN_OUTER_MASK  MOTOR_NO_YAW_S1_MASK
+#define MOTOR_NO_YAW_RIGHT_TURN_NEAR_MASK  MOTOR_NO_YAW_S6_MASK
+#define MOTOR_NO_YAW_RIGHT_TURN_OUTER_MASK MOTOR_NO_YAW_S7_MASK
+#define MOTOR_NO_YAW_LEFT_RETURN_MASK  MOTOR_NO_YAW_LEFT_TURN_OUTER_MASK
+#define MOTOR_NO_YAW_RIGHT_RETURN_MASK MOTOR_NO_YAW_RIGHT_TURN_OUTER_MASK
 #define MOTOR_NO_YAW_ALL_TURN_MASK \
-    (MOTOR_NO_YAW_LEFT_TURN_MASK | MOTOR_NO_YAW_RIGHT_TURN_MASK)
+    (MOTOR_NO_YAW_LEFT_TURN_NEAR_MASK | \
+        MOTOR_NO_YAW_LEFT_TURN_OUTER_MASK | \
+        MOTOR_NO_YAW_RIGHT_TURN_NEAR_MASK | \
+        MOTOR_NO_YAW_RIGHT_TURN_OUTER_MASK)
 
 #define MOTOR_NO_YAW_INVALID_TICKS  (0xFFFFU)
 #define MOTOR_NO_YAW_ABS_TARGET(value) \
@@ -49,62 +52,106 @@
 #error "CAR_MOTOR_NO_YAW_RETURN_CONFIRM_SAMPLES must be 1..255"
 #endif
 
-#if ((CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_COUNTS_PER_PERIOD > \
-        CAR_MOTOR_NO_YAW_BASE_SPEED_COUNTS_PER_PERIOD) || \
-    (CAR_MOTOR_NO_YAW_BASE_SPEED_COUNTS_PER_PERIOD > \
-        CAR_MOTOR_NO_YAW_MAX_LINE_SPEED_COUNTS_PER_PERIOD))
-#error "Task1 line speeds must satisfy min <= base <= max"
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+
+#if ((CAR_MOTOR_NO_YAW_TASK1_PID_MIN_SPEED_COUNTS_PER_PERIOD > \
+        CAR_MOTOR_NO_YAW_TASK1_PID_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PID_BASE_SPEED_COUNTS_PER_PERIOD > \
+        CAR_MOTOR_NO_YAW_TASK1_PID_MAX_SPEED_COUNTS_PER_PERIOD))
+#error "Task1 PID line speeds must satisfy min <= base <= max"
 #endif
 
 #if ((MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_COUNTS_PER_PERIOD) > \
+        CAR_MOTOR_NO_YAW_TASK1_PID_MIN_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_MAX_LINE_SPEED_COUNTS_PER_PERIOD) > \
+        CAR_MOTOR_NO_YAW_TASK1_PID_MAX_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TURN_INNER_SPEED_COUNTS_PER_PERIOD) > \
+    (CAR_MOTOR_NO_YAW_TASK1_PID_CORRECTION_LIMIT_COUNTS > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_LEFT_TURN_SPEED_COUNTS_PER_PERIOD) > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD) > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD) > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD) > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD) > \
+        CAR_MOTOR_NO_YAW_TASK1_PID_SEARCH_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD))
-#error "Task1 speed targets must stay within the Task5 -100..100 scale"
+#error "Task1 PID tracking parameters exceed the target limit"
 #endif
 
-#if ((CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_COUNTS_PER_PERIOD > \
-        CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_COUNTS_PER_PERIOD) || \
-    (CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_COUNTS_PER_PERIOD > \
-        CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_COUNTS_PER_PERIOD))
-#error "Task4 line speeds must satisfy min <= base <= max"
+#if ((CAR_MOTOR_NO_YAW_TASK4_PID_MIN_SPEED_COUNTS_PER_PERIOD > \
+        CAR_MOTOR_NO_YAW_TASK4_PID_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PID_BASE_SPEED_COUNTS_PER_PERIOD > \
+        CAR_MOTOR_NO_YAW_TASK4_PID_MAX_SPEED_COUNTS_PER_PERIOD))
+#error "Task4 PID line speeds must satisfy min <= base <= max"
 #endif
 
 #if ((MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_COUNTS_PER_PERIOD) > \
+        CAR_MOTOR_NO_YAW_TASK4_PID_MIN_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_COUNTS_PER_PERIOD) > \
+        CAR_MOTOR_NO_YAW_TASK4_PID_MAX_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_COUNTS_PER_PERIOD > \
+    (CAR_MOTOR_NO_YAW_TASK4_PID_CORRECTION_LIMIT_COUNTS > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_PID_SEARCH_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD))
+#error "Task4 PID tracking parameters exceed the target limit"
+#endif
+
+#else
+
+#if ((CAR_MOTOR_NO_YAW_TASK1_PWM_BASE_COUNTS < 0) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PWM_BASE_COUNTS > CHASSIS_PWM_LIMIT_COUNTS) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PWM_SEARCH_COUNTS < 0) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PWM_SEARCH_COUNTS > CHASSIS_PWM_LIMIT_COUNTS) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PWM_GRAY_GAIN < 0) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PWM_GRAY_LIMIT_COUNTS > \
+        CHASSIS_PWM_LIMIT_COUNTS) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PWM_SYNC_GAIN_Q1024 < 0L) || \
+    (CAR_MOTOR_NO_YAW_TASK1_PWM_SYNC_LIMIT_COUNTS > \
+        CHASSIS_PWM_LIMIT_COUNTS))
+#error "Task1 direct PWM tracking parameters are invalid"
+#endif
+
+#if ((CAR_MOTOR_NO_YAW_TASK4_PWM_BASE_COUNTS < 0) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PWM_BASE_COUNTS > CHASSIS_PWM_LIMIT_COUNTS) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PWM_SEARCH_COUNTS < 0) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PWM_SEARCH_COUNTS > CHASSIS_PWM_LIMIT_COUNTS) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PWM_GRAY_GAIN < 0) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PWM_GRAY_LIMIT_COUNTS > \
+        CHASSIS_PWM_LIMIT_COUNTS) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PWM_SYNC_GAIN_Q1024 < 0L) || \
+    (CAR_MOTOR_NO_YAW_TASK4_PWM_SYNC_LIMIT_COUNTS > \
+        CHASSIS_PWM_LIMIT_COUNTS))
+#error "Task4 direct PWM tracking parameters are invalid"
+#endif
+
+#endif
+
+#if ((MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK1_TURN_INNER_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK1_LEFT_TURN_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK1_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK1_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK1_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD) > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD))
+#error "Task1 turn targets exceed the chassis target limit"
+#endif
+
+#if ((MOTOR_NO_YAW_ABS_TARGET( \
+        CAR_MOTOR_NO_YAW_TASK4_TURN_INNER_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
         CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_SPEED_COUNTS_PER_PERIOD) > \
@@ -119,15 +166,12 @@
         CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
-        CAR_MOTOR_NO_YAW_TASK4_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD) > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (MOTOR_NO_YAW_ABS_TARGET( \
         CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
     (MOTOR_NO_YAW_ABS_TARGET( \
         CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD) > \
         CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD))
-#error "Task4 speed targets must stay within the Task5 -100..100 scale"
+#error "Task4 turn targets exceed the chassis target limit"
 #endif
 
 #define MOTOR_NO_YAW_TIMER_DIV_TICKS \
@@ -177,20 +221,32 @@ typedef enum {
     MOTOR_NO_YAW_TURN_RIGHT
 } MotorNoYawTurnDirection;
 
+/* 编译时只保留所选算法字段；数组中的两个元素分别属于Task1和Task4。 */
 typedef struct {
+    int16_t lineWeight[GRAY_SENSOR_COUNT];
+    int16_t lineDeadband;
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
     int16_t baseSpeedCounts;
     int16_t minLineSpeedCounts;
     int16_t maxLineSpeedCounts;
-    int16_t lineDeadband;
     int16_t turnGain;
     int16_t turnDGain;
     uint16_t turnLimitCounts;
+    int16_t defaultSearchSpeedCounts;
+#else
+    int16_t basePwmCounts;
+    int16_t searchPwmCounts;
+    int16_t grayGain;
+    uint16_t grayLimitPwmCounts;
+    int32_t syncGainQ1024;
+    uint16_t syncLimitPwmCounts;
+#endif
+    int16_t turnInnerSpeedCounts;
     int16_t leftTurnSpeedCounts;
     int16_t leftTurnNearSpeedCounts;
     int16_t rightTurnSpeedCounts;
     int16_t rightTurnNearSpeedCounts;
     uint32_t turnMinEncoderGapCounts;
-    int16_t defaultSearchSpeedCounts;
     uint16_t turnApproachMs;
     int16_t turnExitOuterSpeedCounts;
     int16_t turnExitInnerSpeedCounts;
@@ -201,40 +257,100 @@ typedef struct {
 
 static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = {
     {
-        (int16_t)CAR_MOTOR_NO_YAW_BASE_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_MAX_LINE_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_LINE_DEADBAND,
-        (int16_t)CAR_MOTOR_NO_YAW_TURN_GAIN,
-        (int16_t)CAR_MOTOR_NO_YAW_TURN_D_GAIN,
-        (uint16_t)CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_LEFT_TURN_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
-        (uint32_t)CAR_MOTOR_NO_YAW_TURN_MIN_ENCODER_GAP_COUNTS,
-        (int16_t)CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD,
-        (uint16_t)CAR_MOTOR_NO_YAW_TURN_APPROACH_MS,
-        (int16_t)CAR_MOTOR_NO_YAW_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD,
-        (uint16_t)CAR_MOTOR_NO_YAW_TURN_EXIT_MS,
-        (uint16_t)CAR_MOTOR_NO_YAW_TURN_HOLD_MS,
-        (uint16_t)CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS
+        {
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+            CAR_MOTOR_NO_YAW_TASK1_PID_S1_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PID_S2_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PID_S3_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PID_S4_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PID_S5_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PID_S6_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PID_S7_WEIGHT
+#else
+            CAR_MOTOR_NO_YAW_TASK1_PWM_S1_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PWM_S2_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PWM_S3_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PWM_S4_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PWM_S5_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PWM_S6_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK1_PWM_S7_WEIGHT
+#endif
+        },
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_LINE_DEADBAND,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_BASE_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_MIN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_MAX_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_GRAY_P_GAIN,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_GRAY_D_GAIN,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK1_PID_CORRECTION_LIMIT_COUNTS,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_SEARCH_SPEED_COUNTS_PER_PERIOD,
+#else
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PWM_LINE_DEADBAND,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PWM_BASE_COUNTS,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PWM_SEARCH_COUNTS,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_PWM_GRAY_GAIN,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK1_PWM_GRAY_LIMIT_COUNTS,
+        (int32_t)CAR_MOTOR_NO_YAW_TASK1_PWM_SYNC_GAIN_Q1024,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK1_PWM_SYNC_LIMIT_COUNTS,
+#endif
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_TURN_INNER_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_LEFT_TURN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
+        (uint32_t)CAR_MOTOR_NO_YAW_TASK1_TURN_MIN_ENCODER_GAP_COUNTS,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK1_TURN_APPROACH_MS,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_MS,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK1_TURN_HOLD_MS,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK1_LINE_LOST_TIMEOUT_MS
     },
     {
-        (int16_t)CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_COUNTS_PER_PERIOD,
-        (int16_t)CAR_MOTOR_NO_YAW_TASK4_LINE_DEADBAND,
-        (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_GAIN,
-        (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_D_GAIN,
-        (uint16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_COUNTS_PER_PERIOD,
+        {
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+            CAR_MOTOR_NO_YAW_TASK4_PID_S1_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PID_S2_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PID_S3_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PID_S4_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PID_S5_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PID_S6_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PID_S7_WEIGHT
+#else
+            CAR_MOTOR_NO_YAW_TASK4_PWM_S1_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PWM_S2_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PWM_S3_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PWM_S4_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PWM_S5_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PWM_S6_WEIGHT,
+            CAR_MOTOR_NO_YAW_TASK4_PWM_S7_WEIGHT
+#endif
+        },
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_LINE_DEADBAND,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_BASE_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_MIN_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_MAX_SPEED_COUNTS_PER_PERIOD,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_GRAY_P_GAIN,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_GRAY_D_GAIN,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK4_PID_CORRECTION_LIMIT_COUNTS,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_SEARCH_SPEED_COUNTS_PER_PERIOD,
+#else
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PWM_LINE_DEADBAND,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PWM_BASE_COUNTS,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PWM_SEARCH_COUNTS,
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_PWM_GRAY_GAIN,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK4_PWM_GRAY_LIMIT_COUNTS,
+        (int32_t)CAR_MOTOR_NO_YAW_TASK4_PWM_SYNC_GAIN_Q1024,
+        (uint16_t)CAR_MOTOR_NO_YAW_TASK4_PWM_SYNC_LIMIT_COUNTS,
+#endif
+        (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_INNER_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD,
         (uint32_t)CAR_MOTOR_NO_YAW_TASK4_TURN_MIN_ENCODER_GAP_COUNTS,
-        (int16_t)CAR_MOTOR_NO_YAW_TASK4_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD,
         (uint16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_APPROACH_MS,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD,
@@ -249,6 +365,8 @@ typedef struct {
     int16_t lastLineError;
     int16_t lastLeftTargetCounts;
     int16_t lastRightTargetCounts;
+    int16_t lastLeftPwmCounts;
+    int16_t lastRightPwmCounts;
     uint16_t turnTicks;
     uint16_t lineLostTicks;
     volatile uint16_t s1RecentSamples;
@@ -280,11 +398,12 @@ typedef struct {
     volatile uint8_t returnLineRequest;
     volatile uint8_t running;
     volatile MotorNoYawState state;
+    volatile MotorNoYawStopReason stopReason;
 } MotorNoYawControl;
 
 static MotorNoYawControl g_motorNoYaw;
 
-static void MotorNoYaw_StopWithReason(const char *reason);
+static void MotorNoYaw_StopWithReason(MotorNoYawStopReason reason);
 static void MotorNoYaw_StartTurn(void);
 
 /* 灰度快采样定时器只在正式循迹期间运行，Task8 不承担这 10kHz 中断。 */
@@ -309,7 +428,7 @@ static const MotorNoYawConfig *MotorNoYaw_GetConfig(void)
     return &g_motorNoYawConfigs[g_motorNoYaw.profile];
 }
 
-/* 作用：把毫秒换成20ms底盘控制周期数。 */
+/* 作用：把毫秒换成当前10ms底盘控制周期数。 */
 static uint16_t MotorNoYaw_MsToTicks(uint16_t timeMs)
 {
     return (uint16_t)((timeMs + CHASSIS_CONTROL_PERIOD_MS - 1U) /
@@ -406,6 +525,8 @@ static uint32_t MotorNoYaw_AbsEncoderDelta(int32_t now, int32_t base)
         (uint32_t)(base - now);
 }
 
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+
 /* 作用：把速度限制在普通循迹允许范围，普通循迹不允许单轮停车。 */
 static int16_t MotorNoYaw_ClampLineSpeed(
     const MotorNoYawConfig *config, int32_t speed)
@@ -431,6 +552,21 @@ static int16_t MotorNoYaw_ClampCorrection(
     }
     return (int16_t)correction;
 }
+
+#else
+
+static int16_t MotorNoYaw_ClampDirectPwm(int32_t pwm)
+{
+    if (pwm > (int32_t)CHASSIS_PWM_LIMIT_COUNTS) {
+        return (int16_t)CHASSIS_PWM_LIMIT_COUNTS;
+    }
+    if (pwm < 0) {
+        return 0;
+    }
+    return (int16_t)pwm;
+}
+
+#endif
 
 /* 作用：吃掉很小的偏差，车在中间附近时不要来回抖。 */
 static int16_t MotorNoYaw_ApplyLineDeadband(
@@ -515,18 +651,9 @@ static uint8_t MotorNoYaw_CanStartTurn(void)
  * 作用：按数字量算一个很直白的偏差。
  * 说明：S1/S7 权重最大，S2/S6 次之，S3/S5 小修，S4 是中心。
  */
-static uint8_t MotorNoYaw_CalcDigitalLineError(uint8_t mask,
-    int16_t *error)
+static uint8_t MotorNoYaw_CalcDigitalLineError(
+    const MotorNoYawConfig *config, uint8_t mask, int16_t *error)
 {
-    static const int16_t weight[GRAY_SENSOR_COUNT] = {
-        CAR_MOTOR_NO_YAW_S1_LINE_WEIGHT,
-        CAR_MOTOR_NO_YAW_S2_LINE_WEIGHT,
-        CAR_MOTOR_NO_YAW_S3_LINE_WEIGHT,
-        CAR_MOTOR_NO_YAW_S4_LINE_WEIGHT,
-        CAR_MOTOR_NO_YAW_S5_LINE_WEIGHT,
-        CAR_MOTOR_NO_YAW_S6_LINE_WEIGHT,
-        CAR_MOTOR_NO_YAW_S7_LINE_WEIGHT
-    };
     int16_t sum = 0;
     uint8_t count = 0U;
     uint8_t bit;
@@ -535,7 +662,7 @@ static uint8_t MotorNoYaw_CalcDigitalLineError(uint8_t mask,
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
         bit = (uint8_t)(1U << ((GRAY_SENSOR_COUNT - 1U) - i));
         if ((mask & bit) != 0U) {
-            sum = (int16_t)(sum + weight[i]);
+            sum = (int16_t)(sum + config->lineWeight[i]);
             ++count;
         }
     }
@@ -553,6 +680,8 @@ static uint8_t MotorNoYaw_CalcDigitalLineError(uint8_t mask,
     }
     return 1U;
 }
+
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
 
 static void MotorNoYaw_CalculateLineTargets(const MotorNoYawConfig *config,
     int16_t error, int16_t errorDelta, int16_t *leftTargetCounts,
@@ -572,22 +701,77 @@ static void MotorNoYaw_CalculateLineTargets(const MotorNoYawConfig *config,
         (int32_t)baseSpeed + (int32_t)correction);
 }
 
-uint8_t MotorNoYaw_CalculateTask1LineCommand(uint8_t digitalMask,
-    int16_t *leftTargetCounts, int16_t *rightTargetCounts)
-{
-    int16_t error;
+#else
 
-    if ((leftTargetCounts == 0) || (rightTargetCounts == 0)) {
+/* 直接PWM方案只保留灰度P修正，增益1表示权重值直接映射到raw PWM。 */
+static void MotorNoYaw_CalculateLinePwm(const MotorNoYawConfig *config,
+    int16_t error, int16_t *leftPwm, int16_t *rightPwm)
+{
+    int16_t lineError = MotorNoYaw_ApplyLineDeadband(config, error);
+    int32_t correction = ((int32_t)lineError *
+        (int32_t)config->grayGain) /
+        (int32_t)GRAY_LINE_ERROR_SCALE;
+
+    if (correction > (int32_t)config->grayLimitPwmCounts) {
+        correction = (int32_t)config->grayLimitPwmCounts;
+    } else if (correction < -(int32_t)config->grayLimitPwmCounts) {
+        correction = -(int32_t)config->grayLimitPwmCounts;
+    }
+    *leftPwm = MotorNoYaw_ClampDirectPwm(
+        (int32_t)config->basePwmCounts - correction);
+    *rightPwm = MotorNoYaw_ClampDirectPwm(
+        (int32_t)config->basePwmCounts + correction);
+}
+
+/* 总开关和S4门控同时满足时才返回编码器交叉同步增益。 */
+static int32_t MotorNoYaw_GetCrossSyncGainQ1024(
+    const MotorNoYawConfig *config, uint8_t digitalMask)
+{
+#if CAR_MOTOR_NO_YAW_ENABLE_CROSS_SYNC
+    return ((digitalMask & MOTOR_NO_YAW_S4_MASK) != 0U) ?
+        config->syncGainQ1024 : 0L;
+#else
+    (void)config;
+    (void)digitalMask;
+    return 0L;
+#endif
+}
+
+#endif
+
+uint8_t MotorNoYaw_ApplyTask1LineCommand(uint8_t digitalMask)
+{
+    const MotorNoYawConfig *config =
+        &g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_TASK1];
+    int16_t error;
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+    int16_t leftTargetCounts;
+    int16_t rightTargetCounts;
+#else
+    int16_t leftPwm;
+    int16_t rightPwm;
+#endif
+
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
+    if (MotorNoYaw_CalcDigitalLineError(config, digitalMask, &error) == 0U) {
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+        Motion_SetChassisPeriodCommand(0, 0);
+#else
+        Motor_SetChassisCrossCoupledPwm(0, 0, 0L,
+            config->syncLimitPwmCounts);
+#endif
         return 0U;
     }
-    *leftTargetCounts = 0;
-    *rightTargetCounts = 0;
-    if (MotorNoYaw_CalcDigitalLineError(digitalMask, &error) == 0U) {
-        return 0U;
-    }
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
     MotorNoYaw_CalculateLineTargets(
-        &g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_TASK1], error, 0,
-        leftTargetCounts, rightTargetCounts);
+        config, error, 0, &leftTargetCounts, &rightTargetCounts);
+    Motion_SetChassisPeriodCommand(leftTargetCounts, rightTargetCounts);
+#else
+    MotorNoYaw_CalculateLinePwm(config, error, &leftPwm, &rightPwm);
+    Motor_SetChassisCrossCoupledPwm(leftPwm, rightPwm,
+        MotorNoYaw_GetCrossSyncGainQ1024(config, digitalMask),
+        config->syncLimitPwmCounts);
+#endif
     return 1U;
 }
 
@@ -597,11 +781,16 @@ static void MotorNoYaw_ApplyLineControl(void)
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
     int16_t error = 0;
     int16_t errorDelta = 0;
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
     int16_t leftSpeed;
     int16_t rightSpeed;
+#else
+    int16_t leftPwm;
+    int16_t rightPwm;
+#endif
 
-    if (MotorNoYaw_CalcDigitalLineError(g_motorNoYaw.digitalMask,
-        &error) != 0U) {
+    if (MotorNoYaw_CalcDigitalLineError(config,
+        g_motorNoYaw.digitalMask, &error) != 0U) {
         if (g_motorNoYaw.lineDerivativeReady != 0U) {
             errorDelta = (int16_t)(error - g_motorNoYaw.lastLineError);
         } else {
@@ -610,14 +799,24 @@ static void MotorNoYaw_ApplyLineControl(void)
         g_motorNoYaw.lastLineError = error;
         g_motorNoYaw.lineError = error;
     }
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
     MotorNoYaw_CalculateLineTargets(config, g_motorNoYaw.lineError,
         errorDelta, &leftSpeed, &rightSpeed);
-
-    Motor_SetChassisZeroTargetBrake(0U, 0U);
     g_motorNoYaw.lastLeftTargetCounts = leftSpeed;
     g_motorNoYaw.lastRightTargetCounts = rightSpeed;
-    g_motorNoYaw.hasLastLineCommand = 1U;
     Motion_SetChassisPeriodCommand(leftSpeed, rightSpeed);
+#else
+    (void)errorDelta;
+    MotorNoYaw_CalculateLinePwm(config, g_motorNoYaw.lineError,
+        &leftPwm, &rightPwm);
+    g_motorNoYaw.lastLeftPwmCounts = leftPwm;
+    g_motorNoYaw.lastRightPwmCounts = rightPwm;
+    Motor_SetChassisCrossCoupledPwm(leftPwm, rightPwm,
+        MotorNoYaw_GetCrossSyncGainQ1024(config,
+            g_motorNoYaw.digitalMask), config->syncLimitPwmCounts);
+#endif
+    g_motorNoYaw.hasLastLineCommand = 1U;
 }
 
 /* 作用：短时间丢线时先沿用上一拍，真丢线再按任务配置温和搜线。 */
@@ -627,24 +826,36 @@ static void MotorNoYaw_ApplyLineLostCommand(void)
 
     Motor_SetChassisZeroTargetBrake(0U, 0U);
     if (g_motorNoYaw.hasLastLineCommand != 0U) {
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
         Motion_SetChassisPeriodCommand(g_motorNoYaw.lastLeftTargetCounts,
             g_motorNoYaw.lastRightTargetCounts);
+#else
+        Motor_SetChassisCrossCoupledPwm(g_motorNoYaw.lastLeftPwmCounts,
+            g_motorNoYaw.lastRightPwmCounts,
+            MotorNoYaw_GetCrossSyncGainQ1024(config,
+                g_motorNoYaw.digitalMask), config->syncLimitPwmCounts);
+#endif
         return;
     }
 
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
     Motion_SetChassisPeriodCommand(config->defaultSearchSpeedCounts, 0);
+#else
+    Motor_SetChassisCrossCoupledPwm(config->searchPwmCounts, 0,
+        MotorNoYaw_GetCrossSyncGainQ1024(config,
+            g_motorNoYaw.digitalMask), config->syncLimitPwmCounts);
+#endif
 }
 
 /* 作用：异常停车，OLED 保留在 NO YAW 页面，方便看 mask/err/state。 */
-static void MotorNoYaw_StopWithReason(const char *reason)
+static void MotorNoYaw_StopWithReason(MotorNoYawStopReason reason)
 {
-    (void)reason;
-
     Motor_SetChassisZeroTargetBrake(0U, 0U);
     Motion_SetChassisPeriodCommand(0, 0);
     MotorEnable_SetChassis(0U);
     g_motorNoYaw.running = 0U;
     MotorNoYaw_SetSampleTimerEnabled(0U);
+    g_motorNoYaw.stopReason = reason;
     g_motorNoYaw.state = MOTOR_NO_YAW_STATE_STOP;
 }
 
@@ -666,14 +877,14 @@ static void MotorNoYaw_UpdateRecentSample(uint8_t mask, uint8_t sensorMask,
     }
 }
 
-/* 作用：记录 S1/S2，两路在窗口内都出现就认为是左直角。 */
+/* 作用：记录左侧 S1/S2，两路在窗口内都出现就认为是左直角。 */
 static uint8_t MotorNoYaw_RecordLeftTurnSample(uint8_t mask)
 {
-    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S1_MASK,
-        &g_motorNoYaw.s1RecentSamples,
-        (uint16_t)MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES);
-    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S2_MASK,
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_LEFT_TURN_NEAR_MASK,
         &g_motorNoYaw.s2RecentSamples,
+        (uint16_t)MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES);
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_LEFT_TURN_OUTER_MASK,
+        &g_motorNoYaw.s1RecentSamples,
         (uint16_t)MOTOR_NO_YAW_LEFT_TURN_WINDOW_SAMPLES);
 
     if ((g_motorNoYaw.s1RecentSamples > 0U) &&
@@ -685,13 +896,13 @@ static uint8_t MotorNoYaw_RecordLeftTurnSample(uint8_t mask)
     return 0U;
 }
 
-/* 作用：记录 S6/S7，两路在窗口内都出现就认为是右直角。 */
+/* 作用：记录右侧 S6/S7，两路在窗口内都出现就认为是右直角。 */
 static uint8_t MotorNoYaw_RecordRightTurnSample(uint8_t mask)
 {
-    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S6_MASK,
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_RIGHT_TURN_NEAR_MASK,
         &g_motorNoYaw.s6RecentSamples,
         (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES);
-    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_S7_MASK,
+    MotorNoYaw_UpdateRecentSample(mask, MOTOR_NO_YAW_RIGHT_TURN_OUTER_MASK,
         &g_motorNoYaw.s7RecentSamples,
         (uint16_t)MOTOR_NO_YAW_RIGHT_TURN_WINDOW_SAMPLES);
 
@@ -731,8 +942,7 @@ static void MotorNoYaw_ApplyTurnCommand(const MotorNoYawConfig *config)
 {
     int16_t outerSpeed = MotorNoYaw_CalculateTurnOuterSpeed(config,
         g_motorNoYaw.turnDirection);
-    int16_t innerSpeed =
-        (int16_t)CAR_MOTOR_NO_YAW_TURN_INNER_SPEED_COUNTS_PER_PERIOD;
+    int16_t innerSpeed = config->turnInnerSpeedCounts;
 
     Motor_SetChassisZeroTargetBrake(0U, 0U);
     if (g_motorNoYaw.turnDirection == MOTOR_NO_YAW_TURN_LEFT) {
@@ -900,7 +1110,7 @@ uint8_t MotorNoYaw_TimerSample(void)
     return 0U;
 }
 
-/* 作用：正常循迹，每个20ms底盘控制周期读一次灰度数字量。 */
+/* 作用：正常循迹，每个10ms底盘控制周期读一次灰度数字量。 */
 static void MotorNoYaw_TaskLine(void)
 {
     uint16_t lineLostTimeoutTicks =
@@ -924,7 +1134,7 @@ static void MotorNoYaw_TaskLine(void)
         MotorNoYaw_ApplyLineLostCommand();
         if ((lineLostTimeoutTicks != 0U) &&
             (g_motorNoYaw.lineLostTicks >= lineLostTimeoutTicks)) {
-            MotorNoYaw_StopWithReason("line-lost");
+            MotorNoYaw_StopWithReason(MOTOR_NO_YAW_STOP_LINE_LOST);
             return;
         }
         ++g_motorNoYaw.lineLostTicks;
@@ -943,13 +1153,31 @@ static void MotorNoYaw_TaskTurnApproach(void)
 
     MotorNoYaw_UpdateTurnYaw();
     if (g_motorNoYaw.hasLastLineCommand != 0U) {
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
             Motion_SetChassisPeriodCommand(
                 g_motorNoYaw.lastLeftTargetCounts,
                 g_motorNoYaw.lastRightTargetCounts);
+#else
+            Motor_SetChassisCrossCoupledPwm(
+                g_motorNoYaw.lastLeftPwmCounts,
+                g_motorNoYaw.lastRightPwmCounts,
+                MotorNoYaw_GetCrossSyncGainQ1024(MotorNoYaw_GetConfig(),
+                    g_motorNoYaw.digitalMask),
+                MotorNoYaw_GetConfig()->syncLimitPwmCounts);
+#endif
     } else {
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
             Motion_SetChassisPeriodCommand(
                 (int16_t)MotorNoYaw_GetConfig()->baseSpeedCounts,
                 (int16_t)MotorNoYaw_GetConfig()->baseSpeedCounts);
+#else
+            Motor_SetChassisCrossCoupledPwm(
+                MotorNoYaw_GetConfig()->basePwmCounts,
+                MotorNoYaw_GetConfig()->basePwmCounts,
+                MotorNoYaw_GetCrossSyncGainQ1024(MotorNoYaw_GetConfig(),
+                    g_motorNoYaw.digitalMask),
+                MotorNoYaw_GetConfig()->syncLimitPwmCounts);
+#endif
     }
 
     if (g_motorNoYaw.turnTicks < MOTOR_NO_YAW_INVALID_TICKS) {
@@ -978,7 +1206,7 @@ static void MotorNoYaw_TaskTurn(void)
     }
 
     if (g_motorNoYaw.turnTicks >= timeoutTicks) {
-        MotorNoYaw_StopWithReason("turn-timeout");
+        MotorNoYaw_StopWithReason(MOTOR_NO_YAW_STOP_TURN_TIMEOUT);
     }
 }
 
@@ -1003,6 +1231,8 @@ static void MotorNoYaw_ResetControl(void)
     g_motorNoYaw.lastLineError = 0;
     g_motorNoYaw.lastLeftTargetCounts = 0;
     g_motorNoYaw.lastRightTargetCounts = 0;
+    g_motorNoYaw.lastLeftPwmCounts = 0;
+    g_motorNoYaw.lastRightPwmCounts = 0;
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
     MotorNoYaw_ResetTurnSampleHistory();
@@ -1028,6 +1258,7 @@ static void MotorNoYaw_ResetControl(void)
     g_motorNoYaw.returnConfirmSamples = 0U;
     g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.returnLineRequest = 0U;
+    g_motorNoYaw.stopReason = MOTOR_NO_YAW_STOP_NONE;
 }
 
 void MotorNoYaw_Init(void)
@@ -1135,6 +1366,11 @@ uint8_t MotorNoYaw_IsRunning(void)
 MotorNoYawState MotorNoYaw_GetState(void)
 {
     return g_motorNoYaw.state;
+}
+
+MotorNoYawStopReason MotorNoYaw_GetStopReason(void)
+{
+    return g_motorNoYaw.stopReason;
 }
 
 const char *MotorNoYaw_GetStateName(void)

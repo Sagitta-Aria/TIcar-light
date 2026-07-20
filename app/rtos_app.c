@@ -7,6 +7,7 @@
 #include "app.h"
 #include "board_config.h"
 #include "control_config.h"
+#include "gimbal.h"
 #include "menu.h"
 #include "motor.h"
 #include "state_machine.h"
@@ -143,7 +144,7 @@ static void RtosApp_WatchdogTask(void *parameter)
 }
 #endif
 
-/* 控制任务可被快事件提前唤醒，但周期控制仍必须等满 20 ms 截止时间。 */
+/* 控制任务可被快事件提前唤醒，但周期控制仍必须等满10 ms截止时间。 */
 static TickType_t RtosApp_GetControlWaitTicks(TickType_t lastControlTime)
 {
     TickType_t period = pdMS_TO_TICKS(CHASSIS_CONTROL_PERIOD_MS);
@@ -153,8 +154,21 @@ static TickType_t RtosApp_GetControlWaitTicks(TickType_t lastControlTime)
 }
 
 /*
+ * 作用：计算距离下一个固定云台矫正截止点的等待时间。
+ * 视觉通知只会提前唤醒任务，不会移动 lastCorrectionTime，因此连续视觉帧
+ * 也不能把固定 10 ms 姿态矫正周期向后推迟。
+ */
+static TickType_t RtosApp_GetGimbalWaitTicks(TickType_t lastCorrectionTime)
+{
+    TickType_t period = pdMS_TO_TICKS(BODY_MOTION_PERIOD_MS);
+    TickType_t elapsed = xTaskGetTickCount() - lastCorrectionTime;
+
+    return (elapsed >= period) ? 0U : period - elapsed;
+}
+
+/*
  * CarControl（优先级 6）：
- * - 常规路径每 CHASSIS_CONTROL_PERIOD_MS（当前 20 ms）执行一次底盘控制；
+ * - 常规路径每CHASSIS_CONTROL_PERIOD_MS（当前10 ms）执行一次底盘控制；
  * - TIMG0 识别到转弯/回线语义事件时可通过通知提前唤醒，只处理快事件，
  *   不会提前读取并清零编码器窗口，也不会提前运行速度 PI；
  * - Task2/3/7/8 期间由 Mission 挂起，恢复时重置周期基准，避免补跑旧周期。
@@ -197,19 +211,46 @@ static void RtosApp_ControlTask(void *parameter)
 }
 
 /*
- * Gimbal（优先级 6）：完整视觉帧通知到达时立即抢占执行；没有通知时
- * 最多等待 BODY_MOTION_PERIOD_MS（当前 10 ms），保证姿态矫正持续更新。
+ * Gimbal（优先级 6）：
+ * - 以绝对 BODY_MOTION_PERIOD_MS（当前 10 ms）节拍执行姿态矫正；
+ * - 直线阶段完整视觉帧可提前抢占并立即执行一次云台控制；
+ * - Task4转向及释放延时内，视觉通知只消费输入，姿态矫正仍按固定10 ms运行；
+ * - 通知与固定截止点同时到达时只执行一次，避免同一 tick 重复输出。
  */
 static void RtosApp_GimbalTask(void *parameter)
 {
+    TickType_t lastCorrectionTime = xTaskGetTickCount();
+    TickType_t now;
+    TickType_t period = pdMS_TO_TICKS(BODY_MOTION_PERIOD_MS);
+    uint32_t notified;
     uint32_t frameCount;
+    uint8_t periodicDue;
 
     (void)parameter;
     for (;;) {
-        (void)ulTaskNotifyTake(pdTRUE,
-            pdMS_TO_TICKS(BODY_MOTION_PERIOD_MS));
+        notified = ulTaskNotifyTake(pdTRUE,
+            RtosApp_GetGimbalWaitTicks(lastCorrectionTime));
+        now = xTaskGetTickCount();
+        periodicDue = (uint8_t)(((now - lastCorrectionTime) >= period) ?
+            1U : 0U);
+        if ((notified == 0U) && (periodicDue == 0U)) {
+            continue;
+        }
+
+        if (periodicDue != 0U) {
+            do {
+                lastCorrectionTime += period;
+            } while ((now - lastCorrectionTime) >= period);
+        }
+
         frameCount = Vision_GetFrameCount();
-        App_GimbalStep();
+        if ((notified != 0U) && (periodicDue == 0U) &&
+            (Gimbal_IsVisionTrackingEnabled() == 0U)) {
+            /* 视觉屏蔽期间及时清空输入，但不能让视觉帧改变姿态环执行频率。 */
+            App_VisionInputStep();
+        } else {
+            App_GimbalStep();
+        }
         if (Vision_GetFrameCount() != frameCount) {
             RtosApp_NotifyMission();
             RtosApp_NotifyUi();

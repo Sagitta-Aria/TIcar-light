@@ -56,9 +56,13 @@ void Motor_ResetRampStep(MotorId motor);
  */
 void Motor_SetChassisCommand(int16_t leftCps, int16_t rightCps);
 
-/* 设置底盘正常闭环目标，单位为 encoder count/控制周期。 */
+/* 设置底盘正常闭环目标，单位为固定encoder count/20ms速度刻度。 */
 void Motor_SetChassisPeriodCommand(int16_t leftCounts,
     int16_t rightCounts);
+
+/* 设置直接PWM，并在10ms底盘周期内按左右编码速度差做交叉同步。 */
+void Motor_SetChassisCrossCoupledPwm(int16_t leftPwm, int16_t rightPwm,
+    int32_t syncGainQ1024, uint16_t syncLimitPwm);
 
 /* 分别允许左右轮在零目标时按编码反馈输出反向阻尼PWM。 */
 void Motor_SetChassisZeroTargetBrake(uint8_t leftEnabled,

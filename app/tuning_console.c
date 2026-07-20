@@ -25,11 +25,17 @@
     ((int32_t)CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD)
 #define TUNING_PWM_PERCENT_MAX          (100L)
 #define TUNING_SET_SETTLE_MS            (4000U)
-#define TUNING_SET_SAMPLE_WINDOWS       (50U)
+#define TUNING_SET_SAMPLE_DURATION_MS   (1000U)
+#define TUNING_SET_SAMPLE_WINDOWS \
+    (TUNING_SET_SAMPLE_DURATION_MS / CHASSIS_CONTROL_PERIOD_MS)
 #define TUNING_PLOT_FIT_MARKER           (-32768L)
 #define TUNING_ENCODER_SPEED_MAX_COUNTS \
     ((int32_t)CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD)
 #define TUNING_ENCODER_DISTANCE_LIMIT    (1000000000L)
+
+#if ((TUNING_SET_SAMPLE_DURATION_MS % CHASSIS_CONTROL_PERIOD_MS) != 0U)
+#error "Task5 set sampling duration must contain whole chassis periods"
+#endif
 
 typedef enum {
     TUNING_SET_IDLE = 0,
@@ -75,7 +81,6 @@ static uint8_t g_encoderMoveActive;
 static TuningMode g_tuningMode;
 static uint8_t g_gimbalPlotEnabled;
 static TickType_t g_lastGimbalPlotTime;
-static StaticConfigDistance g_visionDistance;
 static StaticConfigMode g_visionSource;
 static uint8_t g_visionPlotEnabled;
 static TickType_t g_lastVisionPlotTime;
@@ -95,10 +100,13 @@ static void TuningConsole_StopVisionActivity(void)
     MotorEnable_SetGimbal(0U);
 }
 
+/*
+ * 启动Task5视觉调试并选择唯一point/circle配置。
+ * 副作用：清空视觉接收状态、启用两个云台轴；不再接受人工距离档。
+ */
 static void TuningConsole_StartVisionActivity(void)
 {
-    StaticConfig_SetActiveByDistanceMode(g_visionDistance,
-        g_visionSource);
+    StaticConfig_SetActiveMode(g_visionSource);
     Vision_Start();
     Gimbal_SetTarget(0, 0);
     Gimbal_SetEnabled(1U);
@@ -393,7 +401,7 @@ static void TuningConsole_SendHelp(void)
     LogUart_SendString(
         "# gsign|gh7sign|gjysign -1|1 | gmax|gaccel|glimit VALUE\r\n");
     LogUart_SendString(
-        "# vconfig near|mid|far center|circle | vplot on|off | vshow\r\n");
+        "# vconfig center|circle | vplot on|off | vshow\r\n");
     LogUart_SendString("# Task5 PWM commands use percent:\r\n");
     LogUart_SendString("# set L R       -100..100%, sample FF point\r\n");
     LogUart_SendString("# set clear     clear saved FF points\r\n");
@@ -571,8 +579,8 @@ static void TuningConsole_SendStatus(void)
         LogUart_SendSigned(Vision_GetRawY());
         LogUart_SendString(" stage_x10=");
         LogUart_SendSigned(Vision_GetStageScaleX10());
-        LogUart_SendString(" yaw_boost=");
-        LogUart_SendUnsigned(Vision_IsYawBoostActive());
+        LogUart_SendString(" yaw_k_q1024=");
+        LogUart_SendUnsigned(Vision_GetYawGainQ1024());
         LogUart_SendString(" error=");
         LogUart_SendSigned(Gimbal_GetErrorX());
         LogUart_SendString(",");
@@ -581,6 +589,10 @@ static void TuningConsole_SendStatus(void)
         LogUart_SendSigned(Gimbal_GetCommandX());
         LogUart_SendString(",");
         LogUart_SendSigned(Gimbal_GetCommandY());
+        LogUart_SendString(" vision_ff_sps=");
+        LogUart_SendSigned(Gimbal_GetVisionFeedForwardX());
+        LogUart_SendString(",");
+        LogUart_SendSigned(Gimbal_GetVisionFeedForwardY());
         LogUart_SendString(" step_sps=");
         LogUart_SendSigned(Motor_GetGimbalStepRate(MOTOR_GIMBAL_1));
         LogUart_SendString(",");
@@ -762,6 +774,10 @@ static void TuningConsole_SendDetails(void)
         LogUart_SendUnsigned(config->kdX);
         LogUart_SendString(",");
         LogUart_SendUnsigned(config->kdY);
+        LogUart_SendString(" kff=");
+        LogUart_SendUnsigned(config->kffX);
+        LogUart_SendString(",");
+        LogUart_SendUnsigned(config->kffY);
         LogUart_SendString(" speed_min=");
         LogUart_SendUnsigned(config->minSpeedX);
         LogUart_SendString(",");
@@ -1640,21 +1656,7 @@ static uint8_t TuningConsole_ExecuteGimbalCommand(char *tokens[],
     return 1U;
 }
 
-static uint8_t TuningConsole_ParseVisionDistance(const char *text,
-    StaticConfigDistance *distance)
-{
-    if (TuningConsole_TextEquals(text, "near") != 0U) {
-        *distance = STATICCONFIG_DISTANCE_NEAR;
-    } else if (TuningConsole_TextEquals(text, "mid") != 0U) {
-        *distance = STATICCONFIG_DISTANCE_MID;
-    } else if (TuningConsole_TextEquals(text, "far") != 0U) {
-        *distance = STATICCONFIG_DISTANCE_FAR;
-    } else {
-        return 0U;
-    }
-    return 1U;
-}
-
+/* 把Task5视觉调试参数限制为最终保留的点/圆两种误差源。 */
 static uint8_t TuningConsole_ParseVisionSource(const char *text,
     StaticConfigMode *source)
 {
@@ -1668,6 +1670,10 @@ static uint8_t TuningConsole_ParseVisionSource(const char *text,
     return 1U;
 }
 
+/*
+ * 处理Task5视觉命令；vconfig只允许center/circle并会重启视觉控制。
+ * 不用于比赛任务切换，返回1仅表示命令名已被本处理器消费。
+ */
 static uint8_t TuningConsole_ExecuteVisionCommand(char *tokens[],
     uint8_t tokenCount)
 {
@@ -1707,18 +1713,15 @@ static uint8_t TuningConsole_ExecuteVisionCommand(char *tokens[],
         return 1U;
     }
     if ((TuningConsole_TextEquals(tokens[0], "vconfig") != 0U) &&
-        (tokenCount == 3U)) {
-        StaticConfigDistance distance;
+        (tokenCount == 2U)) {
         StaticConfigMode source;
         uint8_t plotEnabled = g_visionPlotEnabled;
 
-        if ((TuningConsole_ParseVisionDistance(tokens[1], &distance) == 0U) ||
-            (TuningConsole_ParseVisionSource(tokens[2], &source) == 0U)) {
+        if (TuningConsole_ParseVisionSource(tokens[1], &source) == 0U) {
             LogUart_SendString(
-                "#ERR vconfig expects near|mid|far center|circle\r\n");
+                "#ERR vconfig expects center|circle\r\n");
             return 1U;
         }
-        g_visionDistance = distance;
         g_visionSource = source;
         TuningConsole_StopVisionActivity();
         TuningConsole_StartVisionActivity();
@@ -1726,8 +1729,6 @@ static uint8_t TuningConsole_ExecuteVisionCommand(char *tokens[],
         g_lastVisionPlotTime = xTaskGetTickCount();
         LogUart_SendString("#OK vconfig=");
         LogUart_SendString(tokens[1]);
-        LogUart_SendString(",");
-        LogUart_SendString(tokens[2]);
         LogUart_SendString("\r\n");
         g_forceStatus = 1U;
         return 1U;
@@ -1958,7 +1959,6 @@ void TuningConsole_Start(void)
     g_oledPage = TUNING_CONSOLE_OLED_FF;
     g_tuningMode = TUNING_MODE_CHASSIS;
     g_gimbalPlotEnabled = 0U;
-    g_visionDistance = STATICCONFIG_DISTANCE_NEAR;
     g_visionSource = STATICCONFIG_MODE_CENTER;
     g_visionPlotEnabled = 0U;
     g_grayActive = 0U;
@@ -2041,8 +2041,6 @@ void TuningConsole_Task(void)
 
 void TuningConsole_ChassisControlPeriod(void)
 {
-    int16_t leftTargetCounts;
-    int16_t rightTargetCounts;
     uint8_t mask;
 
     if ((g_active == 0U) || (g_tuningMode != TUNING_MODE_CHASSIS) ||
@@ -2051,12 +2049,7 @@ void TuningConsole_ChassisControlPeriod(void)
     }
     mask = Gray_ReadDigitalMaskFast();
     g_grayMask = mask;
-    if (MotorNoYaw_CalculateTask1LineCommand(mask, &leftTargetCounts,
-        &rightTargetCounts) == 0U) {
-        leftTargetCounts = 0;
-        rightTargetCounts = 0;
-    }
-    EncoderMotor_SetPeriodTargets(leftTargetCounts, rightTargetCounts);
+    (void)MotorNoYaw_ApplyTask1LineCommand(mask);
 }
 
 uint8_t TuningConsole_IsActive(void)
@@ -2085,7 +2078,7 @@ void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status)
     status->visionStageScaleX10 = Vision_GetStageScaleX10();
     status->visionCommandX = Gimbal_GetCommandX();
     status->visionCommandY = Gimbal_GetCommandY();
-    status->visionYawBoostActive = Vision_IsYawBoostActive();
+    status->visionYawGainQ1024 = Vision_GetYawGainQ1024();
     status->gimbalState = (uint8_t)gimbal.motion.state;
     status->gimbalHoldEnabled = gimbal.holdEnabled;
     status->gimbalFeedForwardEnabled = gimbal.feedForwardEnabled;

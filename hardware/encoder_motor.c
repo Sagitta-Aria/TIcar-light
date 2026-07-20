@@ -25,6 +25,8 @@ static volatile uint32_t g_rightEncoderAInterruptCount;
 static volatile uint32_t g_rightEncoderBInterruptCount;
 static EncoderMotorMode g_mode;
 static uint32_t g_sampleSequence;
+static int32_t g_crossPwmSyncGainQ1024;
+static uint16_t g_crossPwmSyncLimit;
 
 static void EncoderMotor_WritePwm(uint8_t motorIndex, int16_t pwm);
 
@@ -113,6 +115,28 @@ static int32_t EncoderMotor_CalculateStraightSyncCorrection(
         correction = -directionLimit;
     }
     return correction;
+}
+
+/* 同向直接PWM时按左右速度差交叉分配补偿；异向或单轮命令不做同步。 */
+static int32_t EncoderMotor_CalculateCrossPwmSyncCorrection(
+    int32_t leftFeedback, int32_t rightFeedback, int16_t leftPwm,
+    int16_t rightPwm, int32_t syncGainQ1024, uint16_t syncLimitPwm)
+{
+    int64_t correction;
+
+    if (((int32_t)leftPwm * (int32_t)rightPwm <= 0) ||
+        (syncGainQ1024 == 0L)) {
+        return 0;
+    }
+
+    correction = ((int64_t)leftFeedback - (int64_t)rightFeedback) *
+        syncGainQ1024 / CHASSIS_Q1024_SCALE;
+    if (correction > (int64_t)syncLimitPwm) {
+        correction = (int64_t)syncLimitPwm;
+    } else if (correction < -(int64_t)syncLimitPwm) {
+        correction = -(int64_t)syncLimitPwm;
+    }
+    return (int32_t)correction;
 }
 
 static void EncoderMotor_ApplyTargetLocked(uint8_t motorIndex,
@@ -413,23 +437,43 @@ static void EncoderMotor_InitEncoderPins(void)
         DL_GPIO_PIN_19_EDGE_RISE_FALL | DL_GPIO_PIN_20_EDGE_RISE_FALL |
         DL_GPIO_PIN_24_EDGE_RISE_FALL);
 
-    DL_GPIO_disableInterrupt(GPIOA, PIN_CHASSIS_RIGHT_ENCODER_A);
-    DL_GPIO_disableInterrupt(GPIOB, PIN_CHASSIS_LEFT_ENCODER_A |
-        PIN_CHASSIS_LEFT_ENCODER_B | PIN_CHASSIS_RIGHT_ENCODER_B);
-    DL_GPIO_clearInterruptStatus(GPIOA, PIN_CHASSIS_RIGHT_ENCODER_A);
-    DL_GPIO_clearInterruptStatus(GPIOB, PIN_CHASSIS_LEFT_ENCODER_A |
-        PIN_CHASSIS_LEFT_ENCODER_B | PIN_CHASSIS_RIGHT_ENCODER_B);
+    DL_GPIO_disableInterrupt(PIN_CHASSIS_LEFT_ENCODER_A_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_A);
+    DL_GPIO_disableInterrupt(PIN_CHASSIS_LEFT_ENCODER_B_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_B);
+    DL_GPIO_disableInterrupt(PIN_CHASSIS_RIGHT_ENCODER_A_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_A);
+    DL_GPIO_disableInterrupt(PIN_CHASSIS_RIGHT_ENCODER_B_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_B);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_LEFT_ENCODER_A_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_A);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_LEFT_ENCODER_B_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_B);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_RIGHT_ENCODER_A_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_A);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_RIGHT_ENCODER_B_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_B);
 }
 
 static void EncoderMotor_EnableEncoderInterrupts(void)
 {
     /* Discard edges that occurred while the initial AB state was sampled. */
-    DL_GPIO_clearInterruptStatus(GPIOA, PIN_CHASSIS_RIGHT_ENCODER_A);
-    DL_GPIO_clearInterruptStatus(GPIOB, PIN_CHASSIS_LEFT_ENCODER_A |
-        PIN_CHASSIS_LEFT_ENCODER_B | PIN_CHASSIS_RIGHT_ENCODER_B);
-    DL_GPIO_enableInterrupt(GPIOA, PIN_CHASSIS_RIGHT_ENCODER_A);
-    DL_GPIO_enableInterrupt(GPIOB, PIN_CHASSIS_LEFT_ENCODER_A |
-        PIN_CHASSIS_LEFT_ENCODER_B | PIN_CHASSIS_RIGHT_ENCODER_B);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_LEFT_ENCODER_A_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_A);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_LEFT_ENCODER_B_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_B);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_RIGHT_ENCODER_A_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_A);
+    DL_GPIO_clearInterruptStatus(PIN_CHASSIS_RIGHT_ENCODER_B_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_B);
+    DL_GPIO_enableInterrupt(PIN_CHASSIS_LEFT_ENCODER_A_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_A);
+    DL_GPIO_enableInterrupt(PIN_CHASSIS_LEFT_ENCODER_B_PORT,
+        PIN_CHASSIS_LEFT_ENCODER_B);
+    DL_GPIO_enableInterrupt(PIN_CHASSIS_RIGHT_ENCODER_A_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_A);
+    DL_GPIO_enableInterrupt(PIN_CHASSIS_RIGHT_ENCODER_B_PORT,
+        PIN_CHASSIS_RIGHT_ENCODER_B);
     NVIC_ClearPendingIRQ(GPIOA_INT_IRQn);
     NVIC_ClearPendingIRQ(GPIOB_INT_IRQn);
     NVIC_EnableIRQ(GPIOA_INT_IRQn);
@@ -479,6 +523,8 @@ void EncoderMotor_Init(void)
     g_tuning[ENCODER_MOTOR_RIGHT].kiQ1024 = CHASSIS_RIGHT_KI_Q1024;
     g_mode = ENCODER_MOTOR_MODE_NORMAL;
     g_sampleSequence = 0U;
+    g_crossPwmSyncGainQ1024 = 0L;
+    g_crossPwmSyncLimit = 0U;
     EncoderMotor_EnableEncoderInterrupts();
     EncoderMotor_Stop();
 }
@@ -487,8 +533,10 @@ void EncoderMotor_SetTargets(int16_t leftCps, int16_t rightCps)
 {
     int16_t nextLeft = EncoderMotor_ClampTarget(leftCps);
     int16_t nextRight = EncoderMotor_ClampTarget(rightCps);
-    int16_t leftCounts = (int16_t)(nextLeft / (int16_t)CHASSIS_CONTROL_HZ);
-    int16_t rightCounts = (int16_t)(nextRight / (int16_t)CHASSIS_CONTROL_HZ);
+    int16_t leftCounts =
+        (int16_t)(nextLeft / (int16_t)CHASSIS_SPEED_UNIT_HZ);
+    int16_t rightCounts =
+        (int16_t)(nextRight / (int16_t)CHASSIS_SPEED_UNIT_HZ);
     uint32_t primask = EncoderMotor_EnterCritical();
 
     EncoderMotor_ArmStartupCompensationLocked(leftCounts, rightCounts);
@@ -507,9 +555,37 @@ void EncoderMotor_SetPeriodTargets(int16_t leftCounts, int16_t rightCounts)
     g_mode = ENCODER_MOTOR_MODE_NORMAL;
     EncoderMotor_ArmStartupCompensationLocked(nextLeft, nextRight);
     EncoderMotor_ApplyTargetLocked(ENCODER_MOTOR_LEFT,
-        (int16_t)(nextLeft * (int16_t)CHASSIS_CONTROL_HZ), nextLeft);
+        (int16_t)(nextLeft * (int16_t)CHASSIS_SPEED_UNIT_HZ), nextLeft);
     EncoderMotor_ApplyTargetLocked(ENCODER_MOTOR_RIGHT,
-        (int16_t)(nextRight * (int16_t)CHASSIS_CONTROL_HZ), nextRight);
+        (int16_t)(nextRight * (int16_t)CHASSIS_SPEED_UNIT_HZ), nextRight);
+    EncoderMotor_ExitCritical(primask);
+}
+
+void EncoderMotor_SetCrossCoupledPwm(int16_t leftPwm, int16_t rightPwm,
+    int32_t syncGainQ1024, uint16_t syncLimitPwm)
+{
+    uint32_t primask = EncoderMotor_EnterCritical();
+
+    g_mode = ENCODER_MOTOR_MODE_CROSS_COUPLED_PWM;
+    g_crossPwmSyncGainQ1024 = (syncGainQ1024 < 0L) ? 0L : syncGainQ1024;
+    g_crossPwmSyncLimit = (syncLimitPwm > CHASSIS_PWM_LIMIT_COUNTS) ?
+        (uint16_t)CHASSIS_PWM_LIMIT_COUNTS : syncLimitPwm;
+    g_controller[ENCODER_MOTOR_LEFT].openLoopPwm =
+        EncoderMotor_ClampPwm(leftPwm);
+    g_controller[ENCODER_MOTOR_RIGHT].openLoopPwm =
+        EncoderMotor_ClampPwm(rightPwm);
+    g_controller[ENCODER_MOTOR_LEFT].targetCps = 0;
+    g_controller[ENCODER_MOTOR_RIGHT].targetCps = 0;
+    g_controller[ENCODER_MOTOR_LEFT].commandCounts = 0;
+    g_controller[ENCODER_MOTOR_RIGHT].commandCounts = 0;
+    g_controller[ENCODER_MOTOR_LEFT].targetCounts = 0;
+    g_controller[ENCODER_MOTOR_RIGHT].targetCounts = 0;
+    g_controller[ENCODER_MOTOR_LEFT].integralScaled = 0;
+    g_controller[ENCODER_MOTOR_RIGHT].integralScaled = 0;
+    g_controller[ENCODER_MOTOR_LEFT].startupActive = 0U;
+    g_controller[ENCODER_MOTOR_RIGHT].startupActive = 0U;
+    g_controller[ENCODER_MOTOR_LEFT].zeroTargetBrakeEnabled = 0U;
+    g_controller[ENCODER_MOTOR_RIGHT].zeroTargetBrakeEnabled = 0U;
     EncoderMotor_ExitCritical(primask);
 }
 
@@ -544,7 +620,7 @@ void EncoderMotor_SetTarget(uint8_t motorIndex, int16_t targetCps)
     targetCps = EncoderMotor_ClampTarget(targetCps);
     primask = EncoderMotor_EnterCritical();
     EncoderMotor_ApplyTargetLocked(motorIndex, targetCps,
-        (int16_t)(targetCps / (int16_t)CHASSIS_CONTROL_HZ));
+        (int16_t)(targetCps / (int16_t)CHASSIS_SPEED_UNIT_HZ));
     EncoderMotor_ExitCritical(primask);
 }
 
@@ -552,8 +628,11 @@ static void EncoderMotor_ReadAndClearIntervals(int32_t *left, int32_t *right)
 {
     uint32_t primask = EncoderMotor_EnterCritical();
 
-    *left = g_intervalCount[ENCODER_MOTOR_LEFT];
-    *right = g_intervalCount[ENCODER_MOTOR_RIGHT];
+    /* 10 ms原始窗口换算为固定count/20ms速度刻度，保留现有标定参数。 */
+    *left = g_intervalCount[ENCODER_MOTOR_LEFT] *
+        (int32_t)CHASSIS_FEEDBACK_COUNT_SCALE;
+    *right = g_intervalCount[ENCODER_MOTOR_RIGHT] *
+        (int32_t)CHASSIS_FEEDBACK_COUNT_SCALE;
     g_intervalCount[ENCODER_MOTOR_LEFT] = 0;
     g_intervalCount[ENCODER_MOTOR_RIGHT] = 0;
     EncoderMotor_ExitCritical(primask);
@@ -581,12 +660,22 @@ static int16_t EncoderMotor_UpdateClosedLoop(uint8_t motorIndex,
     }
     feedbackMagnitude = (feedback < 0) ? -(int64_t)feedback :
         (int64_t)feedback;
-    controller->startupActive =
-        (feedbackMagnitude <
-            (int64_t)CHASSIS_START_PWM_SPEED_THRESHOLD_COUNTS_PER_PERIOD) ?
-        1U : 0U;
+    /*
+     * START只负责本次起步：达到运行速度后单向切到RUN_START。
+     * 运行中即使反馈在阈值附近波动，也不能重新切回START，否则两套
+     * 基础PWM的台阶会直接叠加到速度环输出，造成低速循迹左右抢速。
+     * 停车或目标反向时由EncoderMotor_ApplyTargetLocked重新进入START。
+     */
+    if ((controller->startupActive != 0U) &&
+        (feedbackMagnitude >=
+            (int64_t)CHASSIS_START_PWM_SPEED_THRESHOLD_COUNTS_PER_PERIOD)) {
+        controller->startupActive = 0U;
+    }
     error = targetCounts - feedback;
-    controller->integralScaled += (int64_t)tuning->kiQ1024 * error;
+    controller->integralScaled +=
+        ((int64_t)tuning->kiQ1024 * error *
+            (int64_t)CHASSIS_CONTROL_PERIOD_MS) /
+        (int64_t)CHASSIS_SPEED_UNIT_PERIOD_MS;
     controller->integralScaled = EncoderMotor_ClampIntegralScaled(
         motorIndex, controller->integralScaled);
     selectedStartPwm = (controller->startupActive != 0U) ?
@@ -624,6 +713,27 @@ void EncoderMotor_RunControlPeriod(void)
             g_controller[ENCODER_MOTOR_LEFT].openLoopPwm;
         output[ENCODER_MOTOR_RIGHT] =
             g_controller[ENCODER_MOTOR_RIGHT].openLoopPwm;
+        g_controller[ENCODER_MOTOR_LEFT].pwm = output[ENCODER_MOTOR_LEFT];
+        g_controller[ENCODER_MOTOR_RIGHT].pwm = output[ENCODER_MOTOR_RIGHT];
+    } else if (g_mode == ENCODER_MOTOR_MODE_CROSS_COUPLED_PWM) {
+        int32_t correction = EncoderMotor_CalculateCrossPwmSyncCorrection(
+            leftFeedback, rightFeedback,
+            g_controller[ENCODER_MOTOR_LEFT].openLoopPwm,
+            g_controller[ENCODER_MOTOR_RIGHT].openLoopPwm,
+            g_crossPwmSyncGainQ1024, g_crossPwmSyncLimit);
+
+        g_controller[ENCODER_MOTOR_LEFT].targetCounts = 0;
+        g_controller[ENCODER_MOTOR_RIGHT].targetCounts = 0;
+        g_controller[ENCODER_MOTOR_LEFT].feedbackCounts = leftFeedback;
+        g_controller[ENCODER_MOTOR_RIGHT].feedbackCounts = rightFeedback;
+        g_controller[ENCODER_MOTOR_LEFT].integralScaled = 0;
+        g_controller[ENCODER_MOTOR_RIGHT].integralScaled = 0;
+        output[ENCODER_MOTOR_LEFT] = EncoderMotor_ClampPwm(
+            (int32_t)g_controller[ENCODER_MOTOR_LEFT].openLoopPwm -
+            correction);
+        output[ENCODER_MOTOR_RIGHT] = EncoderMotor_ClampPwm(
+            (int32_t)g_controller[ENCODER_MOTOR_RIGHT].openLoopPwm +
+            correction);
         g_controller[ENCODER_MOTOR_LEFT].pwm = output[ENCODER_MOTOR_LEFT];
         g_controller[ENCODER_MOTOR_RIGHT].pwm = output[ENCODER_MOTOR_RIGHT];
     } else {
@@ -769,9 +879,9 @@ void EncoderMotor_SetCalibrationTargets(int16_t leftCounts,
     g_controller[ENCODER_MOTOR_RIGHT].integralScaled = 0;
     EncoderMotor_ArmStartupCompensationLocked(nextLeft, nextRight);
     EncoderMotor_ApplyTargetLocked(ENCODER_MOTOR_LEFT,
-        (int16_t)(nextLeft * (int16_t)CHASSIS_CONTROL_HZ), nextLeft);
+        (int16_t)(nextLeft * (int16_t)CHASSIS_SPEED_UNIT_HZ), nextLeft);
     EncoderMotor_ApplyTargetLocked(ENCODER_MOTOR_RIGHT,
-        (int16_t)(nextRight * (int16_t)CHASSIS_CONTROL_HZ), nextRight);
+        (int16_t)(nextRight * (int16_t)CHASSIS_SPEED_UNIT_HZ), nextRight);
     g_controller[ENCODER_MOTOR_LEFT].openLoopPwm = 0;
     g_controller[ENCODER_MOTOR_RIGHT].openLoopPwm = 0;
     g_controller[ENCODER_MOTOR_LEFT].pwm = 0;
@@ -884,31 +994,42 @@ void EncoderMotor_GetSnapshot(EncoderMotorSnapshot *snapshot)
 
 void EncoderMotor_HandleGPIOInterrupt(void)
 {
-    uint32_t pendingA = DL_GPIO_getEnabledInterruptStatus(GPIOA,
-        PIN_CHASSIS_RIGHT_ENCODER_A);
-    uint32_t pendingB = DL_GPIO_getEnabledInterruptStatus(GPIOB,
-        PIN_CHASSIS_LEFT_ENCODER_A | PIN_CHASSIS_LEFT_ENCODER_B |
-        PIN_CHASSIS_RIGHT_ENCODER_B);
+    uint32_t pendingLeftA = DL_GPIO_getEnabledInterruptStatus(
+        PIN_CHASSIS_LEFT_ENCODER_A_PORT, PIN_CHASSIS_LEFT_ENCODER_A);
+    uint32_t pendingLeftB = DL_GPIO_getEnabledInterruptStatus(
+        PIN_CHASSIS_LEFT_ENCODER_B_PORT, PIN_CHASSIS_LEFT_ENCODER_B);
+    uint32_t pendingRightA = DL_GPIO_getEnabledInterruptStatus(
+        PIN_CHASSIS_RIGHT_ENCODER_A_PORT, PIN_CHASSIS_RIGHT_ENCODER_A);
+    uint32_t pendingRightB = DL_GPIO_getEnabledInterruptStatus(
+        PIN_CHASSIS_RIGHT_ENCODER_B_PORT, PIN_CHASSIS_RIGHT_ENCODER_B);
 
-    if ((pendingA & PIN_CHASSIS_RIGHT_ENCODER_A) != 0U) {
+    if (pendingRightA != 0U) {
         ++g_rightEncoderAInterruptCount;
     }
-    if ((pendingB & PIN_CHASSIS_RIGHT_ENCODER_B) != 0U) {
+    if (pendingRightB != 0U) {
         ++g_rightEncoderBInterruptCount;
     }
-    if ((pendingB & (PIN_CHASSIS_LEFT_ENCODER_A |
-        PIN_CHASSIS_LEFT_ENCODER_B)) != 0U) {
+    if ((pendingLeftA != 0U) || (pendingLeftB != 0U)) {
         EncoderMotor_UpdateEncoder(ENCODER_MOTOR_LEFT);
     }
-    if (((pendingA & PIN_CHASSIS_RIGHT_ENCODER_A) != 0U) ||
-        ((pendingB & PIN_CHASSIS_RIGHT_ENCODER_B) != 0U)) {
+    if ((pendingRightA != 0U) || (pendingRightB != 0U)) {
         EncoderMotor_UpdateEncoder(ENCODER_MOTOR_RIGHT);
     }
-    if (pendingA != 0U) {
-        DL_GPIO_clearInterruptStatus(GPIOA, pendingA);
+    if (pendingLeftA != 0U) {
+        DL_GPIO_clearInterruptStatus(PIN_CHASSIS_LEFT_ENCODER_A_PORT,
+            pendingLeftA);
     }
-    if (pendingB != 0U) {
-        DL_GPIO_clearInterruptStatus(GPIOB, pendingB);
+    if (pendingLeftB != 0U) {
+        DL_GPIO_clearInterruptStatus(PIN_CHASSIS_LEFT_ENCODER_B_PORT,
+            pendingLeftB);
+    }
+    if (pendingRightA != 0U) {
+        DL_GPIO_clearInterruptStatus(PIN_CHASSIS_RIGHT_ENCODER_A_PORT,
+            pendingRightA);
+    }
+    if (pendingRightB != 0U) {
+        DL_GPIO_clearInterruptStatus(PIN_CHASSIS_RIGHT_ENCODER_B_PORT,
+            pendingRightB);
     }
 }
 

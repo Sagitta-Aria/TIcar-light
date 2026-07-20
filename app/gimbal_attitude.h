@@ -58,7 +58,7 @@ void GimbalAttitude_StartAssist(void);
 /* 停止 yaw 输出并恢复该轴的默认斜坡参数。 */
 void GimbalAttitude_Stop(void);
 
-/* 10ms控制入口：H7为反馈，板载JY61的BodyMotion为底座前馈。 */
+/* 固定10ms或视觉帧提前唤醒入口：H7反馈，板载JY61提供底座前馈。 */
 void GimbalAttitude_Task(void);
 
 /* 重新采集板载JY61前馈零偏；H7反馈不在M0端重复校准。 */
@@ -70,7 +70,7 @@ void GimbalAttitude_SetHoldEnabled(uint8_t enabled);
 /* 上层按任务策略控制板载JY61角速度前馈；H7反馈始终生效。 */
 void GimbalAttitude_SetFeedForwardEnabled(uint8_t enabled);
 
-/* 主动转yaw时跟随当前H7参考以避免角度环抵消，同时保留已启用的底座yaw前馈。 */
+/* 明确请求时才重抓H7参考；Task4固定跟车矫正期间必须保持关闭。 */
 void GimbalAttitude_SetReferenceTracking(uint8_t enabled);
 
 uint8_t GimbalAttitude_IsActive(void);

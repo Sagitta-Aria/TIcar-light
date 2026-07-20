@@ -29,10 +29,10 @@ uint32_t Vision_GetBadFrameCount(void);
 int16_t Vision_GetRawX(void);
 int16_t Vision_GetRawY(void);
 
-/* 读取第五字段阶段标度，单位0.1；610表示61.0。 */
+/* 读取第五字段目标长度，单位0.1；610表示61.0。 */
 int16_t Vision_GetStageScaleX10(void);
 
-/* 阶段标度严格大于60.0且已应用1.4倍yaw增益时返回1。 */
-uint8_t Vision_IsYawBoostActive(void);
+/* 读取由目标长度30.0~140.0线性拟合出的yaw增益；1024表示1.0倍。 */
+uint16_t Vision_GetYawGainQ1024(void);
 
 #endif

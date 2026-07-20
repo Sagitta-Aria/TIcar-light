@@ -17,6 +17,7 @@ typedef struct {
     int16_t rawX;
     int16_t rawY;
     int16_t stageScaleX10;
+    uint16_t yawGainQ1024;
 } VisionState;
 
 static VisionState g_vision;
@@ -128,7 +129,44 @@ static uint8_t Vision_ParseValues(const char *line,
     return count;
 }
 
-/* 作用：按当前六套云台参数选择中心误差或圆点误差，并写入 gimbal。 */
+/*
+ * 作用：把视觉第5字段目标长度拟合为连续yaw增益。
+ * 使用场景：仅在五字段视觉帧通过数量校验后调用。
+ * 边界：长度在30.0~140.0外先钳位；结果使用Q1024且不操作电机。
+ */
+static uint16_t Vision_ComputeYawGainQ1024(int16_t targetLengthX10)
+{
+    int32_t length = targetLengthX10;
+    uint32_t lengthOffset;
+    uint32_t lengthRange = (uint32_t)(VISION_TARGET_LENGTH_MAX_X10 -
+        VISION_TARGET_LENGTH_MIN_X10);
+    uint32_t gainRange = GIMBAL_VISION_YAW_GAIN_MAX_Q1024 -
+        GIMBAL_VISION_YAW_GAIN_MIN_Q1024;
+
+    if (length <= VISION_TARGET_LENGTH_MIN_X10) {
+        return GIMBAL_VISION_YAW_GAIN_MIN_Q1024;
+    }
+    if (length >= VISION_TARGET_LENGTH_MAX_X10) {
+        return GIMBAL_VISION_YAW_GAIN_MAX_Q1024;
+    }
+
+    lengthOffset = (uint32_t)(length - VISION_TARGET_LENGTH_MIN_X10);
+    return (uint16_t)(GIMBAL_VISION_YAW_GAIN_MIN_Q1024 +
+        ((lengthOffset * gainRange) + lengthRange / 2U) / lengthRange);
+}
+
+/*
+ * 作用：没有有效视觉长度时恢复1.0倍，防止新任务沿用上一任务的K。
+ * 使用场景：Vision初始化、启动和停止；不会启动云台或伪造视觉帧。
+ */
+static void Vision_ResetYawGain(void)
+{
+    g_vision.stageScaleX10 = 0;
+    g_vision.yawGainQ1024 = GIMBAL_VISION_YAW_GAIN_Q1024_SCALE;
+    Gimbal_SetVisionYawGainQ1024(g_vision.yawGainQ1024);
+}
+
+/* 选择点/圆误差，拟合本帧yaw K，并把有效帧写入Gimbal控制器。 */
 static void Vision_ApplyValues(const int16_t *values, uint8_t count)
 {
     const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
@@ -150,8 +188,9 @@ static void Vision_ApplyValues(const int16_t *values, uint8_t count)
     g_vision.rawX = values[valueIndex];
     g_vision.rawY = values[valueIndex + 1U];
     g_vision.stageScaleX10 = values[4];
-    Gimbal_SetVisionYawBoostEnabled((uint8_t)(
-        g_vision.stageScaleX10 > VISION_STAGE_YAW_BOOST_THRESHOLD_X10));
+    g_vision.yawGainQ1024 = Vision_ComputeYawGainQ1024(
+        g_vision.stageScaleX10);
+    Gimbal_SetVisionYawGainQ1024(g_vision.yawGainQ1024);
     Gimbal_UpdateFromCameraError(g_vision.rawX, g_vision.rawY);
     g_vision.hasFrame = 1U;
     ++g_vision.frameCount;
@@ -165,8 +204,7 @@ void Vision_Init(void)
     g_vision.badFrameCount = 0U;
     g_vision.rawX = 0;
     g_vision.rawY = 0;
-    g_vision.stageScaleX10 = 0;
-    Gimbal_SetVisionYawBoostEnabled(0U);
+    Vision_ResetYawGain();
 }
 
 void Vision_Start(void)
@@ -178,16 +216,14 @@ void Vision_Start(void)
     g_vision.badFrameCount = 0U;
     g_vision.rawX = 0;
     g_vision.rawY = 0;
-    g_vision.stageScaleX10 = 0;
-    Gimbal_SetVisionYawBoostEnabled(0U);
+    Vision_ResetYawGain();
 }
 
 void Vision_Stop(void)
 {
     g_vision.running = 0U;
     g_vision.hasFrame = 0U;
-    g_vision.stageScaleX10 = 0;
-    Gimbal_SetVisionYawBoostEnabled(0U);
+    Vision_ResetYawGain();
 }
 
 void Vision_Task(void)
@@ -238,13 +274,14 @@ int16_t Vision_GetRawY(void)
     return g_vision.rawY;
 }
 
+/* 返回最近一帧目标表观长度，单位0.1；没有有效帧时为0。 */
 int16_t Vision_GetStageScaleX10(void)
 {
     return g_vision.stageScaleX10;
 }
 
-uint8_t Vision_IsYawBoostActive(void)
+/* 返回最近长度拟合出的视觉yaw K；仅供显示/日志，不触发控制计算。 */
+uint16_t Vision_GetYawGainQ1024(void)
 {
-    return (uint8_t)(g_vision.stageScaleX10 >
-        VISION_STAGE_YAW_BOOST_THRESHOLD_X10);
+    return g_vision.yawGainQ1024;
 }

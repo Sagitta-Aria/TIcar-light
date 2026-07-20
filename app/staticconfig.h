@@ -9,12 +9,12 @@
  * 视觉脚本当前发送 "centerDx,centerDy;circleDx,circleDy;stageScale\n"。
  * dx/dy 的符号已经是 target - current，进入 MCU 后统一放大为 0.1 像素单位。
  *
- * 调参时优先改 app/staticconfig.c 里的六个 g_task* 结构体：
- * 近/中/远三个距离档，每个距离档再分中心误差 CENTER 和圆点误差 CIRCLE。
+ * 调参时只改 app/staticconfig.c 里的 point/circle 两个结构体。视觉第5字段
+ * 提供目标长度，距离造成的yaw响应差异由连续增益拟合，不再切近/中/远表。
  * board_config.h 只保留方向、超时、pitch 限幅、测试速度等硬件/测试参数。
  */
 
-/* 距离档：Task2/3/7由菜单选择，Task4由循迹转向次数选择。 */
+/* Task4强转yaw三段的近/中/远索引；视觉参数选择已不再使用该枚举。 */
 typedef enum {
     STATICCONFIG_DISTANCE_NEAR = 0,
     STATICCONFIG_DISTANCE_MID,
@@ -29,14 +29,10 @@ typedef enum {
     STATICCONFIG_MODE_COUNT
 } StaticConfigMode;
 
-/* 六套任务参数编号：三个距离档 x 两种视觉模式。 */
+/* 最终只保留矩形中心点和圆点两套视觉参数。 */
 typedef enum {
-    STATICCONFIG_TASK_NEAR_CENTER = 0,
-    STATICCONFIG_TASK_NEAR_CIRCLE,
-    STATICCONFIG_TASK_MID_CENTER,
-    STATICCONFIG_TASK_MID_CIRCLE,
-    STATICCONFIG_TASK_FAR_CENTER,
-    STATICCONFIG_TASK_FAR_CIRCLE,
+    STATICCONFIG_TASK_POINT = 0,
+    STATICCONFIG_TASK_CIRCLE,
     STATICCONFIG_TASK_COUNT
 } StaticConfigTaskId;
 
@@ -44,18 +40,20 @@ typedef enum {
  * StaticConfigGimbalTask：一套云台视觉闭环参数。
  *
  * 使用场景：
- * - 直接改 g_taskNearCenter/g_taskNearCircle/... 的字段来调实车。
- * - App 或路线层根据当前位置调用 StaticConfig_SetActiveTask() 切换参数。
+ * - 直接改 g_taskPoint/g_taskCircle 的字段来调实车。
+ * - App 只按视觉模式调用 StaticConfig_SetActiveMode() 切换参数。
  *
  * 控制公式：
- * commandSps = (error0.1px * kp + deltaError0.1px * kd) / gainScale
- * 超过死区后若算出来太小，会抬到 minSpeed；超过 maxSpeed 会限幅。
+ * feedbackSps = (error0.1px * kp + deltaError0.1px * kd) / gainScale
+ * feedForwardSps = deltaError0.1px * kff / gainScale
+ * commandSps = clamp(feedbackSps + feedForwardSps)
+ * 反馈超过死区后若算出来太小，会抬到 minSpeed；视觉速度前馈绕过位置死区，
+ * 但合成命令仍受 maxSpeed 限幅。
  */
 typedef struct {
     /* name：调试名，不参与控制。 */
     const char *name;
-    /* distance/mode：这套参数所属距离档和视觉模式。 */
-    StaticConfigDistance distance;
+    /* mode：这套参数使用矩形中心误差还是圆点误差。 */
     StaticConfigMode mode;
     /* deadbandX/Y：停止阈值，单位 0.1 像素；10 表示 1 像素。 */
     uint16_t deadbandX;
@@ -69,6 +67,9 @@ typedef struct {
     /* kdX/Y：相邻视觉帧误差变化的阻尼增益；不用 D 时填 0。 */
     uint16_t kdX;
     uint16_t kdY;
+    /* kffX/Y：相邻视觉帧误差趋势前馈；不用前馈时填 0。 */
+    uint16_t kffX;
+    uint16_t kffY;
     /* gainScale：P/D 统一除数，默认 100，避免浮点运算。 */
     uint16_t gainScale;
     /* minSpeedX/Y：超过死区后的最小动作速度，单位 SPS。 */
@@ -99,12 +100,7 @@ const StaticConfigGimbalTask *StaticConfig_GetTask(StaticConfigTaskId taskId);
 /* StaticConfig_GetActiveGimbal：读取当前云台闭环使用的参数。 */
 const StaticConfigGimbalTask *StaticConfig_GetActiveGimbal(void);
 
-/* StaticConfig_GetTaskFor：按距离档和模式返回对应任务编号。 */
-StaticConfigTaskId StaticConfig_GetTaskFor(StaticConfigDistance distance,
-    StaticConfigMode mode);
-
-/* StaticConfig_SetActiveByDistanceMode：按距离档和模式直接切换 active 参数。 */
-void StaticConfig_SetActiveByDistanceMode(StaticConfigDistance distance,
-    StaticConfigMode mode);
+/* StaticConfig_SetActiveMode：只按点/圆模式切换两套最终参数。 */
+void StaticConfig_SetActiveMode(StaticConfigMode mode);
 
 #endif

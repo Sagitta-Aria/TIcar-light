@@ -16,6 +16,8 @@ void App_MissionDispatch(CarEvent event);
 void App_MissionStep(void);
 void App_CommStep(void);
 void App_GimbalStep(void);
+/* 仅解析视觉输入；供Task4转向时丢帧控制但保持UART队列畅通。 */
+void App_VisionInputStep(void);
 void App_UiStep(void);
 uint8_t App_HousekeepingStep(void);
 

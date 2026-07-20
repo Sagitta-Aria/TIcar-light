@@ -24,6 +24,15 @@ void Gimbal_SetEnabled(uint8_t enabled);
 /* Gimbal_IsEnabled：读取云台闭环是否启用。 */
 uint8_t Gimbal_IsEnabled(void);
 
+/*
+ * 开关视觉误差对云台的控制输出；关闭期间帧可继续解析，但不更新yaw/pitch。
+ * 重新打开后等待下一帧，不复用关闭前的误差或D/前馈状态。
+ */
+void Gimbal_SetVisionTrackingEnabled(uint8_t enabled);
+
+/* 读取视觉误差当前是否允许驱动云台，供RTOS区分抢占与固定周期路径。 */
+uint8_t Gimbal_IsVisionTrackingEnabled(void);
+
 /* Gimbal_NeedsTimeoutService：已有视觉帧时返回1，供任务设置掉线超时。 */
 uint8_t Gimbal_NeedsTimeoutService(void);
 
@@ -66,23 +75,20 @@ void Gimbal_Task(void);
  */
 void Gimbal_SetYawFeedForward(int16_t speedSps);
 
-/* 写入姿态环的电机方向补偿速度；只允许 Gimbal 固定周期任务调用。 */
+/* 写入姿态环的电机方向补偿速度；只允许高优先级 Gimbal 任务调用。 */
 void Gimbal_SetYawAttitudeCompensation(int16_t speedSps);
 
-/* 高阶段视觉帧启用时，把视觉yaw命令和对应上限放大到1.4倍。 */
-void Gimbal_SetVisionYawBoostEnabled(uint8_t enabled);
+/* 写入视觉目标长度拟合出的yaw增益，Q1024；不缩放H7/JY61或固定yaw命令。 */
+void Gimbal_SetVisionYawGainQ1024(uint16_t gainQ1024);
 
-/* 当前视觉yaw高阶段增益是否启用。 */
-uint8_t Gimbal_IsVisionYawBoostEnabled(void);
+/* 读取当前视觉yaw拟合增益，1024表示1.0倍。 */
+uint16_t Gimbal_GetVisionYawGainQ1024(void);
 
 /* Task4首帧锁定后允许视觉超时触发左右摆动重搜；其他任务保持关闭。 */
 void Gimbal_SetLostTargetSearchEnabled(uint8_t enabled);
 
 /* Task4 当前正处于丢目标左右搜索时返回1。 */
 uint8_t Gimbal_IsLostTargetSearchActive(void);
-
-/* 视觉或任务基础命令正在主动转动 yaw 时返回1，供姿态环跟踪参考点。 */
-uint8_t Gimbal_IsYawTrackingActive(void);
 
 /* Gimbal_ResetRamp：Task4 临时覆盖结束后恢复两个云台轴的默认斜坡。 */
 void Gimbal_ResetRamp(void);
@@ -97,5 +103,9 @@ int16_t Gimbal_GetErrorY(void);
 /* Gimbal_GetCommandX/Y：读取最近一次输出到云台轴的有符号 SPS。 */
 int16_t Gimbal_GetCommandX(void);
 int16_t Gimbal_GetCommandY(void);
+
+/* 读取最近一次视觉误差趋势产生的前馈 SPS，不包含固定yaw或姿态补偿。 */
+int16_t Gimbal_GetVisionFeedForwardX(void);
+int16_t Gimbal_GetVisionFeedForwardY(void);
 
 #endif

@@ -68,8 +68,8 @@
 #define CAR_GIMBAL_ENABLE_DEFAULT_ON   (0U)     /* 0：上电默认不启用云台闭环；1：默认请求启用。 */
 
 /* 底盘左右轮安装方向修正。 */
-#define CAR_CHASSIS_LEFT_REVERSE       (1U)
-#define CAR_CHASSIS_RIGHT_REVERSE      (0U)
+#define CAR_CHASSIS_LEFT_REVERSE       (0U)
+#define CAR_CHASSIS_RIGHT_REVERSE      (1U)
 
 /* K1/K2 按键：低电平按下，正式版不保留按键诊断日志。 */
 #define CAR_KEY_ACTIVE_LOW             (1U)
@@ -81,109 +81,190 @@
 #define CAR_GIMBAL_YAW_REVERSE         (0U)  /* 1：反转 yaw 控制方向；0：保持计算方向。 */
 #define CAR_GIMBAL_PITCH_REVERSE       (0U)  /* 1：反转 pitch 控制方向；0：保持计算方向。 */
 #define CAR_GIMBAL_VISION_TIMEOUT_TICKS (60U) /* 视觉数据 60ms 未更新时停止视觉追点。 */
-#define CAR_GIMBAL_PITCH_LIMIT_STEPS   (500U) /* pitch 相对启用位置允许正负 200 STEP。 */
+#define CAR_GIMBAL_PITCH_LIMIT_STEPS   (600U) /* pitch 相对启用位置允许正负 200 STEP。 */
 
 /*
- * Motor NO YAW：Task1 编码底盘循迹参数。
- * 注意：快采样、左右直角窗口和强转时间不要随手改。
- * 速度单位与 Task5 target/move 相同：encoder count/20ms，范围 -100..100。
- * 正负号直接对应串口 target；当前实车 Task1/Task4 前进方向使用正目标。
- * 距离仍为累计 encoder count。
+ * ---------- Task1/Task4 普通循迹算法总开关 ----------
+ * 0：编译第3/4套直接PWM配置；1：编译第1/2套目标速度PID配置。
+ * 该开关同时选择Task1和Task4的算法，但两个任务始终读取各自独立的参数。
+ * 这里只切普通循迹；直角强转和出弯始终使用下方的目标速度闭环参数。
  */
-#define CAR_MOTOR_NO_YAW_BASE_SPEED_COUNTS_PER_PERIOD        (4)  /* 等同串口 target 25 25。 */
-#define CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_COUNTS_PER_PERIOD    (0)  /* 差速目标数值下限。 */
-#define CAR_MOTOR_NO_YAW_MAX_LINE_SPEED_COUNTS_PER_PERIOD    (10)  /* 差速目标数值上限。 */
-#define CAR_MOTOR_NO_YAW_LINE_DEADBAND         (0)     /* 误差死区：灰度误差小于该值时按居中处理。 */
-#define CAR_MOTOR_NO_YAW_TURN_GAIN             (2)     /* P修正 = 当前灰度误差 * gain / 100。 */
-#define CAR_MOTOR_NO_YAW_TURN_D_GAIN           (1)     /* D修正 = 相邻20ms误差差值 * gain / 100。 */
-#define CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD       (20U)  /* 普通循迹最大差速修正。 */
-/*
- * 灰度位置权重：正值降低左轮(PB19/PB20编码器)速度，负值降低右轮速度。
- * 因此前进目标为正数时，S1/S2/S3负责左转，S5/S6/S7负责右转。
- */
-#define CAR_MOTOR_NO_YAW_S1_LINE_WEIGHT        (11)
-#define CAR_MOTOR_NO_YAW_S2_LINE_WEIGHT        (5)
-#define CAR_MOTOR_NO_YAW_S3_LINE_WEIGHT        (2)
-#define CAR_MOTOR_NO_YAW_S4_LINE_WEIGHT        (0)
-#define CAR_MOTOR_NO_YAW_S5_LINE_WEIGHT        (-2)
-#define CAR_MOTOR_NO_YAW_S6_LINE_WEIGHT        (-5)
-#define CAR_MOTOR_NO_YAW_S7_LINE_WEIGHT        (-11)
+#define CAR_MOTOR_NO_YAW_USE_SPEED_PID         (1U)
 
-/* 强转内轮给轻微反向闭环目标，左右直角共用。 */
-#define CAR_MOTOR_NO_YAW_TURN_INNER_SPEED_COUNTS_PER_PERIOD    (-1)
-
-/* 左直角：左轮为内轮，右轮为外轮。 */
-#define CAR_MOTOR_NO_YAW_LEFT_TURN_SPEED_COUNTS_PER_PERIOD     (4)
-#define CAR_MOTOR_NO_YAW_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD (3)
-
-/* 右直角：右轮为内轮，左轮为外轮。 */
-#define CAR_MOTOR_NO_YAW_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD      (4)
-#define CAR_MOTOR_NO_YAW_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD  (3)
-
-#define CAR_MOTOR_NO_YAW_TURN_MIN_ENCODER_GAP_COUNTS (400U) /* 两次强转之间的最小平均编码距离。 */
-#define CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD (15) /* 无上一拍命令时的左轮搜线目标。 */
-#define CAR_MOTOR_NO_YAW_LEFT_TURN_WINDOW_MS   (100U)   /* S1/S2 在窗口内都触发才判左直角。 */
-#define CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS  (100U)   /* S6/S7 在窗口内都触发才判右直角。 */
-#define CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US       (1000U)   /* 快采样周期：TIMG0 独立读取 Gray_ReadDigitalMaskFast()。 */
-#define CAR_MOTOR_NO_YAW_LINE_CONFIRM_SAMPLES  (2U)     /* 普通循迹mask连续出现2次才更新，约200us。 */
-#define CAR_MOTOR_NO_YAW_TURN_REARM_MS         (20U)    /* 出弯后两侧直角传感器释放20ms才允许下次强转。 */
-#define CAR_MOTOR_NO_YAW_RETURN_CONFIRM_SAMPLES (2U)    /* 右转S7/左转S1重新命中约200us后出弯。 */
-#define CAR_MOTOR_NO_YAW_TURN_APPROACH_MS      (0U)     /* 0=确认直角后立即进入强转。 */
-#define CAR_MOTOR_NO_YAW_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD (3) /* 出弯外轮目标。 */
-#define CAR_MOTOR_NO_YAW_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD (4) /* 出弯内轮目标。 */
-#define CAR_MOTOR_NO_YAW_TURN_EXIT_MS           (40U)   /* 出弯低速前进保持时间。 */
-#define CAR_MOTOR_NO_YAW_TURN_HOLD_MS          (5000U)  /* 强转超时：超过该时间仍未找到转向侧回线则停车。 */
-#define CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS  (0U)     /* 0=不因丢线停车，继续按搜线目标运行。 */
-
-/* Task1使用UART1/PB7板载JY61姿态角辅助减速；H7只服务云台反馈。 */
-#define CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100 (7500U)
+#if (CAR_MOTOR_NO_YAW_USE_SPEED_PID > 1U)
+#error "CAR_MOTOR_NO_YAW_USE_SPEED_PID must be 0 or 1"
+#endif
 
 /*
- * Task4 编码底盘 NO YAW：调试阶段逐项复用 Task1 的循迹参数。
- * 宏名与 Task1 保持相同后缀和单位，后续需要独立调参时可直接替换别名值。
+ * ---------- 直接PWM左右编码速度交叉同步总开关 ----------
+ * 0：关闭左右速度交叉，只保留基准PWM和灰度差速。
+ * 1：允许左右速度交叉，但仍只有S4压线、两轮非零同向时才实际生效。
+ * 该开关只影响直接PWM方案，不影响目标速度PID和直角强转闭环。
  */
-#define CAR_MOTOR_NO_YAW_TASK4_BASE_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_BASE_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_MIN_LINE_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_MIN_LINE_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_MAX_LINE_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_MAX_LINE_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_LINE_DEADBAND \
-    CAR_MOTOR_NO_YAW_LINE_DEADBAND
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_GAIN \
-    CAR_MOTOR_NO_YAW_TURN_GAIN
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_D_GAIN \
-    CAR_MOTOR_NO_YAW_TURN_D_GAIN
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_LIMIT_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_TURN_LIMIT_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_LEFT_TURN_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_MIN_ENCODER_GAP_COUNTS \
-    CAR_MOTOR_NO_YAW_TURN_MIN_ENCODER_GAP_COUNTS
-#define CAR_MOTOR_NO_YAW_TASK4_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_DEFAULT_SEARCH_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_APPROACH_MS \
-    CAR_MOTOR_NO_YAW_TURN_APPROACH_MS
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD \
-    CAR_MOTOR_NO_YAW_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_MS \
-    CAR_MOTOR_NO_YAW_TURN_EXIT_MS
-#define CAR_MOTOR_NO_YAW_TASK4_TURN_HOLD_MS \
-    CAR_MOTOR_NO_YAW_TURN_HOLD_MS
-#define CAR_MOTOR_NO_YAW_TASK4_LINE_LOST_TIMEOUT_MS \
-    CAR_MOTOR_NO_YAW_LINE_LOST_TIMEOUT_MS
+#define CAR_MOTOR_NO_YAW_ENABLE_CROSS_SYNC      (1U)
+
+#if (CAR_MOTOR_NO_YAW_ENABLE_CROSS_SYNC > 1U)
+#error "CAR_MOTOR_NO_YAW_ENABLE_CROSS_SYNC must be 0 or 1"
+#endif
+
+/*
+ * S1到S7按车头朝前时从左到右排列，S4为中心。
+ * 多个传感器同时命中时先求权重平均值，再乘100得到lineError。
+ * 权重为正会降低左轮、提高右轮，车体左转；负值方向相反。
+ * 两种算法、两个任务分别保存参数，禁止 Task4 再别名 Task1。
+ */
+#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+
+/*
+ * ---------- 第1套：Task1 灰度目标速度 + PID ----------
+ * 速度单位均为encoder count/20ms，与Task5 target命令相同。
+ * adjustedError = deadband(lineError)
+ * correction = (adjustedError * P_GAIN + errorDelta * D_GAIN) / 100
+ * leftTarget = clamp(BASE - correction, MIN, MAX)
+ * rightTarget = clamp(BASE + correction, MIN, MAX)
+ * 增大P会加大当前偏差修正；增大D会加强对偏差突变的抑制，也更容易放大毛刺。
+ */
+#define CAR_MOTOR_NO_YAW_TASK1_PID_BASE_SPEED_COUNTS_PER_PERIOD       (30)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_MIN_SPEED_COUNTS_PER_PERIOD         (-5)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_MAX_SPEED_COUNTS_PER_PERIOD        (35)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_LINE_DEADBAND                       (1) /* lineError单位，内部已乘100。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PID_GRAY_P_GAIN                         (3)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_GRAY_D_GAIN                         (0)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_CORRECTION_LIMIT_COUNTS            (30U) /* 单侧最大差速修正。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PID_SEARCH_SPEED_COUNTS_PER_PERIOD     (10) /* 启动即丢线且无上一拍时左轮搜线。 */
+/* S1/S7是最外侧，绝对权重最大；S4居中时不产生差速。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PID_S1_WEIGHT                          (13)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_S2_WEIGHT                           (11)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_S3_WEIGHT                           (5)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_S4_WEIGHT                           (0)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_S5_WEIGHT                          (-5)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_S6_WEIGHT                          (-11)
+#define CAR_MOTOR_NO_YAW_TASK1_PID_S7_WEIGHT                         (-13)
+
+/*
+ * ---------- 第2套：Task4 灰度目标速度 + PID ----------
+ * 字段、单位和计算公式与第1套完全相同，但数值独立，修改这里不会影响Task1。
+ */
+#define CAR_MOTOR_NO_YAW_TASK4_PID_BASE_SPEED_COUNTS_PER_PERIOD       (20)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_MIN_SPEED_COUNTS_PER_PERIOD         (-5)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_MAX_SPEED_COUNTS_PER_PERIOD        (35)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_LINE_DEADBAND                       (1)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_GRAY_P_GAIN                         (3)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_GRAY_D_GAIN                         (0)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_CORRECTION_LIMIT_COUNTS            (30U)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_SEARCH_SPEED_COUNTS_PER_PERIOD     (10)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_S1_WEIGHT                          (13)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_S2_WEIGHT                           (11)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_S3_WEIGHT                           (3)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_S4_WEIGHT                           (0)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_S5_WEIGHT                          (-3)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_S6_WEIGHT                          (-11)
+#define CAR_MOTOR_NO_YAW_TASK4_PID_S7_WEIGHT                         (-13)
+
+#else
+
+/*
+ * ---------- 第3套：Task1 直接PWM + 灰度 + 编码器交叉同步 ----------
+ * PWM单位为raw timer count；当前软件上限1200，因此BASE=300等于25%。
+ * grayCorrection = deadband(lineError) * GRAY_GAIN / 100
+ * leftCommand = BASE - grayCorrection；rightCommand = BASE + grayCorrection
+ * syncCorrection = (leftFeedback - rightFeedback) * SYNC_GAIN_Q1024 / 1024
+ * leftOutput = leftCommand - syncCorrection；rightOutput = rightCommand + syncCorrection
+ * SYNC只在S4确认压线、两轮命令同向且都非0时生效。S4离线时同步增益强制为0，
+ * 只保留灰度PWM差速。调大GRAY增强转向；调大SYNC增强居中直行时的同速能力，
+ * 但SYNC过大仍可能表现为左右PWM来回抢。
+ */
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_BASE_COUNTS                       (240)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_SEARCH_COUNTS                     (120) /* 启动即丢线且无上一拍时左轮PWM。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_LINE_DEADBAND                       (0) /* lineError单位，内部已乘100。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_GRAY_GAIN                           (2)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_GRAY_LIMIT_COUNTS                 (120U) /* 单侧灰度PWM修正上限。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_SYNC_GAIN_Q1024                  (3072L) /* 3072=每差1速度count修正3 PWM count。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_SYNC_LIMIT_COUNTS                 (120U) /* 单侧同步PWM修正上限。 */
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_S1_WEIGHT                          (11)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_S2_WEIGHT                           (5)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_S3_WEIGHT                           (3)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_S4_WEIGHT                           (0)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_S5_WEIGHT                          (-3)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_S6_WEIGHT                          (-5)
+#define CAR_MOTOR_NO_YAW_TASK1_PWM_S7_WEIGHT                         (-11)
+
+/*
+ * ---------- 第4套：Task4 直接PWM + 灰度 + 编码器交叉同步 ----------
+ * 字段、单位和计算公式与第3套完全相同，但数值独立，修改这里不会影响Task1。
+ */
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_BASE_COUNTS                       (240)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_SEARCH_COUNTS                     (120)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_LINE_DEADBAND                       (0)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_GRAY_GAIN                           (1)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_GRAY_LIMIT_COUNTS                 (120U)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_SYNC_GAIN_Q1024                  (3072L)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_SYNC_LIMIT_COUNTS                 (120U)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_S1_WEIGHT                          (11)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_S2_WEIGHT                           (5)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_S3_WEIGHT                           (3)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_S4_WEIGHT                           (0)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_S5_WEIGHT                          (-3)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_S6_WEIGHT                          (-5)
+#define CAR_MOTOR_NO_YAW_TASK4_PWM_S7_WEIGHT                         (-11)
+
+#endif
+
+/*
+ * ---------- Task1 强转和出弯参数 ----------
+ * 所有速度仍为count/20ms；负数表示反转。左转时左轮是内轮、右轮是外轮，
+ * 右转时相反。TURN_SPEED是刚入强转的外轮速度，TURN_NEAR_SPEED是接近
+ * TURN_TARGET_ANGLE时的外轮速度；两者之间按JY61已转角线性插值。
+ * TURN_MIN_ENCODER_GAP是两次强转间允许的最小平均累计编码距离。
+ * TURN_APPROACH是识别直角后继续沿上一拍命令前进的时间。
+ * TURN_EXIT的INNER/OUTER是回线后的短暂出弯速度；HOLD是找不到回线的安全超时。
+ * LINE_LOST_TIMEOUT=0表示普通循迹丢线后不自动停车。
+ */
+#define CAR_MOTOR_NO_YAW_TASK1_TURN_INNER_SPEED_COUNTS_PER_PERIOD     (-1)
+#define CAR_MOTOR_NO_YAW_TASK1_LEFT_TURN_SPEED_COUNTS_PER_PERIOD       (25)   //入弯道
+#define CAR_MOTOR_NO_YAW_TASK1_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD  (25)   //出弯道
+#define CAR_MOTOR_NO_YAW_TASK1_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD      (25)
+#define CAR_MOTOR_NO_YAW_TASK1_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD (25)
+#define CAR_MOTOR_NO_YAW_TASK1_TURN_MIN_ENCODER_GAP_COUNTS          (3500U)
+#define CAR_MOTOR_NO_YAW_TASK1_TURN_APPROACH_MS                       (100U)
+#define CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD (25)
+#define CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD (26)
+#define CAR_MOTOR_NO_YAW_TASK1_TURN_EXIT_MS                           (40U)
+#define CAR_MOTOR_NO_YAW_TASK1_TURN_HOLD_MS                         (10000U)
+#define CAR_MOTOR_NO_YAW_TASK1_LINE_LOST_TIMEOUT_MS                    (0U)
+
+/* Task4强转/出弯字段含义与Task1相同，但全部保存为独立数值。 */
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_INNER_SPEED_COUNTS_PER_PERIOD     (-1)
+#define CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_SPEED_COUNTS_PER_PERIOD       (30)
+#define CAR_MOTOR_NO_YAW_TASK4_LEFT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD  (30)
+#define CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_SPEED_COUNTS_PER_PERIOD      (30)
+#define CAR_MOTOR_NO_YAW_TASK4_RIGHT_TURN_NEAR_SPEED_COUNTS_PER_PERIOD (30)
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_MIN_ENCODER_GAP_COUNTS          (3500U)
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_APPROACH_MS                       (200U)
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_OUTER_SPEED_COUNTS_PER_PERIOD (25)
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_INNER_SPEED_COUNTS_PER_PERIOD (26)
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_EXIT_MS                           (40U)
+#define CAR_MOTOR_NO_YAW_TASK4_TURN_HOLD_MS                         (5000U)
+#define CAR_MOTOR_NO_YAW_TASK4_LINE_LOST_TIMEOUT_MS                    (0U)
+
+/*
+ * 两任务共用的灰度采样语义；这些值改变ISR判定时序，不属于四套调速参数。
+ * 左/右窗口表示S1+S2或S6+S7在该时间内都出现才判直角。
+ * LINE_CONFIRM要求同一完整mask连续出现指定次数才更新普通循迹输入。
+ * TURN_REARM要求外侧传感器稳定释放后才允许识别下一次直角。
+ * RETURN_CONFIRM要求转向侧最外传感器重新命中指定次数才进入出弯。
+ */
+#define CAR_MOTOR_NO_YAW_LEFT_TURN_WINDOW_MS   (100U)  /* 左侧S1/S2组合窗口。 */
+#define CAR_MOTOR_NO_YAW_RIGHT_TURN_WINDOW_MS  (100U)  /* 右侧S6/S7组合窗口。 */
+#define CAR_MOTOR_NO_YAW_TIMER_SAMPLE_US       (1000U) /* 灰度语义采样间隔，当前1ms。 */
+#define CAR_MOTOR_NO_YAW_LINE_CONFIRM_SAMPLES  (2U)    /* 普通mask连续确认次数。 */
+#define CAR_MOTOR_NO_YAW_TURN_REARM_MS         (20U)   /* 下一次直角检测重新开门时间。 */
+#define CAR_MOTOR_NO_YAW_RETURN_CONFIRM_SAMPLES (2U)   /* 最外传感器回线确认次数。 */
+#define CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100 (7500U) /* JY61外轮减速参考角75.00度。 */
 
 /*
  * Task4 云台 yaw 随动参数。
- * NEAR/MID/FAR 三组会按 Task4 当前位置切换：近/中/远/中循环。
+ * NEAR/MID/FAR三组只控制Task4强转yaw，按近/中/远/中循环；视觉KP不再切表。
  * BASE_SPEED_SPS：循迹期间固定的 yaw 基础速度；负数可反向。
  * STEPS：每次强转开始后，yaw 额外跟随的 STEP 数，方向由速度符号决定。
  * SPEED_SPS：强转期间单独使用的 yaw 目标速度。
@@ -193,7 +274,9 @@
 #define CAR_MISSION4_GIMBAL_YAW_BASE_SPEED_SPS       (0)   //一圈3200
 #define CAR_MISSION4_GIMBAL_LOST_SEARCH_SPEED_SPS    (0U)
 #define CAR_MISSION4_GIMBAL_LOST_SEARCH_AMPLITUDE_STEPS (0U)
-#define CAR_MISSION4_EXTRA_ENCODER_COUNTS             (200U)  //任务四编码值
+#define CAR_MISSION4_LASER_TO_LINE_DELAY_MS          (500U) /* 首帧发F后等待多久再启动底盘循迹。 */
+#define CAR_MISSION4_GIMBAL_CORRECTION_RELEASE_DELAY_MS (80U) /* 灰度确认回线后继续姿态矫正并屏蔽视觉的时间。 */
+#define CAR_MISSION4_EXTRA_ENCODER_COUNTS             (3500U)  //任务四编码值
 
 #define CAR_MISSION4_GIMBAL_NEAR_YAW_STEPS          (0U)  //强转步数
 #define CAR_MISSION4_GIMBAL_NEAR_YAW_SPEED_SPS      (400)

@@ -57,7 +57,7 @@ typedef struct {
     int16_t visionStageScaleX10;
     int16_t visionCommandX;
     int16_t visionCommandY;
-    uint8_t visionYawBoostActive;
+    uint16_t visionYawGainQ1024;
     uint8_t gimbalState;
     uint8_t gimbalHoldEnabled;
     uint8_t gimbalFeedForwardEnabled;

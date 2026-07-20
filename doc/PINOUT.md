@@ -6,16 +6,16 @@
 
 | 通道 | 信号 | MCU管脚 | 配置 |
 | --- | --- | --- | --- |
-| A / 左轮 | PWMA | PA22 | TIMA0 CCP1，20 kHz |
-| A / 左轮 | AIN1 | PA31 | GPIO输出 |
-| A / 左轮 | AIN2 | PA28 | GPIO输出 |
-| A / 左轮 | Encoder A | PB19 | GPIO输入，双边沿中断，内部上拉 |
-| A / 左轮 | Encoder B | PB20 | GPIO输入，双边沿中断，内部上拉 |
-| B / 右轮 | PWMB | PA12 | TIMA0 CCP3，20 kHz |
-| B / 右轮 | BIN1 | PA21 | GPIO输出 |
-| B / 右轮 | BIN2 | PA23 | GPIO输出 |
-| B / 右轮 | Encoder A | PA13 | GPIO输入，双边沿中断，内部上拉 |
-| B / 右轮 | Encoder B | PB24 | GPIO输入，双边沿中断，内部上拉 |
+| B / 左轮 | PWMB | PA12 | TIMA0 CCP3，20 kHz |
+| B / 左轮 | BIN1 | PA21 | GPIO输出 |
+| B / 左轮 | BIN2 | PA23 | GPIO输出 |
+| 左轮 | Encoder A | PA13 | GPIO输入，双边沿中断，内部上拉 |
+| 左轮 | Encoder B | PB24 | GPIO输入，双边沿中断，内部上拉 |
+| A / 右轮 | PWMA | PA22 | TIMA0 CCP1，20 kHz |
+| A / 右轮 | AIN1 | PA31 | GPIO输出 |
+| A / 右轮 | AIN2 | PA28 | GPIO输出 |
+| 右轮 | Encoder A | PB19 | GPIO输入，双边沿中断，内部上拉 |
+| 右轮 | Encoder B | PB20 | GPIO输入，双边沿中断，内部上拉 |
 
 编码器需要与主控共地，并确认输出电平不超过 3.3 V。若实物只有单路编码输出或为开漏输出，不能直接按当前正交解码配置使用。
 

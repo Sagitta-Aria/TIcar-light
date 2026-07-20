@@ -27,6 +27,8 @@ typedef struct {
     int16_t errorDeltaY;
     int16_t lastErrorX;
     int16_t lastErrorY;
+    int16_t visionFeedForwardSpsX;
+    int16_t visionFeedForwardSpsY;
     /* command 是输出给 motor.c 的有符号 SPS，绝对值越大 STEP 越快。 */
     int16_t commandX;
     int16_t commandY;
@@ -46,7 +48,8 @@ typedef struct {
     int8_t yawLostSearchDirection;
     uint8_t yawLostSearchEnabled;
     uint8_t yawLostSearchActive;
-    uint8_t visionYawBoostEnabled;
+    uint8_t visionTrackingEnabled;
+    uint16_t visionYawGainQ1024;
 } GimbalControl;
 
 static GimbalControl g_gimbal;
@@ -55,6 +58,32 @@ static void Gimbal_MarkVisionFresh(void)
 {
     g_gimbal.hasVision = 1U;
     g_gimbal.lastVisionTick = xTaskGetTickCount();
+}
+
+/*
+ * 清除全部视觉闭环状态，但保留Task4固定yaw和姿态补偿输入。
+ * 重新允许追踪后必须等待下一帧，禁止恢复转向前的旧误差。
+ */
+static void Gimbal_ClearVisionTrackingState(void)
+{
+    g_gimbal.target.x = 0;
+    g_gimbal.target.y = 0;
+    g_gimbal.current.x = 0;
+    g_gimbal.current.y = 0;
+    g_gimbal.errorX = 0;
+    g_gimbal.errorY = 0;
+    g_gimbal.errorDeltaX = 0;
+    g_gimbal.errorDeltaY = 0;
+    g_gimbal.lastErrorX = 0;
+    g_gimbal.lastErrorY = 0;
+    g_gimbal.visionFeedForwardSpsX = 0;
+    g_gimbal.visionFeedForwardSpsY = 0;
+    g_gimbal.hasVision = 0U;
+    g_gimbal.hasLastError = 0U;
+    g_gimbal.controlPending = 1U;
+    g_gimbal.axisActiveX = 0U;
+    g_gimbal.axisActiveY = 0U;
+    g_gimbal.yawLostSearchActive = 0U;
 }
 
 /*
@@ -153,6 +182,44 @@ static int16_t Gimbal_ComputeAxisCommand(int16_t error, int16_t errorDelta,
         (int16_t)commandAbs;
 }
 
+/* 把视觉反馈与趋势前馈合成后限制在当前参数和硬件共同允许的步频内。 */
+static int16_t Gimbal_ClampVisionAxisCommand(int32_t command,
+    uint16_t maxSpeedSps)
+{
+    uint16_t limit = maxSpeedSps;
+
+    if (limit > CAR_STEPPER_SPEED_MAX_SPS) {
+        limit = CAR_STEPPER_SPEED_MAX_SPS;
+    }
+    if (command > (int32_t)limit) {
+        return (int16_t)limit;
+    }
+    if (command < -(int32_t)limit) {
+        return (int16_t)(-(int32_t)limit);
+    }
+    return Gimbal_ClampInt16(command);
+}
+
+/*
+ * 用滤波后的相邻帧误差趋势估算视觉速度前馈。
+ * 该项绕过位置死区，用于目标持续移动时提前给出少量同向步频。
+ */
+static int16_t Gimbal_ComputeVisionFeedForward(int16_t errorDelta,
+    uint16_t kff, uint16_t gainScale, uint16_t maxSpeedSps)
+{
+    int32_t command;
+
+    if ((errorDelta == 0) || (kff == 0U)) {
+        return 0;
+    }
+    if (gainScale == 0U) {
+        gainScale = 1U;
+    }
+    command = ((int32_t)errorDelta * (int32_t)kff) /
+        (int32_t)gainScale;
+    return Gimbal_ClampVisionAxisCommand(command, maxSpeedSps);
+}
+
 /* 作用：根据配置宏对某个云台轴的方向取反。 */
 static int16_t Gimbal_ApplyReverse(int16_t command, uint8_t reverse)
 {
@@ -170,23 +237,28 @@ static int16_t Gimbal_ClampCommand(int32_t command)
     return Gimbal_ClampInt16(command);
 }
 
-/* 高阶段只放大视觉yaw，不放大底座前馈或H7姿态补偿。 */
-static int16_t Gimbal_ApplyVisionYawBoost(int16_t command)
+/*
+ * 作用：把视觉长度拟合出的K只乘到视觉yaw命令。
+ * 使用场景：视觉PD完成自身限幅后、与固定yaw/H7补偿合成前。
+ * 禁止用于：底座前馈、H7姿态补偿或pitch命令，避免改变跟车环增益。
+ */
+static int16_t Gimbal_ApplyVisionYawGain(int16_t command)
 {
     int32_t scaled;
 
-    if ((g_gimbal.visionYawBoostEnabled == 0U) || (command == 0)) {
+    if ((g_gimbal.visionYawGainQ1024 ==
+            GIMBAL_VISION_YAW_GAIN_Q1024_SCALE) || (command == 0)) {
         return command;
     }
 
     scaled = (int32_t)command *
-        (int32_t)GIMBAL_VISION_YAW_BOOST_NUMERATOR;
+        (int32_t)g_gimbal.visionYawGainQ1024;
     if (scaled > 0) {
-        scaled += (int32_t)GIMBAL_VISION_YAW_BOOST_DENOMINATOR / 2L;
+        scaled += (int32_t)GIMBAL_VISION_YAW_GAIN_Q1024_SCALE / 2L;
     } else {
-        scaled -= (int32_t)GIMBAL_VISION_YAW_BOOST_DENOMINATOR / 2L;
+        scaled -= (int32_t)GIMBAL_VISION_YAW_GAIN_Q1024_SCALE / 2L;
     }
-    scaled /= (int32_t)GIMBAL_VISION_YAW_BOOST_DENOMINATOR;
+    scaled /= (int32_t)GIMBAL_VISION_YAW_GAIN_Q1024_SCALE;
     return Gimbal_ClampCommand(scaled);
 }
 
@@ -268,6 +340,8 @@ static void Gimbal_ApplyLostTargetSearch(void)
         (int16_t)CAR_MISSION4_GIMBAL_LOST_SEARCH_SPEED_SPS;
     commandX = Gimbal_ClampCommand((int32_t)searchCommand +
         (int32_t)g_gimbal.yawAttitudeCompensationSps);
+    g_gimbal.visionFeedForwardSpsX = 0;
+    g_gimbal.visionFeedForwardSpsY = 0;
     g_gimbal.commandX = commandX;
     g_gimbal.commandY = 0;
     Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
@@ -285,6 +359,8 @@ static void Gimbal_ApplyYawSupplementsOnly(void)
 {
     int16_t commandX = Gimbal_CombineYawCommand(0);
 
+    g_gimbal.visionFeedForwardSpsX = 0;
+    g_gimbal.visionFeedForwardSpsY = 0;
     g_gimbal.commandX = commandX;
     g_gimbal.commandY = 0;
     Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
@@ -350,7 +426,18 @@ static void Gimbal_ApplyControl(void)
         config->kpY, config->kdY, config->gainScale, config->minSpeedY,
         config->maxSpeedY, &g_gimbal.axisActiveY);
 
-    commandX = Gimbal_ApplyVisionYawBoost(commandX);
+    g_gimbal.visionFeedForwardSpsX = Gimbal_ComputeVisionFeedForward(
+        g_gimbal.errorDeltaX, config->kffX, config->gainScale,
+        config->maxSpeedX);
+    g_gimbal.visionFeedForwardSpsY = Gimbal_ComputeVisionFeedForward(
+        g_gimbal.errorDeltaY, config->kffY, config->gainScale,
+        config->maxSpeedY);
+    commandX = Gimbal_ClampVisionAxisCommand((int32_t)commandX +
+        (int32_t)g_gimbal.visionFeedForwardSpsX, config->maxSpeedX);
+    commandY = Gimbal_ClampVisionAxisCommand((int32_t)commandY +
+        (int32_t)g_gimbal.visionFeedForwardSpsY, config->maxSpeedY);
+
+    commandX = Gimbal_ApplyVisionYawGain(commandX);
     commandX = Gimbal_CombineYawCommand(commandX);
     commandY = Gimbal_ApplyReverse(commandY, CAR_GIMBAL_PITCH_REVERSE);
     commandY = Gimbal_LimitPitchCommand(commandY);
@@ -380,6 +467,8 @@ void Gimbal_Init(void)
     g_gimbal.errorDeltaY = 0;
     g_gimbal.lastErrorX = 0;
     g_gimbal.lastErrorY = 0;
+    g_gimbal.visionFeedForwardSpsX = 0;
+    g_gimbal.visionFeedForwardSpsY = 0;
     g_gimbal.commandX = 0;
     g_gimbal.commandY = 0;
     g_gimbal.yawFeedForwardSps = 0;
@@ -396,7 +485,8 @@ void Gimbal_Init(void)
     g_gimbal.yawLostSearchDirection = 1;
     g_gimbal.yawLostSearchEnabled = 0U;
     g_gimbal.yawLostSearchActive = 0U;
-    g_gimbal.visionYawBoostEnabled = 0U;
+    g_gimbal.visionTrackingEnabled = 1U;
+    g_gimbal.visionYawGainQ1024 = GIMBAL_VISION_YAW_GAIN_Q1024_SCALE;
     Gimbal_Stop();
 }
 
@@ -441,6 +531,23 @@ uint8_t Gimbal_IsEnabled(void)
     return g_gimbal.enabled;
 }
 
+void Gimbal_SetVisionTrackingEnabled(uint8_t enabled)
+{
+    uint8_t nextEnabled = (enabled != 0U) ? 1U : 0U;
+
+    if (nextEnabled == g_gimbal.visionTrackingEnabled) {
+        return;
+    }
+    g_gimbal.visionTrackingEnabled = nextEnabled;
+    Gimbal_ClearVisionTrackingState();
+    RtosApp_NotifyGimbal();
+}
+
+uint8_t Gimbal_IsVisionTrackingEnabled(void)
+{
+    return g_gimbal.visionTrackingEnabled;
+}
+
 uint8_t Gimbal_NeedsTimeoutService(void)
 {
     return (uint8_t)(((g_gimbal.enabled != 0U) &&
@@ -459,6 +566,9 @@ void Gimbal_SetTarget(int16_t x, int16_t y)
 /* 作用：单独更新当前识别点，并标记已有视觉数据，当前单位为 0.1 像素。 */
 void Gimbal_SetCurrent(int16_t x, int16_t y)
 {
+    if (g_gimbal.visionTrackingEnabled == 0U) {
+        return;
+    }
     g_gimbal.current.x = x;
     g_gimbal.current.y = y;
     Gimbal_MarkVisionFresh();
@@ -469,6 +579,9 @@ void Gimbal_SetCurrent(int16_t x, int16_t y)
 void Gimbal_UpdateFromVision(int16_t targetX, int16_t targetY,
     int16_t currentX, int16_t currentY)
 {
+    if (g_gimbal.visionTrackingEnabled == 0U) {
+        return;
+    }
     /*
      * 这里只更新控制输入和误差，不直接等待或阻塞。
      * 真正的 STEP 命令在 Gimbal_Task() 被通知后输出。
@@ -500,6 +613,10 @@ void Gimbal_UpdateFromCameraError(int16_t targetMinusCurrentX,
     const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
     int16_t adjustedErrorX;
     int16_t adjustedErrorY;
+
+    if (g_gimbal.visionTrackingEnabled == 0U) {
+        return;
+    }
 
     /*
      * 新视觉脚本发的是 160-x,120-y，已经是 target - current。
@@ -611,14 +728,20 @@ void Gimbal_SetYawAttitudeCompensation(int16_t speedSps)
     g_gimbal.controlPending = 1U;
 }
 
-void Gimbal_SetVisionYawBoostEnabled(uint8_t enabled)
+/*
+ * 写入本帧视觉yaw拟合增益；仅视觉解析任务调用。函数只更新控制状态，
+ * 不直接访问电机，真正输出仍由同一高优先级Gimbal任务完成。
+ */
+void Gimbal_SetVisionYawGainQ1024(uint16_t gainQ1024)
 {
-    g_gimbal.visionYawBoostEnabled = (enabled != 0U) ? 1U : 0U;
+    g_gimbal.visionYawGainQ1024 = (gainQ1024 == 0U) ?
+        GIMBAL_VISION_YAW_GAIN_Q1024_SCALE : gainQ1024;
 }
 
-uint8_t Gimbal_IsVisionYawBoostEnabled(void)
+/* 返回当前视觉yaw拟合增益，供调试显示；不包含姿态补偿增益。 */
+uint16_t Gimbal_GetVisionYawGainQ1024(void)
 {
-    return g_gimbal.visionYawBoostEnabled;
+    return g_gimbal.visionYawGainQ1024;
 }
 
 void Gimbal_SetLostTargetSearchEnabled(uint8_t enabled)
@@ -641,28 +764,11 @@ uint8_t Gimbal_IsLostTargetSearchActive(void)
     return g_gimbal.yawLostSearchActive;
 }
 
-uint8_t Gimbal_IsYawTrackingActive(void)
-{
-    const StaticConfigGimbalTask *config = StaticConfig_GetActiveGimbal();
-    uint16_t threshold = (g_gimbal.axisActiveX != 0U) ?
-        config->deadbandX : config->restartDeadbandX;
-
-    if (g_gimbal.yawLostSearchActive != 0U) {
-        return 1U;
-    }
-    if ((g_gimbal.enabled == 0U) || (g_gimbal.hasVision == 0U)) {
-        return (uint8_t)((g_gimbal.yawFeedForwardSps != 0) ? 1U : 0U);
-    }
-    if (threshold < config->deadbandX) {
-        threshold = config->deadbandX;
-    }
-    return (uint8_t)(((uint32_t)Gimbal_Abs16(g_gimbal.errorX) > threshold) ||
-        (g_gimbal.yawFeedForwardSps != 0));
-}
-
 /* 作用：停止云台两个轴，不改变底盘速度。 */
 void Gimbal_Stop(void)
 {
+    g_gimbal.visionFeedForwardSpsX = 0;
+    g_gimbal.visionFeedForwardSpsY = 0;
     g_gimbal.commandX = 0;
     g_gimbal.commandY = 0;
     Gimbal_SetAxis(MOTOR_GIMBAL_1, 0);
@@ -691,4 +797,15 @@ int16_t Gimbal_GetCommandX(void)
 int16_t Gimbal_GetCommandY(void)
 {
     return g_gimbal.commandY;
+}
+
+/* 返回最近一次视觉误差趋势产生的前馈，单位为 SPS，不含姿态补偿。 */
+int16_t Gimbal_GetVisionFeedForwardX(void)
+{
+    return g_gimbal.visionFeedForwardSpsX;
+}
+
+int16_t Gimbal_GetVisionFeedForwardY(void)
+{
+    return g_gimbal.visionFeedForwardSpsY;
 }
