@@ -98,7 +98,19 @@
 #define PIN_UART1_RX                    GPIO_JY61P_RX_PIN
 #define PIN_UART1_RX_IOMUX              GPIO_JY61P_IOMUX_RX
 
-/* HC-05 UART follows the selected board header and must be wired crossed. */
+/* Tianmeng UART2 is the competition H7 control/display link. */
+#if CAR_LIBRARY_BOARD_IS_TIANMENG
+#define PIN_H7_CONTROL_UART_TX_PORT       GPIOB
+#define PIN_H7_CONTROL_UART_TX            DL_GPIO_PIN_15
+#define PIN_H7_CONTROL_UART_TX_IOMUX      IOMUX_PINCM32
+#define PIN_H7_CONTROL_UART_TX_FUNC       IOMUX_PINCM32_PF_UART2_TX
+#define PIN_H7_CONTROL_UART_RX_PORT       GPIOB
+#define PIN_H7_CONTROL_UART_RX            DL_GPIO_PIN_16
+#define PIN_H7_CONTROL_UART_RX_IOMUX      IOMUX_PINCM33
+#define PIN_H7_CONTROL_UART_RX_FUNC       IOMUX_PINCM33_PF_UART2_RX
+#endif
+
+/* Legacy HC-05 UART mapping retained for non-competition builds. */
 #if CAR_LIBRARY_BOARD_IS_TIANMENG
 #define PIN_BLUETOOTH_UART_TX_PORT       GPIOB
 #define PIN_BLUETOOTH_UART_TX            DL_GPIO_PIN_15

@@ -12,14 +12,14 @@ D:\Ti\m0-light-rtos
 
 ## 产品 Profile 与复用库
 
-工程用显式编译期 Profile 区分两种产品：`Gmr` 是当前地猛星底盘/JY61调试版，
+工程用显式编译期 Profile 区分两种产品：`Gmr` 是当前天猛星赛题控制台，
 `Full` 是视觉云台完整比赛版。`config/profile_select.h`定义模式，两个产品的默认
 功能组合分别在`config/profiles/profile_gmr.h`和`profile_full.h`；
 `config/library_config.h`只定义可选方法、派生开关和依赖检查。
 
-当前Gmr配置为：本地SSD1306 OLED开启，H7 LCD关闭，H7 IMU关闭；UART0
-PA10/PA11专供Task2/Task5电脑调参，UART1保留板载JY61，UART3 PB2/PB3接外部
-M0姿态模块（115200、8-N-1）。
+当前Gmr固定使用天猛星板：两路编码电机和七路数字灰度保留；UART2 PB15/PB16
+连接H7并输出LCD文本、接收任务命令；UART3 PB2/PB3连接外部M0姿态模块；
+本地SSD1306 OLED显示姿态。UART0日志、UART1 JY61、蓝牙和云台均默认关闭。
 完整的配置归属、UART资源矩阵和新增任务步骤见`doc/PROFILES.md`，库方法目录见
 `doc/COMPETITION_LIBRARY.md`。
 
@@ -27,28 +27,16 @@ M0姿态模块（115200、8-N-1）。
 Full两个Profile均默认关闭。接线、构建选择和`IMU660RX_Read()`接口见
 `doc/IMU660RX.md`。
 
-工程已加入两车HC-05通信协议核心。主车模块地址为`002506010DD3`，从车模块
-地址为`98DA50030177`，主机持久绑定`98da,50,030177`。天猛星使用UART2的
-PB15/PB16，地猛星使用UART3的PB2/PB3，固件均为115200、8-N-1；地猛星启用蓝牙时
-UART3不再接外部M0姿态。角色构建、交叉接线和协议见
-`doc/BLUETOOTH_CAR_LINK.md`。
+旧两车HC-05协议和调参代码仍保留在仓库历史基线中，但不进入当前Gmr构建。
 
-Gmr菜单由`app/task_registry.c`集中声明，共6项：
+Gmr菜单由`app/task_registry.c`集中声明，当前只有1项：
 
 | 菜单项 | 实际入口 |
 | --- | --- |
-| Task 1 Drive | Mission1，底盘开环/闭环直行测试 |
-| Task 2 PID | Mission2，左右编码电机FF/PI标定 |
-| Task 3 Encoder | Mission3，编码器累计计数检查 |
-| Task 4 Line | Mission4，数字灰度循迹 |
-| Task 5 M0 Yaw | Mission5，外部M0姿态上电航向保持与左右轮差速修正 |
-| Task 6 BT Replay | Mission6，主车循迹一圈并发送实际编码增量；从车收到OVER后按距离闭环无灰度回放 |
+| Attitude | Mission1，被动显示外部M0的连续yaw、yaw角速度、序号和帧统计；不会驱动电机 |
 
-两车必须都进入`Task 6 BT Replay`。建议先让地猛星从车进入任务六等待，再让
-天猛星主车进入；主车收到从车`READY/START_ACK`后才启动循迹。主车每50 ms
-记录并发送一组左右轮实际编码增量，完成4次转向后发送`OVER`；从车在完整校验
-全部指令前保持停车，随后累计左右位置目标，通过距离外环和自身编码器速度PI
-逐段回放，不读取灰度传感器。新旧任务六协议不兼容，两车必须使用同一版固件。
+本地K2或H7命令`@START=1\n`启动任务，长按K2或H7命令`@STOP\n`停止。
+完整接口和当前保留资源见`doc/GMR_TIANMENG_CONSOLE.md`。
 
 ## Full Profile 比赛任务
 
@@ -78,12 +66,12 @@ Task2/Task3/Task7不再显示距离子菜单，在主菜单按K2直接启动；�
 
 | RTOS任务 | 优先级 | 唤醒方式 | 职责 |
 | --- | ---: | --- | --- |
-| CarControl | 6 | 严格10 ms；灰度语义事件可提前唤醒 | Full Task1/Task4和GMR Task6主车采灰度、计算目标；从车按编码距离轨迹运行位置外环，再执行速度PI和更新PWM |
+| CarControl | 6 | 严格10 ms；灰度语义事件可提前唤醒 | 维护底盘闭环；Gmr姿态任务期间挂起并保持电机停车 |
 | Gimbal | 6 | 绝对10 ms截止点；完整视觉帧可提前唤醒 | 维护H7反馈与JY61前馈、解析视觉，并运行Task4姿态辅助或Task8独占姿态控制 |
 | Watchdog | 可配置 | 周期可配置 | 检查UI任务心跳；超时后停止喂WWDT0，由硬件复位整机 |
 | Input | 4 | GPIO按键边沿；按住期间 1 ms | 按键消抖、长按计时并向静态事件队列投递事件 |
-| Mission | 3 | 任务/视觉通知；Task3连续搜索和Task4非循迹阶段 1 ms | 处理比赛状态切换及非底盘周期流程；循迹和蓝牙回放交给CarControl |
-| Comm | 2 | 5 ms | UART Link状态、Task5串口命令和低频日志维护 |
+| Mission | 3 | 状态事件通知 | 处理任务启动、停止和状态切换 |
+| Comm | 2 | 5 ms | Gmr维护H7命令与外部M0姿态；Full维护原通信链路 |
 | UI | 1 | UI变化通知；20 ms板级维护 | 刷新所选H7 LCD/OLED后端；状态灯保持周期维护 |
 
 关键调度配置：
@@ -92,11 +80,11 @@ Task2/Task3/Task7不再显示距离子菜单，在主菜单按K2直接启动；�
 - tick 为 1 kHz，tickless idle 关闭；空闲任务不让 MCU 进入睡眠。
 - 全部任务、栈和事件队列静态分配；动态内存关闭。
 - `vTaskDelete()` 关闭，任务不会在运行期被删除。
-- 显示由`CAR_LIBRARY_H7_LCD_METHOD`和`CAR_LIBRARY_LOCAL_OLED_METHOD`独立选择；当前两个Profile都默认只开本地OLED，H7 LCD关闭。
+- Gmr同时开启H7 LCD文本后端和本地OLED；Full默认只开本地OLED。
 - Watchdog参数集中在`config/board_config.h`的`CAR_WATCHDOG_*`宏；当前`CAR_ENABLE_UI_WATCHDOG=0`关闭监督。启用后，UI约2秒无心跳会停止喂狗，WWDT0再经过约1秒复位整机，调试器暂停内核时同步暂停。
 - WWDT0违规在MSPM0G3507上产生SYSRST，不会给外部H7断电。启动日志会输出`reset cause raw=`及WWDT0、CPU LOCKUP、BOR等原因。
-- Gimbal任务保留绝对10 ms姿态截止点。直线阶段完整视觉帧会立即抢占并更新云台；Task4进入`TURN_LEFT`/`TURN_RIGHT`后，无论有无视觉帧，H7/JY61姿态补偿都严格每10 ms执行一次。转向期间及灰度回线后的80 ms释放延时内，视觉通知只解析并丢弃控制输入，不会额外触发姿态计算，也不会积压旧帧；延时结束后关闭姿态矫正，从下一帧恢复抢占式视觉追踪。GMR Task1/Task6没有云台命令时STEP定时器保持停止。Task2/Task3/Task7/Task8进入后停车并挂起CarControl；Task8不启动视觉。GMR Task6保留CarControl，主车记录实际编码增量，从车每10ms运行距离外环和编码器速度内环。
-- TIMG6按需承担20 kHz云台STEP；TIMG0只在Full Task1/Task4或GMR Task6主车循迹时承担10 kHz灰度采样，从车回放时不启用。TIMA0底盘20 kHz PWM不产生周期中断。
+- Full的Gimbal任务保留绝对10 ms姿态截止点；Gmr不创建Gimbal任务，也不初始化云台STEP资源。
+- Full按需使用TIMG6的20 kHz云台STEP和TIMG0的10 kHz灰度采样；当前Gmr不启动这两个定时器。TIMA0底盘20 kHz PWM不产生周期中断。
 - UART3 ISR只在收到完整视觉行后唤醒Gimbal立即消费最新帧；固定10 ms姿态矫正截止点保持不变，不累积过期控制帧。
 - 普通循迹灰度在10 ms控制周期边界生成一次左右目标。TIMG0仍每100 us做语义快采样，不把原始采样逐条入队；确认左/右直角或转向侧回线时提前唤醒CarControl。入弯时若有有效UART1板载JY61姿态帧就锁存航向供粗略减速参考，编码器读清、角度更新和PI仍留在固定10 ms边界。
 - 普通循迹使用100 us快采样形成的确认mask；同一S1～S7完整mask连续出现2次后才更新，单次毛刺继续沿用上一确认值。
@@ -107,7 +95,7 @@ Task2/Task3/Task7不再显示距离子菜单，在主菜单按K2直接启动；�
 
 | 通道 | PWM | 方向1 | 方向2 | 编码器A | 编码器B |
 | --- | --- | --- | --- | --- | --- |
-| 左轮 / B | PA12 | PA21 | PA23 | PA13 | PB24 |
+| 左轮 / B | PA12 | PA29 | PA30 | PA13 | PB24 |
 | 右轮 / A | PA22 | PA31 | PA28 | PB19 | PB20 |
 
 - TIMA0 CH1/CH3 输出 20 kHz PWM。
@@ -159,7 +147,7 @@ PA11接H7 PE8接收姿态，PA10接H7 PE7发送LCD命令和日志。H7只处理`
 
 七路灰度为数字输入，高电平表示有效：S1～S7 对应 PA15、PA16、PA17、PA24、PA25、PA26、PA27。
 
-TIMG0 以 10 kHz（100 us）进入灰度采样中断；云台 STEP 由独立的 TIMG6 以 20 kHz 调度。`MotorNoYaw_TimerSample()` 只读取 GPIO、更新小计数器和置事件标志；仅当形成右转/回线语义事件时使用 ISR-safe Task Notification 唤醒 CarControl，不调用 OLED 或日志，也不会在不足10 ms时提前清零编码器窗口。
+当前Gmr只初始化七路数字灰度GPIO，不启动TIMG0快采样；新增正式循迹任务后再按任务需求启用采样定时器。Full仍保留原10 kHz灰度快路径和20 kHz云台STEP调度。
 
 ## 构建
 
@@ -169,23 +157,16 @@ TIMG0 以 10 kHz（100 us）进入灰度采样中断；云台 STEP 由独立的 
 Set-Location D:\Ti\m0-light-rtos
 .\tools\build_ccs.ps1 -Profile Gmr -Clean
 .\tools\build_ccs.ps1 -Profile Full -Clean
-.\tools\build_ccs.ps1 -Profile Gmr -Board Tianmeng -BluetoothRole Master -Clean
-.\tools\build_ccs.ps1 -Profile Gmr -Board Dimeng -BluetoothRole Slave -Clean
-.\tools\build_ccs.ps1 -Profile Gmr -Board Tianmeng -BluetoothRole Master -Jy61 Disabled -Log Disabled -Clean
 ```
 
 输出文件：
 
 ```text
-D:\Ti\m0-light-rtos\Debug\profile-gmr-tianmeng\m0-light-rtos.out
+D:\Ti\m0-light-rtos\Debug\profile-gmr-tianmeng-no-jy61-no-log\m0-light-rtos.out
 D:\Ti\m0-light-rtos\Debug\profile-full-tianmeng\m0-light-rtos.out
-D:\Ti\m0-light-rtos\Debug\profile-gmr-tianmeng-bt-master\m0-light-rtos.out
-D:\Ti\m0-light-rtos\Debug\profile-gmr-dimeng-bt-slave\m0-light-rtos.out
-D:\Ti\m0-light-rtos\Debug\profile-gmr-tianmeng-bt-master-no-jy61-no-log\m0-light-rtos.out
 ```
 
-`-Jy61 Disabled`会跳过UART1初始化和中断，`-Log Disabled`会同时关闭UART0日志
-收发；两项默认均为`Enabled`，普通构建行为不变。
+Gmr默认关闭JY61和UART0日志，并拒绝地猛星或蓝牙组合；Full仍默认启用JY61和日志。
 
 也可以在 CCS Theia 中导入 `D:\Ti\m0-light-rtos`。目标芯片为 MSPM0G3507，默认目标配置为 `targetConfigs\MSPM0G3507_XDS110.ccxml`。
 
@@ -193,13 +174,11 @@ D:\Ti\m0-light-rtos\Debug\profile-gmr-tianmeng-bt-master-no-jy61-no-log\m0-light
 
 ## 首次上板顺序
 
-1. 断开电机动力电源，只确认所选显示后端、按键、UART和任务菜单。
-2. 保持电机动力断开，分别确认UART0/PA11的H7反馈和UART1/PB7的JY61前馈持续刷新；手动跨过H7 yaw的±180度检查连续展开。
-3. 架空左右轮，先用低限幅验证 A/B 电机方向和编码器正负号。
-4. 标定每侧 `FF`，再调 `KP/KI`，最后提高目标速度。
-5. 接地先单独测试一个右弯，确认S4先离线再重新连续命中时才出弯；同时断开UART1/PB7的JY61，验证小车仍会靠灰度完成转弯，不会半途停车。
-6. 最后测 Task1 一圈，再测 Task2～4。
+1. 断开电机动力电源，确认OLED出现唯一`Attitude`入口。
+2. 确认H7 UART2交叉接线，并验证H7能收到LCD文本、发出启动/停止命令。
+3. 接入外部M0 UART3，确认OLED的yaw、角速度、序号和帧计数持续变化。
+4. 架空左右轮，确认姿态任务全程不会驱动电机；正式运动任务加入后再做电机标定。
 
 完整接线见 `doc/PINOUT.md`。
 
-Task5 串口命令、公式和完整标定步骤见 `doc/CONTROL_TUNING.md`。
+旧底盘调参资料仍保留在`doc/CONTROL_TUNING.md`，但不属于当前唯一任务。

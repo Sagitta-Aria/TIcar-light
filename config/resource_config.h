@@ -3,6 +3,7 @@
 
 #include "bluetooth_config.h"
 #include "board_config.h"
+#include "pin_map.h"
 #include "ti_msp_dl_config.h"
 
 /* 电脑调试口在两个Profile中都固定使用UART0 PA10/PA11。 */
@@ -53,20 +54,21 @@
 #define CAR_M0_ATTITUDE_UART_RX_IOMUX   GPIO_Exchange_IOMUX_RX
 #define CAR_M0_ATTITUDE_UART_RX_IOMUX_FUNC GPIO_Exchange_IOMUX_RX_FUNC
 
-/*
- * H7资源随产品Profile绑定：完整产品使用UART0；旧GMR映射仍保留用于冲突检查。
- * 业务驱动只使用CAR_H7_UART_*，不得自行判断Profile后硬编码UART实例。
- */
+/* H7 uses independent UART2 on Tianmeng GMR and UART0 on Full. */
 #if CAR_PROFILE_IS_GMR
+#if !CAR_LIBRARY_BOARD_IS_TIANMENG
+#error "Competition GMR profile requires the Tianmeng board"
+#endif
 #define CAR_H7_UART_REQUIRED \
     (CAR_LIBRARY_H7_IMU_ENABLED || CAR_LIBRARY_H7_LCD_ENABLED)
-#define CAR_H7_UART_INST                Exchange_INST
-#define CAR_H7_UART_INST_INT_IRQN       Exchange_INST_INT_IRQN
-#define CAR_H7_UART_BAUD_RATE           Exchange_BAUD_RATE
-#define CAR_H7_UART_TX_PORT             GPIO_Exchange_TX_PORT
-#define CAR_H7_UART_TX_PIN              GPIO_Exchange_TX_PIN
-#define CAR_H7_UART_RX_PORT             GPIO_Exchange_RX_PORT
-#define CAR_H7_UART_RX_PIN              GPIO_Exchange_RX_PIN
+#define CAR_H7_UART_INST                UART2
+#define CAR_H7_UART_INST_INT_IRQN       UART2_INT_IRQn
+#define CAR_H7_UART_BAUD_RATE           (115200U)
+#define CAR_H7_UART_FREQUENCY           (32000000U)
+#define CAR_H7_UART_TX_PORT             PIN_H7_CONTROL_UART_TX_PORT
+#define CAR_H7_UART_TX_PIN              PIN_H7_CONTROL_UART_TX
+#define CAR_H7_UART_RX_PORT             PIN_H7_CONTROL_UART_RX_PORT
+#define CAR_H7_UART_RX_PIN              PIN_H7_CONTROL_UART_RX
 #else
 #define CAR_H7_UART_REQUIRED \
     (CAR_LIBRARY_H7_IMU_ENABLED || CAR_LIBRARY_H7_LCD_ENABLED)
@@ -77,10 +79,6 @@
 #define CAR_H7_UART_TX_PIN              GPIO_LogUart_TX_PIN
 #define CAR_H7_UART_RX_PORT             GPIO_LogUart_RX_PORT
 #define CAR_H7_UART_RX_PIN              GPIO_LogUart_RX_PIN
-#endif
-
-#if (CAR_M0_ATTITUDE_UART_REQUIRED && CAR_H7_UART_REQUIRED)
-#error "GMR M0 attitude and H7 cannot share UART3 PB2/PB3"
 #endif
 
 #if (CAR_BLUETOOTH_USES_UART3 && CAR_H7_UART_REQUIRED)

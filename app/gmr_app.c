@@ -5,24 +5,15 @@
 #include "app.h"
 
 #include "board.h"
-#include "board_config.h"
-#include "bluetooth_service.h"
 #include "car_display.h"
 #include "delay.h"
-#include "gmr_bluetooth_mission.h"
-#include "gmr_yaw_control.h"
-#include "h7_gyro_link.h"
-#if CAR_JY61P_ENABLED
-#include "jy61p.h"
-#endif
+#include "h7_control_uart.h"
 #include "key.h"
-#include "log_uart.h"
 #include "m0_attitude_link.h"
 #include "m0_attitude_uart.h"
 #include "menu.h"
-#include "motor_no_yaw.h"
 #include "resource_config.h"
-#include "tuning_console.h"
+#include "rtos_app.h"
 
 static uint8_t g_inputHadEvent;
 
@@ -35,19 +26,10 @@ static CarEvent App_HandleKeyEvent(KeyEvent event)
     }
     state = StateMachine_GetState();
     if (event == KEY_EVENT_2_LONG) {
-        if (state == CAR_STATE_MENU) {
-            (void)Menu_Back();
-            return CAR_EVENT_NONE;
-        }
         return (state == CAR_STATE_MISSION) ? CAR_EVENT_STOP : CAR_EVENT_MENU;
     }
-    if (state == CAR_STATE_MENU) {
-        if (event == KEY_EVENT_1) {
-            Menu_Next();
-        } else if (event == KEY_EVENT_2) {
-            return Menu_Confirm();
-        }
-        return CAR_EVENT_NONE;
+    if ((state == CAR_STATE_MENU) && (event == KEY_EVENT_2)) {
+        return Menu_Confirm();
     }
     if (((state == CAR_STATE_STOP) || (state == CAR_STATE_FINISHED) ||
         (state == CAR_STATE_ERROR)) && (event == KEY_EVENT_2)) {
@@ -58,25 +40,15 @@ static CarEvent App_HandleKeyEvent(KeyEvent event)
 
 void App_Init(void)
 {
-    Board_ShowBootProgress("GMR", "UART OK", "Motor OK", "APP...", "");
-    BluetoothService_Init();
-#if CAR_JY61P_ENABLED
-    JY61P_Init();
-#endif
-#if CAR_LIBRARY_H7_IMU_ENABLED
-    H7GyroLink_Init();
-#endif
+    Board_ShowBootProgress("GMR Tianmeng", "H7 UART2", "M0 UART3",
+        "APP...", "");
     M0AttitudeLink_Init();
 #if CAR_M0_ATTITUDE_UART_REQUIRED
     M0AttitudeUart_Init();
 #endif
-    GmrYawControl_Init();
-    MotorNoYaw_Init();
-    GmrBluetoothMission_Init();
     Menu_Init();
     StateMachine_Init();
     CarDisplay_Clear();
-    CarDisplay_Refresh();
     Menu_Task(StateMachine_GetState());
 }
 
@@ -97,14 +69,17 @@ uint8_t App_InputHadEvent(void)
 
 void App_CommStep(void)
 {
-    BluetoothService_Task(5U);
-    GmrBluetoothMission_CommTask(5U);
+    H7ControlCommand command;
+
 #if CAR_M0_ATTITUDE_UART_REQUIRED
     M0AttitudeUart_Task(5U);
 #endif
-    GmrYawControl_Observe();
-    LogUart_Task();
-    TuningConsole_Task();
+    command = H7ControlUart_TakeCommand();
+    if (command == H7_CONTROL_COMMAND_START_ATTITUDE) {
+        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_1_START);
+    } else if (command == H7_CONTROL_COMMAND_STOP) {
+        (void)RtosApp_PostEvent(CAR_EVENT_STOP);
+    }
 }
 
 void App_GimbalStep(void)

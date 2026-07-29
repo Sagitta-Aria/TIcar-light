@@ -8,10 +8,10 @@
 ```powershell
 .\tools\build_ccs.ps1 -Profile Gmr -Clean
 .\tools\build_ccs.ps1 -Profile Full -Clean
-.\tools\build_ccs.ps1 -Profile Gmr -Board Dimeng -BluetoothRole Slave -Clean
 ```
 
-未传 `-Profile` 时默认构建 `Gmr`，未传 `-Board` 时默认选择 `Tianmeng`。构建脚本写入
+未传 `-Profile` 时默认构建 `Gmr`，未传 `-Board` 时默认选择 `Tianmeng`。当前Gmr
+拒绝地猛星和蓝牙组合，并默认关闭JY61与UART0日志。构建脚本写入
 `CAR_ACTIVE_PROFILE=CAR_PROFILE_GMR/FULL`和板型宏，并只编译该 Profile 拥有的产品源文件。
 旧的 `CAR_LIBRARY_GMR_CONFIG_ENABLED=0/1` 仅保留为构建兼容输入，新代码禁止使用。
 
@@ -36,17 +36,16 @@
 
 | 资源 | Gmr | Full |
 | --- | --- | --- |
-| PC 调试串口 | UART0，PA10 TX / PA11 RX | UART0 TX；H7 IMU启用时PA11由H7独占 |
-| 板载 JY61 | UART1保留，Task5不使用 | UART1，供车身姿态前馈 |
-| UART3 PB2/PB3 | 默认是外部M0姿态；地猛星蓝牙构建改由HC-05独占 | K230视觉链路 |
-| 两车蓝牙 | 天猛星UART2 PB15/PB16；地猛星UART3 PB2/PB3 | 仅天猛星UART2 PB15/PB16 |
+| PC 调试串口 | 关闭 | UART0 TX；H7 IMU启用时PA11由H7独占 |
+| 板载 JY61 | 关闭 | UART1，供车身姿态前馈 |
+| UART2 PB15/PB16 | H7 LCD输出和任务启动/停止命令 | 可选蓝牙 |
+| UART3 PB2/PB3 | 外部M0姿态 | K230视觉链路 |
 | H7 IMU | `CAR_LIBRARY_H7_IMU_NONE` | `CAR_LIBRARY_H7_IMU_UART_JY61` |
 | 天猛星SPI六轴 | 默认关闭，可选IMU660RA/RB/RC | 默认关闭，可选IMU660RA/RB/RC |
-| H7 LCD | 关闭 | 关闭 |
+| H7 LCD | 开启 | 关闭 |
 | 本地 SSD1306 | 开启 | 开启 |
 
-Gmr 默认由外部M0姿态独占UART3，Task5只读取该链路；地猛星启用蓝牙后UART3
-切给HC-05，外部M0姿态和依赖它的Task5航向反馈不可用。板载JY61及UART1仍保留。
+Gmr固定由外部M0姿态独占UART3、H7独占UART2，当前唯一任务只显示姿态。
 Full的UART3固定给K230，因此`Full + Dimeng + Bluetooth`会在编译期拒绝。
 
 ## 增加任务

@@ -287,8 +287,12 @@ static uint8_t RtosApp_ShouldSuspendControl(void)
     }
 
     missionId = StateMachine_GetMissionId();
+#if CAR_PROFILE_IS_GMR
+    return (uint8_t)((missionId == 1U) ? 1U : 0U);
+#else
     return (uint8_t)((missionId == 2U) || (missionId == 3U) ||
         (missionId == 7U) || (missionId == 8U) || (missionId == 9U));
+#endif
 }
 
 /* Task2/3/7/8是纯云台任务；Task9只采编码器，运行时停止底盘控制调度。 */
@@ -570,6 +574,18 @@ void RtosApp_NotifyMission(void)
 void RtosApp_NotifyUi(void)
 {
     RtosApp_NotifyTask(g_uiTaskHandle);
+}
+
+uint8_t RtosApp_PostEvent(CarEvent event)
+{
+    if ((event == CAR_EVENT_NONE) || (g_eventQueue == 0)) {
+        return 0U;
+    }
+    if (xQueueSendToBack(g_eventQueue, &event, 0U) != pdPASS) {
+        return 0U;
+    }
+    RtosApp_NotifyMission();
+    return 1U;
 }
 
 void RtosApp_NotifyGimbalFromISR(void)

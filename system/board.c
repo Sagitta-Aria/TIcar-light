@@ -11,6 +11,9 @@
 #if CAR_LIBRARY_GRAY_INPUT_ENABLED
 #include "gray.h"
 #endif
+#if CAR_PROFILE_IS_GMR
+#include "h7_control_uart.h"
+#endif
 #include "interrupt.h"
 #if CAR_LIBRARY_IMU660RX_ENABLED
 #include "imu660rx.h"
@@ -377,9 +380,11 @@ void Board_Init(void)
     Board_ShowBootStep("OK Stepper GPIO", "RUN UART", "WAIT Gray",
         "WAIT Drivers");
 
-#if CAR_PROFILE_IS_FULL || CAR_M0_ATTITUDE_UART_REQUIRED || \
-    CAR_H7_UART_REQUIRED
+#if CAR_PROFILE_IS_FULL || CAR_M0_ATTITUDE_UART_REQUIRED
     SYSCFG_DL_Exchange_init();
+#endif
+#if CAR_PROFILE_IS_GMR && CAR_H7_UART_REQUIRED
+    H7ControlUart_Init();
 #endif
 #if CAR_JY61P_ENABLED
     SYSCFG_DL_JY61P_init();

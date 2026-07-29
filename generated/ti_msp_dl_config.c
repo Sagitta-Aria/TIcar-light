@@ -1,18 +1,29 @@
 #include "ti_msp_dl_config.h"
 
 #include "board_config.h"
+#include "resource_config.h"
 
 SYSCONFIG_WEAK void SYSCFG_DL_init(void)
 {
     SYSCFG_DL_initPower();
     SYSCFG_DL_GPIO_init();
     SYSCFG_DL_SYSCTL_init();
+#if CAR_PROFILE_IS_FULL
     SYSCFG_DL_STEPPER_TIMER_init();
+#endif
+#if CAR_LIBRARY_LINE_FOLLOW_ENABLED
     SYSCFG_DL_GRAY_SAMPLE_TIMER_init();
+#endif
     SYSCFG_DL_OLED_init();
+#if CAR_UART0_REQUIRED
     SYSCFG_DL_LogUart_init();
+#endif
+#if CAR_JY61P_ENABLED
     SYSCFG_DL_JY61P_init();
+#endif
+#if CAR_PROFILE_IS_FULL || CAR_M0_ATTITUDE_UART_REQUIRED
     SYSCFG_DL_Exchange_init();
+#endif
 #if (CAR_GRAY_INPUT_DIGITAL == 0U)
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();
@@ -34,11 +45,21 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_reset(GPIOA);
     DL_GPIO_reset(GPIOB);
     DL_I2C_reset(OLED_INST);
+#if CAR_PROFILE_IS_FULL
     DL_TimerG_reset(STEPPER_TIMER_INST);
+#endif
+#if CAR_LIBRARY_LINE_FOLLOW_ENABLED
     DL_TimerG_reset(GRAY_SAMPLE_TIMER_INST);
+#endif
+#if CAR_UART0_REQUIRED
     DL_UART_Main_reset(LogUart_INST);
+#endif
+#if CAR_JY61P_ENABLED
     DL_UART_Main_reset(JY61P_INST);
+#endif
+#if CAR_PROFILE_IS_FULL || CAR_M0_ATTITUDE_UART_REQUIRED
     DL_UART_Main_reset(Exchange_INST);
+#endif
 #if (CAR_GRAY_INPUT_DIGITAL == 0U)
     DL_ADC12_reset(GRAY_ADC0_INST);
     DL_ADC12_reset(GRAY_ADC1_INST);
@@ -47,11 +68,21 @@ SYSCONFIG_WEAK void SYSCFG_DL_initPower(void)
     DL_GPIO_enablePower(GPIOA);
     DL_GPIO_enablePower(GPIOB);
     DL_I2C_enablePower(OLED_INST);
+#if CAR_PROFILE_IS_FULL
     DL_TimerG_enablePower(STEPPER_TIMER_INST);
+#endif
+#if CAR_LIBRARY_LINE_FOLLOW_ENABLED
     DL_TimerG_enablePower(GRAY_SAMPLE_TIMER_INST);
+#endif
+#if CAR_UART0_REQUIRED
     DL_UART_Main_enablePower(LogUart_INST);
+#endif
+#if CAR_JY61P_ENABLED
     DL_UART_Main_enablePower(JY61P_INST);
+#endif
+#if CAR_PROFILE_IS_FULL || CAR_M0_ATTITUDE_UART_REQUIRED
     DL_UART_Main_enablePower(Exchange_INST);
+#endif
 #if (CAR_GRAY_INPUT_DIGITAL == 0U)
     DL_ADC12_enablePower(GRAY_ADC0_INST);
     DL_ADC12_enablePower(GRAY_ADC1_INST);
@@ -64,10 +95,12 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_initPeripheralAnalogFunction(GPIO_HFXIN_IOMUX);
     DL_GPIO_initPeripheralAnalogFunction(GPIO_HFXOUT_IOMUX);
 
+#if CAR_PROFILE_IS_FULL
     DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_1_STEP_IOMUX);
     DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_1_DIR_IOMUX);
     DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_2_STEP_IOMUX);
     DL_GPIO_initDigitalOutput(STEPPER_GIMBAL_2_DIR_IOMUX);
+#endif
 
     /*
      * OLED I2C0 使用 PA0/PA1。
@@ -85,18 +118,24 @@ SYSCONFIG_WEAK void SYSCFG_DL_GPIO_init(void)
     DL_GPIO_enableHiZ(GPIO_OLED_IOMUX_SDA);
     DL_GPIO_enableHiZ(GPIO_OLED_IOMUX_SCL);
 
+#if CAR_UART0_REQUIRED
     DL_GPIO_initPeripheralOutputFunction(
         GPIO_LogUart_IOMUX_TX, GPIO_LogUart_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_LogUart_IOMUX_RX, GPIO_LogUart_IOMUX_RX_FUNC);
+#endif
+#if CAR_JY61P_ENABLED
     DL_GPIO_initPeripheralOutputFunction(
         GPIO_JY61P_IOMUX_TX, GPIO_JY61P_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_JY61P_IOMUX_RX, GPIO_JY61P_IOMUX_RX_FUNC);
+#endif
+#if CAR_PROFILE_IS_FULL || CAR_M0_ATTITUDE_UART_REQUIRED
     DL_GPIO_initPeripheralOutputFunction(
         GPIO_Exchange_IOMUX_TX, GPIO_Exchange_IOMUX_TX_FUNC);
     DL_GPIO_initPeripheralInputFunction(
         GPIO_Exchange_IOMUX_RX, GPIO_Exchange_IOMUX_RX_FUNC);
+#endif
 
 #if (CAR_GRAY_INPUT_DIGITAL == 0U)
     DL_GPIO_initPeripheralAnalogFunction(GRAY_S1_IOMUX);

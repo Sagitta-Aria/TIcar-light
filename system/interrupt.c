@@ -12,6 +12,9 @@
 #if CAR_PROFILE_IS_FULL || CAR_LIBRARY_H7_IMU_ENABLED
 #include "h7_gyro_link.h"
 #endif
+#if CAR_PROFILE_IS_GMR && CAR_H7_UART_REQUIRED
+#include "h7_control_uart.h"
+#endif
 #if CAR_JY61P_ENABLED
 #include "jy61p.h"
 #endif
@@ -48,6 +51,9 @@ void Interrupt_Init(void)
     NVIC_SetPriority(H7GyroLink_INST_INT_IRQN, 2U);
 #elif CAR_M0_ATTITUDE_UART_REQUIRED
     NVIC_SetPriority(CAR_M0_ATTITUDE_UART_INST_INT_IRQN, 2U);
+#endif
+#if CAR_PROFILE_IS_GMR && CAR_H7_UART_REQUIRED
+    NVIC_SetPriority(CAR_H7_UART_INST_INT_IRQN, 2U);
 #endif
 #if CAR_JY61P_ENABLED
     NVIC_SetPriority(JY61P_INST_INT_IRQN, 2U);
@@ -103,7 +109,9 @@ void UART1_IRQHandler(void)
 
 void UART2_IRQHandler(void)
 {
-#if CAR_BLUETOOTH_ENABLED && CAR_BLUETOOTH_UART_IS_UART2
+#if CAR_PROFILE_IS_GMR && CAR_H7_UART_REQUIRED
+    H7ControlUart_HandleUARTInterrupt();
+#elif CAR_BLUETOOTH_ENABLED && CAR_BLUETOOTH_UART_IS_UART2
     BluetoothUart_HandleUARTInterrupt();
 #endif
 }

@@ -6,8 +6,8 @@ param(
     [string]$Profile = "",
     [string]$Board = "Tianmeng",
     [string]$BluetoothRole = "Disabled",
-    [string]$Jy61 = "Enabled",
-    [string]$Log = "Enabled",
+    [string]$Jy61 = "",
+    [string]$Log = "",
     [string[]]$Defines = @(),
     [switch]$Clean
 )
@@ -109,11 +109,17 @@ else {
 }
 $bluetoothRoleSlug = $BluetoothRole.ToLowerInvariant()
 
+if ([string]::IsNullOrWhiteSpace($Jy61)) {
+    $Jy61 = if ($Profile -eq 'Gmr') { 'Disabled' } else { 'Enabled' }
+}
 if (($Jy61 -ne 'Enabled') -and ($Jy61 -ne 'Disabled')) {
     throw "Jy61 must be Enabled or Disabled"
 }
 $jy61Value = if ($Jy61 -eq 'Enabled') { 1 } else { 0 }
 
+if ([string]::IsNullOrWhiteSpace($Log)) {
+    $Log = if ($Profile -eq 'Gmr') { 'Disabled' } else { 'Enabled' }
+}
 if (($Log -ne 'Enabled') -and ($Log -ne 'Disabled')) {
     throw "Log must be Enabled or Disabled"
 }
@@ -122,6 +128,12 @@ $logValue = if ($Log -eq 'Enabled') { 1 } else { 0 }
 if (($Profile -eq 'Full') -and ($Board -eq 'Dimeng') -and
     ($BluetoothRole -ne 'Disabled')) {
     throw "Full/Dimeng cannot enable Bluetooth because K230 owns UART3 PB2/PB3"
+}
+if (($Profile -eq 'Gmr') -and ($Board -ne 'Tianmeng')) {
+    throw "Competition Gmr profile requires -Board Tianmeng"
+}
+if (($Profile -eq 'Gmr') -and ($BluetoothRole -ne 'Disabled')) {
+    throw "Competition Gmr reserves UART2 for H7; Bluetooth must be disabled"
 }
 
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
@@ -222,12 +234,21 @@ foreach ($dir in $sourceDirs) {
 }
 $gmrOnlySources = @(
     "app\gmr_app.c",
-    "app\gmr_bluetooth_mission.c",
     "app\gmr_menu.c",
     "app\gmr_state_machine.c",
-    "app\gmr_tuning_console.c",
-    "app\gmr_yaw_control.c",
     "hardware\gmr_motor.c"
+)
+$legacyGmrSources = @(
+    "app\gmr_bluetooth_mission.c",
+    "app\gmr_tuning_console.c",
+    "app\gmr_yaw_control.c"
+)
+$gmrUnusedSources = @(
+    "app\bluetooth_service.c",
+    "app\motor_no_yaw.c",
+    "hardware\bluetooth_link.c",
+    "hardware\bluetooth_protocol.c",
+    "hardware\bluetooth_uart.c"
 )
 $fullOnlySources = @(
     "app\app.c",
@@ -244,9 +265,9 @@ $fullOnlySources = @(
     "hardware\stepper_pulse.c"
 )
 $excludedSources = if ($Profile -eq 'Gmr') {
-    $fullOnlySources
+    $fullOnlySources + $legacyGmrSources + $gmrUnusedSources
 } else {
-    $gmrOnlySources
+    $gmrOnlySources + $legacyGmrSources
 }
 $sources = $sources | Where-Object {
     $relativePath = $_.FullName.Substring($ProjectDir.Length).TrimStart('\')

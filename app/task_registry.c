@@ -10,12 +10,7 @@ typedef struct {
 
 #if CAR_PROFILE_IS_GMR
 static const TaskRegistryEntry g_tasks[] = {
-    { "Task 1 Drive",   1U, CAR_EVENT_MISSION_1_START },
-    { "Task 2 PID",     2U, CAR_EVENT_MISSION_2_START },
-    { "Task 3 Encoder", 3U, CAR_EVENT_MISSION_3_START },
-    { "Task 4 Line",    4U, CAR_EVENT_MISSION_4_START },
-    { "Task 5 M0 Yaw",  5U, CAR_EVENT_MISSION_5_START },
-    { "Task 6 BT Replay", 6U, CAR_EVENT_MISSION_6_START }
+    { "Attitude", 1U, CAR_EVENT_MISSION_1_START }
 };
 #else
 static const TaskRegistryEntry g_tasks[] = {

@@ -34,3 +34,6 @@ Release/
 # Windows clutter
 Thumbs.db
 Desktop.ini
+
+# CCS debugger trace accidentally emitted at the project root
+/true

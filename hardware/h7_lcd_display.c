@@ -1,6 +1,6 @@
 /*
  * H7 LCD后端：把0至9行转换成@L命令，只发送发生变化的行。
- * GMR通过UART3/PB2发送，普通配置沿用UART0/PA10。
+ * GMR通过UART2/PB15发送，Full配置沿用UART0/PA10。
  * UI任务负责刷新，ISR和10ms控制任务只能更新业务状态，不能直接阻塞发送显示数据。
  * UART忙时未发送内容会保留到下次重试，不应把显示失败当成电机控制失败。
  */
@@ -11,7 +11,7 @@
 #if CAR_LIBRARY_H7_LCD_ENABLED
 
 #if CAR_PROFILE_IS_GMR
-#include "h7_gyro_link.h"
+#include "h7_control_uart.h"
 #else
 #include "log_uart.h"
 #endif
@@ -74,7 +74,7 @@ static uint8_t H7LcdDisplay_TrySendBytes(const uint8_t *data,
     uint16_t length)
 {
 #if CAR_PROFILE_IS_GMR
-    return H7GyroLink_TrySendBytes(data, length);
+    return H7ControlUart_TrySendBytes(data, length);
 #else
     return LogUart_TrySendBytes(data, length);
 #endif

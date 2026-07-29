@@ -8,7 +8,6 @@
 
 ```powershell
 .\tools\build_ccs.ps1 -Profile Gmr -Board Tianmeng -Clean
-.\tools\build_ccs.ps1 -Profile Gmr -Board Dimeng -Clean
 ```
 
 该开关会同时改变`pin_map.h`和生成配置中的相关GPIO/IOMUX，不是只换业务层别名。
@@ -31,7 +30,7 @@
 
 编码器需要与主控共地，并确认输出电平不超过 3.3 V。若实物只有单路编码输出或为开漏输出，不能直接按当前正交解码配置使用。
 
-## 云台步进电机
+## Full Profile云台步进电机
 
 | 轴 | STEP | DIR | EN |
 | --- | --- | --- | --- |
@@ -47,18 +46,16 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 | 本地OLED（当前启用） | I2C0 SDA / SCL | PA0 / PA1 | SSD1306菜单显示 |
 | K1 / K2 | 按键 | PB0 / PB1 | 低有效，内部上拉 |
 | 状态灯 | LED | PB22 | 天猛星板载USER_LED，高电平点亮 |
-| H7云台反馈 / LCD输出 | UART0 TX / RX | PA10 / PA11 | PA11接H7 PE8，PA10接H7 PE7；必须拆开CH340 TX |
+| Gmr H7 LCD / 任务控制 | UART2 TX / RX | PB15 / PB16 | 115200 8-N-1；TX/RX交叉 |
+| Full H7云台反馈 / LCD输出 | UART0 TX / RX | PA10 / PA11 | 仅Full使用 |
 | 外部M0姿态 / K230视觉 | UART3 TX / RX | PB2 / PB3 | GMR默认接M0姿态，Full接K230；115200 |
-| 板载JY61底座前馈 | UART1 TX / RX | PB4 / PB5 | PB5接JY61 TX；避开板载Flash PB6/PB7 |
-| 天猛星HC-05蓝牙 | UART2 TX / RX | PB15 / PB16 | U21-11/U21-13，115200 8-N-1；TX/RX交叉 |
+| 板载JY61底座前馈 | UART1 TX / RX | PB4 / PB5 | 仅Full默认启用 |
 | 地猛星HC-05蓝牙 | UART3 TX / RX | PB2 / PB3 | H3-12/H3-13，115200 8-N-1；启用时替代外部M0姿态 |
 | HFXT | 晶振 | PA5 / PA6 | 当前软件使用内部32 MHz SYSOSC，硬件位仍保留 |
 | SWD | SWDIO / SWCLK | PA19 / PA20 | 禁止复用 |
 
-GMR最小配置不启用K230，UART0 PA10/PA11专供Task2/Task5电脑调试。天猛星GMR
-保持UART3连接外部M0姿态，蓝牙走UART2。地猛星蓝牙构建则把UART3切给HC-05：
-PB2为MCU TX并接HC-05 RXD，PB3为MCU RX并接HC-05 TXD，此时不能再接外部M0姿态。
-Full完整配置把UART3分配给K230视觉，所以地猛星Full不能启用蓝牙。模块必须共地。
+当前Gmr固定为天猛星：UART2连接H7，UART3连接外部M0；UART0、UART1、蓝牙和
+云台STEP资源不初始化。Full仍使用UART0连接H7、UART3连接K230。模块必须共地。
 | BSL invoke | 输入 | PA18 | 不要连接会在启动时拉低的外设 |
 
 ## 数字灰度
@@ -133,10 +130,4 @@ Full完整配置把UART3分配给K230视觉，所以地猛星Full不能启用蓝
 
 ```powershell
 .\tools\build_ccs.ps1 -Clean
-```
-
-编译地猛星GMR蓝牙从机：
-
-```powershell
-.\tools\build_ccs.ps1 -Profile Gmr -Board Dimeng -BluetoothRole Slave -Clean
 ```
