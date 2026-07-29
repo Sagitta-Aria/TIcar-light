@@ -1,8 +1,27 @@
 #ifndef CONTROL_CONFIG_H
 #define CONTROL_CONFIG_H
 
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_GMR
+
+#include "gmr_control_config.h"
+
+#else
+
+/*
+ * control_config.h：底盘内环、姿态环和视觉动态缩放的具体控制参数。
+ *
+ * 使用边界：
+ * - 这里只调“控制器本身”的周期、增益、限幅和电机标定值。
+ * - 循迹速度、直角转向速度、灰度权重应去board_config.h修改。
+ * - 选择哪一种算法应去library_config.h修改。
+ * - Q1024表示实际小数乘1024保存，例如1024=1.0、512=0.5、2048=2.0。
+ * - 修改底盘PWM、编码器符号或姿态方向前必须架空车轮/云台验证。
+ */
+
 /* ---------- Task4/Task8 固定控制周期 ---------- */
-#define BODY_MOTION_PERIOD_MS                       (10U)
+#define BODY_MOTION_PERIOD_MS                       (10U) /* JY61姿态估计与云台姿态环的固定周期。 */
 
 #if (BODY_MOTION_PERIOD_MS == 0U)
 #error "BODY_MOTION_PERIOD_MS must be greater than zero"
@@ -14,11 +33,20 @@
  * 超出范围先钳位，再在K=0.8~1.6间线性插值；Q1024避免M0+使用浮点。
  * 端点来自旧三档yaw上限：远档400/中档500=0.8，近档800/中档500=1.6。
  */
-#define VISION_TARGET_LENGTH_MIN_X10                  (300)
-#define VISION_TARGET_LENGTH_MAX_X10                 (1400)
-#define GIMBAL_VISION_YAW_GAIN_Q1024_SCALE           (1024U)
+#if CAR_LIBRARY_GIMBAL_TRACKING_ENABLED
+#define VISION_TARGET_LENGTH_MIN_X10                  (300) /* 目标最小表观长度30.0，低于此值按30.0算。 */
+#define VISION_TARGET_LENGTH_MAX_X10                 (1400) /* 目标最大表观长度140.0，高于此值按140.0算。 */
+#define GIMBAL_VISION_YAW_GAIN_Q1024_SCALE           (1024U) /* yaw动态增益的1.0基准，不要单独调。 */
 #define GIMBAL_VISION_YAW_GAIN_MIN_Q1024              (819U) /* 约0.8。 */
 #define GIMBAL_VISION_YAW_GAIN_MAX_Q1024             (1638U) /* 约1.6。 */
+#else
+/* 二维视觉库关闭时的编译占位，不参与任何任务输出。 */
+#define VISION_TARGET_LENGTH_MIN_X10                    (0)
+#define VISION_TARGET_LENGTH_MAX_X10                    (1)
+#define GIMBAL_VISION_YAW_GAIN_Q1024_SCALE           (1024U)
+#define GIMBAL_VISION_YAW_GAIN_MIN_Q1024             (1024U)
+#define GIMBAL_VISION_YAW_GAIN_MAX_Q1024             (1024U)
+#endif
 
 #if (VISION_TARGET_LENGTH_MAX_X10 <= VISION_TARGET_LENGTH_MIN_X10)
 #error "VISION target length max must be greater than min"
@@ -31,19 +59,23 @@
 #endif
 
 /* ---------- 板载JY61：底座姿态估计与角速度前馈 ---------- */
+#if CAR_LIBRARY_BODY_MOTION_REQUIRED
 #define BODY_MOTION_CALIBRATION_SAMPLES             (100U)  /* 静止零偏样本数。 */
 #define BODY_MOTION_GYRO_ALPHA_Q1024                (512U)  /* JY61角速度低通；越大响应越快。 */
 #define BODY_MOTION_YAW_BETA_Q1024                  (512U)  /* JY61角度校正；越大响应越快。 */
 #define BODY_MOTION_PREDICTION_MS                    (10U)  /* JY61姿态预测时间。 */
 #define BODY_MOTION_SENSOR_STALE_MS                 (100U)  /* JY61帧超时；超时后只关闭前馈。 */
+#else
+#define BODY_MOTION_CALIBRATION_SAMPLES               (1U) /* 姿态库关闭后的最小编译占位。 */
+#define BODY_MOTION_GYRO_ALPHA_Q1024                  (0U) /* 姿态库关闭，不进行角速度低通更新。 */
+#define BODY_MOTION_YAW_BETA_Q1024                    (0U) /* 姿态库关闭，不进行角度校正。 */
+#define BODY_MOTION_PREDICTION_MS                     (0U) /* 姿态库关闭，不做前向预测。 */
+#define BODY_MOTION_SENSOR_STALE_MS                 (100U) /* 接口兼容的超时占位，不产生控制输出。 */
+#endif
+
+#if CAR_LIBRARY_GIMBAL_ATTITUDE_ENABLED
 #define GIMBAL_ATTITUDE_JY61_FEEDFORWARD_SIGN         (1)   /* JY61底座yaw角速度坐标方向。 */
 #define GIMBAL_ATTITUDE_JY61_KFF_Q1024              (1024U) /* JY61底座角速度前馈增益，1.0。 */
-
-/*
- * 旧版JY61单传感器姿态环的STEP位置误差Kp调试记录。
- * 当前双传感器Task8中JY61只做前馈，此宏不参与控制计算。
- */
-#define GIMBAL_ATTITUDE_JY61_LEGACY_STEP_KP_Q1024  (16384U)
 
 /* ---------- H7：云台yaw角度与角速度反馈 ---------- */
 #define H7_GYRO_FEEDBACK_STALE_MS                   (100U)  /* H7任一姿态帧超时后立即停yaw。 */
@@ -58,21 +90,36 @@
 #define GIMBAL_ATTITUDE_MAX_SPEED_SPS                (1600U) /* Task4/Task8最终yaw速度限幅。 */
 #define GIMBAL_ATTITUDE_ACCEL_STEP_SPS                (200U) /* 每1ms最多增加/减少的SPS。 */
 #define GIMBAL_ATTITUDE_POSITION_LIMIT_STEPS          (25600U) /* 相对姿态辅助启动位置的软件行程。 */
+#else
+/* 双IMU库关闭时保持模块可链接，但所有闭环增益和前馈均为0。 */
+#define GIMBAL_ATTITUDE_JY61_FEEDFORWARD_SIGN           (1)
+#define GIMBAL_ATTITUDE_JY61_KFF_Q1024                  (0U)
+#define H7_GYRO_FEEDBACK_STALE_MS                     (100U)
+#define GIMBAL_ATTITUDE_H7_FEEDBACK_SIGN                 (1)
+#define GIMBAL_ATTITUDE_H7_ANGLE_DEADBAND_X100           (0L)
+#define GIMBAL_ATTITUDE_H7_ANGLE_KP_Q1024                (0U)
+#define GIMBAL_ATTITUDE_H7_RATE_KP_Q1024                 (0U)
+#define GIMBAL_ATTITUDE_STEPS_PER_REVOLUTION           (3200U)
+#define GIMBAL_ATTITUDE_MOTOR_DIRECTION_SIGN              (1)
+#define GIMBAL_ATTITUDE_MAX_SPEED_SPS                  (1600U)
+#define GIMBAL_ATTITUDE_ACCEL_STEP_SPS                   (80U)
+#define GIMBAL_ATTITUDE_POSITION_LIMIT_STEPS              (0U)
+#endif
 
 /* TIMA0 底盘 PWM：32 MHz / 1600 = 20 kHz，全部 PWM 数值均为定时器 count。 */
-#define CHASSIS_PWM_PERIOD_COUNTS             (1600U)
-#define CHASSIS_PWM_HARDWARE_MAX_COUNTS       (CHASSIS_PWM_PERIOD_COUNTS - 1U)
+#define CHASSIS_PWM_PERIOD_COUNTS             (1600U) /* TIMA0一个20kHz PWM周期的总count。 */
+#define CHASSIS_PWM_HARDWARE_MAX_COUNTS       (CHASSIS_PWM_PERIOD_COUNTS - 1U) /* 定时器比较值硬上限，自动派生。 */
 #define CHASSIS_PWM_LIMIT_COUNTS              (1200U)  /* 软件输出限幅；100% 标定命令对应此值。 */
 
 /*
  * 零目标速度阻尼：调用方显式允许后，目标为0但编码器仍有速度时，输出
  * 与反馈方向相反的PWM。该分支不使用START、FF或积分，只做比例阻尼并
- * 受独立限幅保护。当前NO YAW强转使用-1内轮目标，不启用此零目标分支。
+ * 受独立限幅保护。NO YAW两套直角方法都不启用此零目标分支。
  */
-#define CHASSIS_ZERO_TARGET_BRAKE_ENABLE       (1U)
-#define CHASSIS_ZERO_TARGET_BRAKE_DEADBAND_COUNTS_PER_PERIOD (0U)
-#define CHASSIS_ZERO_TARGET_BRAKE_KP_Q1024     (2048L)
-#define CHASSIS_ZERO_TARGET_BRAKE_PWM_LIMIT_COUNTS (300U)
+#define CHASSIS_ZERO_TARGET_BRAKE_ENABLE       (1U) /* 1允许上层按轮请求零速阻尼；0完全禁用。 */
+#define CHASSIS_ZERO_TARGET_BRAKE_DEADBAND_COUNTS_PER_PERIOD (0U) /* 反馈绝对值不超过此值时不制动。 */
+#define CHASSIS_ZERO_TARGET_BRAKE_KP_Q1024     (2048L) /* 反馈速度到反向PWM的比例，2048表示2.0。 */
+#define CHASSIS_ZERO_TARGET_BRAKE_PWM_LIMIT_COUNTS (300U) /* 零速阻尼单轮最大PWM，防止突然反冲。 */
 
 #if (CHASSIS_ZERO_TARGET_BRAKE_ENABLE > 1U)
 #error "CHASSIS_ZERO_TARGET_BRAKE_ENABLE must be 0 or 1"
@@ -92,10 +139,10 @@
  * encoder count/20ms；底层会把10 ms原始编码器窗口归一化到该速度刻度。
  * 旧CPS接口仅保留作兼容边界，进入速度环前只换算一次。
  */
-#define CHASSIS_CONTROL_PERIOD_MS             (10U)
-#define CHASSIS_SPEED_UNIT_PERIOD_MS          (20U)
-#define CHASSIS_TARGET_LIMIT_CPS              (5000U)
-#define CHASSIS_Q1024_SCALE                   (1024L)
+#define CHASSIS_CONTROL_PERIOD_MS             (10U) /* 编码器读取和PI计算的实际运行周期。 */
+#define CHASSIS_SPEED_UNIT_PERIOD_MS          (20U) /* 对外速度命令统一使用count/20ms。 */
+#define CHASSIS_TARGET_LIMIT_CPS              (5000U) /* 兼容CPS接口最大绝对值，对应100 count/20ms。 */
+#define CHASSIS_Q1024_SCALE                   (1024L) /* 底盘定点增益的1.0基准，不要修改。 */
 
 #if ((CHASSIS_CONTROL_PERIOD_MS == 0U) || \
     ((1000U % CHASSIS_CONTROL_PERIOD_MS) != 0U))
@@ -108,6 +155,7 @@
 #error "CHASSIS speed unit must divide 1000 and contain whole control periods"
 #endif
 
+/* 以下三个量均由上面的周期自动计算，业务代码只读，禁止手动填写。 */
 #define CHASSIS_CONTROL_HZ \
     (1000U / CHASSIS_CONTROL_PERIOD_MS)
 #define CHASSIS_SPEED_UNIT_HZ \
@@ -133,8 +181,8 @@
  * 对两侧目标做等量反向修正。1024表示完整跟随两轮平均速度，0表示关闭。
  * LIMIT以count/20ms限制单侧修正，避免低速修正过猛。
  */
-#define CHASSIS_STRAIGHT_SYNC_GAIN_Q1024       (1024L)
-#define CHASSIS_STRAIGHT_SYNC_LIMIT_COUNTS_PER_PERIOD (5U)
+#define CHASSIS_STRAIGHT_SYNC_GAIN_Q1024       (1024L) /* 左右速度差修正比例；1024表示完整修正到平均值。 */
+#define CHASSIS_STRAIGHT_SYNC_LIMIT_COUNTS_PER_PERIOD (5U) /* 单轮目标最多修正5 count/20ms。 */
 
 #if (CHASSIS_STRAIGHT_SYNC_GAIN_Q1024 < 0L)
 #error "CHASSIS_STRAIGHT_SYNC_GAIN_Q1024 must be non-negative"
@@ -149,13 +197,13 @@
  * Task6 调试页速度范围。闭环单位为 count/20ms，开环单位为 PWM%。
  * 两种模式共用 10~100 的菜单刻度，K1 每次增加 10，到上限后回到 10。
  */
-#define CHASSIS_DEBUG_SPEED_MIN                (10U)
-#define CHASSIS_DEBUG_SPEED_MAX                (100U)
-#define CHASSIS_DEBUG_SPEED_STEP               (10U)
+#define CHASSIS_DEBUG_SPEED_MIN                (10U) /* Task6菜单最小速度档。 */
+#define CHASSIS_DEBUG_SPEED_MAX                (100U) /* Task6菜单最大速度档。 */
+#define CHASSIS_DEBUG_SPEED_STEP               (10U) /* K1每次切换增加的速度档。 */
 
-#define CHASSIS_TASK6_DEFAULT_CLOSED_LOOP      (1U)
-#define CHASSIS_TASK6_CLOSED_SPEED_DEFAULT     (40U)
-#define CHASSIS_TASK6_OPEN_SPEED_DEFAULT       (40U)
+#define CHASSIS_TASK6_DEFAULT_CLOSED_LOOP      (1U) /* 1默认闭环；0默认开环。 */
+#define CHASSIS_TASK6_CLOSED_SPEED_DEFAULT     (40U) /* Task6闭环默认40 count/20ms。 */
+#define CHASSIS_TASK6_OPEN_SPEED_DEFAULT       (40U) /* Task6开环默认40% PWM。 */
 
 #if ((CHASSIS_DEBUG_SPEED_MIN == 0U) || \
     (CHASSIS_DEBUG_SPEED_MIN > CHASSIS_DEBUG_SPEED_MAX) || \
@@ -190,19 +238,19 @@
  * FF表示每个count/20ms对应的PWM count，再乘1024保存。KI仍按20 ms
  * 速度刻度标定，控制器在10 ms执行时按周期比例缩放每次积分增量。
  */
-#define CHASSIS_START_PWM_SPEED_THRESHOLD_COUNTS_PER_PERIOD (15U)
-#define CHASSIS_LEFT_START_PWM_COUNTS         (200)
-#define CHASSIS_LEFT_RUN_START_PWM_COUNTS     (180)
-#define CHASSIS_LEFT_KP_Q1024                 (16000L)
-#define CHASSIS_LEFT_KI_Q1024                 (100L)
-#define CHASSIS_LEFT_FF_Q1024                 (12000L)
-#define CHASSIS_LEFT_INTEGRAL_LIMIT_PWM_COUNTS (360)
-#define CHASSIS_RIGHT_START_PWM_COUNTS        (160)
-#define CHASSIS_RIGHT_RUN_START_PWM_COUNTS    (140)
-#define CHASSIS_RIGHT_KP_Q1024                (6200L)
-#define CHASSIS_RIGHT_KI_Q1024                (100L)
-#define CHASSIS_RIGHT_FF_Q1024                (4096L)
-#define CHASSIS_RIGHT_INTEGRAL_LIMIT_PWM_COUNTS (360)
+#define CHASSIS_START_PWM_SPEED_THRESHOLD_COUNTS_PER_PERIOD (15U) /* 首次达到此反馈速度后切到RUN_START。 */
+#define CHASSIS_LEFT_START_PWM_COUNTS         (200) /* 左轮停车/换向起步时克服静摩擦的基础PWM。 */
+#define CHASSIS_LEFT_RUN_START_PWM_COUNTS     (180) /* 左轮已经转起来后的基础PWM。 */
+#define CHASSIS_LEFT_KP_Q1024                 (16000L) /* 左轮速度误差比例增益，Q1024。 */
+#define CHASSIS_LEFT_KI_Q1024                 (100L) /* 左轮速度误差积分增益，Q1024。 */
+#define CHASSIS_LEFT_FF_Q1024                 (12000L) /* 左轮每1 count/20ms所需PWM前馈，Q1024。 */
+#define CHASSIS_LEFT_INTEGRAL_LIMIT_PWM_COUNTS (360) /* 左轮积分项绝对值上限，防止积分饱和。 */
+#define CHASSIS_RIGHT_START_PWM_COUNTS        (160) /* 右轮停车/换向起步基础PWM。 */
+#define CHASSIS_RIGHT_RUN_START_PWM_COUNTS    (140) /* 右轮已经转起来后的基础PWM。 */
+#define CHASSIS_RIGHT_KP_Q1024                (6200L) /* 右轮速度误差比例增益，Q1024。 */
+#define CHASSIS_RIGHT_KI_Q1024                (100L) /* 右轮速度误差积分增益，Q1024。 */
+#define CHASSIS_RIGHT_FF_Q1024                (4096L) /* 右轮每1 count/20ms所需PWM前馈，Q1024。 */
+#define CHASSIS_RIGHT_INTEGRAL_LIMIT_PWM_COUNTS (360) /* 右轮积分项绝对值上限。 */
 
 #if (CHASSIS_START_PWM_SPEED_THRESHOLD_COUNTS_PER_PERIOD > \
     CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD)
@@ -214,11 +262,11 @@
  * 正数：增强左轮并等量减弱右轮；负数：增强右轮并等量减弱左轮。
  * 保持为有符号 int；预装后由正常积分误差连续调整，不按时间取消。
  */
-#define CHASSIS_LEFT_STARTUP_COMPENSATION_PWM_COUNTS (0)  //预装载积分
+#define CHASSIS_LEFT_STARTUP_COMPENSATION_PWM_COUNTS (0) /* 同向起步预装积分；当前不补偿左右差。 */
 
 /* 编码器正方向修正：1 保持计数方向，-1 反转计数方向。 */
-#define CHASSIS_LEFT_ENCODER_SIGN             (-1)
-#define CHASSIS_RIGHT_ENCODER_SIGN            (1)
+#define CHASSIS_LEFT_ENCODER_SIGN             (-1) /* 左轮当前接线需把原始编码器方向反转。 */
+#define CHASSIS_RIGHT_ENCODER_SIGN            (1)  /* 右轮保持原始编码器方向。 */
 
 #if ((CHASSIS_LEFT_ENCODER_SIGN != 1) && \
     (CHASSIS_LEFT_ENCODER_SIGN != -1))
@@ -229,5 +277,7 @@
     (CHASSIS_RIGHT_ENCODER_SIGN != -1))
 #error "CHASSIS_RIGHT_ENCODER_SIGN must be 1 or -1"
 #endif
+
+#endif /* CAR_PROFILE_IS_GMR */
 
 #endif

@@ -43,6 +43,16 @@ void Motor_RunChassisControl(void);
  */
 void Motor_Set(MotorId motor, MotorDir dir, uint16_t speedSps);
 
+/*
+ * 让单个云台轴按指定速度输出精确数量的STEP；新Motor_Set命令会取消该运动。
+ * 底盘电机或非法编号不会执行。
+ */
+void Motor_MoveSteps(MotorId motor, MotorDir dir, uint16_t speedSps,
+    uint32_t stepCount);
+
+/* 对应云台轴仍有定步脉冲待输出时返回1。 */
+uint8_t Motor_IsStepMoveActive(MotorId motor);
+
 /* Motor_SetRampStep：单独设置某一路电机的加减速斜坡步长。 */
 void Motor_SetRampStep(MotorId motor, uint16_t accelStepSps,
     uint16_t decelStepSps);

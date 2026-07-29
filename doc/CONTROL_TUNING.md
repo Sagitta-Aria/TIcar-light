@@ -1,14 +1,64 @@
 # Task5 在线标定与 Task8 云台姿态环
 
+## GMR Menu2 / Task5 M0航向保持
+
+当构建`-Profile Gmr`时，简化菜单保留`Task 2 PID`作为
+`MISSION_2`左右电机FF/PI标定入口，并使用`Task 5 M0 Yaw`作为`MISSION_5`
+外部M0姿态航向保持入口。外部模块接UART3：PB2为MCU TX、PB3为MCU RX，串口为
+115200、8-N-1。MCU上电后收到第一帧有效M0姿态数据时锁存当前连续yaw；进入
+Task5后，以20 count/20ms基础速度前进并保持该航向。姿态帧无效时只等待，不输出
+电机目标。
+
+外环每10 ms运行一次，`error=current_yaw-startup_yaw`。已确认正yaw表示车头
+向右，因此正误差按左轮减速、右轮加速修正：
+
+```text
+correction = clamp(Kp * abs(error), 6, 20) * sign(error)
+left_target  = 20 - correction
+right_target = 20 + correction
+```
+
+误差在`±10.00度`内时`correction=0`，左右轮继续保持20的基础速度；最大修正为20，
+所以内轮只会减到0，不会反转。M0解析器已经输出跨`±180度`展开后的连续yaw。
+帧超过100 ms没有更新时立即退出航向保持并清零两轮目标。
+
+`angle DEG`保留为相对目标测试命令，把目标改成“当前yaw + DEG”；到达新目标后
+继续按基础速度直行：
+
+```text
+oled yaw
+angle 90
+stop
+```
+
+状态行`Y`固定为十通道：
+
+```text
+Y yaw_x100,target_x100,error_x100,correction,left_target,right_target,
+  yaw_rate_x100_s,age_ms,active,fresh
+```
+
+`pwm`、`target`、`set`和`stop`都会先取消航向保持，避免多个模式同时写电机。
+进入Task5后首帧有效yaw会自动启动左右轮，因此首次验证必须架空车轮并准备物理
+断电手段。正误差应看到`left_target < right_target`；若实车误差反而扩大，只修改
+`GMR_M0_YAW_CHASSIS_DIRECTION_SIGN`，不要交换P增益正负号。
+
+### GMR M0姿态串口
+
+GMR的UART3由外部M0姿态独占。接线为模块TX接PB3（MCU RX）、模块RX接PB2
+（MCU TX），并与MSPM0共地；信号电平必须为3.3 V TTL。UART接收中断把每个字节
+交给`m0_attitude_link`完成帧同步、CRC16和连续yaw展开。板载JY61继续使用UART1，
+但不参与Task5航向保持。旧H7 UART3选项与该链路互斥，误开时构建会直接报错。
+
 Task5 用于左右编码电机的开环测量和速度 PI 在线测试。测试前必须架空车轮，并准备能立即断开电机动力电源的物理手段。串口命令会一直保持到下一条命令，USB 断开不会自动停车。
 视觉模式会实际驱动 yaw/pitch 两轴，测试前还必须确认机械行程内没有线缆或限位干涉。
 
 ## 串口和任务入口
 
-- UART0：115200，8-N-1；当前PA11由H7姿态链路独占。
-- MCU PA10只保留输出，UART0文本RX关闭，因此Type-C在线命令暂不可用。
-- H7 LCD菜单选择 `Task 5 PID`，按K2进入。
-- 进入 Task5 后会停止所有电机并关闭视觉。100 Hz 姿态任务保持运行，默认由底盘调参模式占用执行机构。
+- GMR调试UART0：PA10 TX、PA11 RX，115200、8-N-1，供Task2/Task5文本命令。
+- GMR M0姿态UART3：PB2为MCU TX、PB3为MCU RX，115200、8-N-1。
+- 在当前本地OLED菜单选择`Task 5 M0 Yaw`，按K2进入。
+- 进入Task5会先清零电机；第一帧有效M0 yaw到达后，自动以配置的基础速度启动航向保持。
 - 长按 K2 退出时，左右 PWM 强制清零、积分清零，并恢复正常任务模式。
 
 Task5默认处于`mode chassis`。只有显式发送`mode gimbal`后才停止底盘调参、
@@ -187,12 +237,12 @@ Task5命令单位，原始10 ms计数在控制器入口乘2，统一表示为等
 串口默认每500 ms输出一行状态；修改`pwm`或`target`后会丢弃第一个混合窗口，
 再从新的完整10 ms窗口累计平均值。
 
-NO YAW强转当前把内轮目标设为`-1 count/20ms`，通过正常闭环直接产生轻微反向
-作用；左转命令为`(-1, outer)`，右转命令为`(outer, -1)`。强转期间不启用零目标
-阻尼分支，普通停车、出弯和标定也不启用。零目标阻尼接口仍保留供后续单独试验。
+直角方法由`CAR_LIBRARY_RIGHT_ANGLE_TURN_METHOD`选择。单轮锁死参数保留内轮
+`-1 count/20ms`；当前双轮反转方案中，Task1内/外轮为`-25/+25`，Task4为
+`-30/+30`。强转期间不启用零目标阻尼分支，普通停车、出弯和标定也不启用。
 
-普通循迹由`CAR_MOTOR_NO_YAW_USE_SPEED_PID`选择输出结构：`1`使用灰度目标速度和
-双轮PID，`0`使用直接PWM方案。配置按算法和任务隔离成四组：
+普通循迹由`CAR_LIBRARY_LINE_DRIVE_METHOD`选择输出结构，可选直接PWM、PWM加
+编码器交叉同步或编码器速度闭环。配置按算法和任务隔离成四组：
 
 - `TASK1_PID_*`：Task1目标速度、灰度P/D、权重和限幅。
 - `TASK4_PID_*`：Task4独立的目标速度、灰度P/D、权重和限幅。
@@ -201,7 +251,7 @@ NO YAW强转当前把内轮目标设为`-1 count/20ms`，通过正常闭环直�
 
 正式Task4调用`MotorNoYaw_StartMission4()`，不再通过Task1 profile运行。强转和出弯
 参数也按Task1/Task4保存独立数值，但两种普通循迹算法共用本任务自己的强转参数。
-当前总开关为`1`；切换为`0`后，直接PWM先由当前任务配置生成原始命令：
+当前选择编码器速度闭环；切换为任一PWM方法后，先由当前任务配置生成原始命令：
 
 ```text
 grayCorrection = lineError * TASKx_PWM_GRAY_GAIN / 100
@@ -219,13 +269,11 @@ leftPwmOutput   = leftPwmCommand - syncCorrection
 rightPwmOutput  = rightPwmCommand + syncCorrection
 ```
 
-`CAR_MOTOR_NO_YAW_ENABLE_CROSS_SYNC=0`会全局关闭左右编码速度交叉，只保留灰度差速；
-设为`1`时，两组同步修正仍使用各自参数和单侧120 PWM count限幅，并且只有S4确认
-压线且左右命令非零、同向时才生效。S4离线、单轮搜线、异向命令和Task5普通开环
-标定都不启用同步。
-Task5 `gray on`会跟随总开关并使用Task1对应的PID或PWM配置。直角强转和出弯仍调用
-目标速度闭环，不会被同步器强行拉成同速。切回`USE_SPEED_PID=1`后，Task1和Task4
-分别恢复自己的PID参数。
+选择`CAR_LIBRARY_LINE_DRIVE_PWM_ENCODER_SYNC`时，两组同步修正使用各自参数和
+单侧120 PWM count限幅，并且只有S4确认压线且左右命令非零、同向时才生效。
+选择`CAR_LIBRARY_LINE_DRIVE_DIRECT_PWM`、S4离线、单轮搜线、异向命令和Task5
+普通开环标定都不启用同步。Task5 `gray on`会跟随库选择并使用Task1对应参数；
+直角强转和出弯始终调用目标速度闭环，不会被同步器强行拉成同速。
 
 ## 命令
 

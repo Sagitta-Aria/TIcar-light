@@ -1,3 +1,12 @@
+/*
+ * K230视觉协议解析器：消费UART3完整文本行，校验五个定点字段并更新云台误差。
+ * Link ISR只提交行，解析在Gimbal/Comm任务上下文完成；坏帧只计数，不复用为控制输入。
+ * 第五字段是目标表观长度，用于连续拟合yaw增益，不再代表近/中/远离散档位。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "vision.h"
 
 #include "control_config.h"
@@ -285,3 +294,5 @@ uint16_t Vision_GetYawGainQ1024(void)
 {
     return g_vision.yawGainQ1024;
 }
+
+#endif

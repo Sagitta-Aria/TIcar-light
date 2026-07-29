@@ -1,3 +1,12 @@
+/*
+ * 二维视觉云台控制器：把目标误差转换成yaw/pitch PD和趋势前馈STEP速度。
+ * Gimbal任务在完整视觉帧或10ms超时截止点调用；还会合成姿态补偿和固定yaw前馈。
+ * 本文件只控制云台两轴，不允许修改底盘命令；关闭视觉时会丢弃旧D项和前馈状态。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "gimbal.h"
 
 #include "FreeRTOS.h"
@@ -49,6 +58,7 @@ typedef struct {
     uint8_t yawLostSearchEnabled;
     uint8_t yawLostSearchActive;
     uint8_t visionTrackingEnabled;
+    uint8_t pitchStepMoveActive;
     uint16_t visionYawGainQ1024;
 } GimbalControl;
 
@@ -308,6 +318,19 @@ static void Gimbal_SetAxis(MotorId motor, int16_t command)
     }
 }
 
+/* 定步补偿完成前保持其pitch命令；完成后才允许视觉或停车命令接管。 */
+static int16_t Gimbal_SetPitchAxis(int16_t command)
+{
+    if (g_gimbal.pitchStepMoveActive != 0U) {
+        if (Motor_IsStepMoveActive(MOTOR_GIMBAL_2) != 0U) {
+            return Motor_GetCommand(MOTOR_GIMBAL_2);
+        }
+        g_gimbal.pitchStepMoveActive = 0U;
+    }
+    Gimbal_SetAxis(MOTOR_GIMBAL_2, command);
+    return command;
+}
+
 /* 以丢失瞬间的位置为中心，清除固定随动并沿最后一次yaw方向开始重搜。 */
 static void Gimbal_StartLostTargetSearch(void)
 {
@@ -343,9 +366,8 @@ static void Gimbal_ApplyLostTargetSearch(void)
     g_gimbal.visionFeedForwardSpsX = 0;
     g_gimbal.visionFeedForwardSpsY = 0;
     g_gimbal.commandX = commandX;
-    g_gimbal.commandY = 0;
+    g_gimbal.commandY = Gimbal_SetPitchAxis(0);
     Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
-    Gimbal_SetAxis(MOTOR_GIMBAL_2, 0);
 }
 
 /* 作用：Task4 临时覆盖结束后恢复两个云台轴的默认斜坡。 */
@@ -362,9 +384,18 @@ static void Gimbal_ApplyYawSupplementsOnly(void)
     g_gimbal.visionFeedForwardSpsX = 0;
     g_gimbal.visionFeedForwardSpsY = 0;
     g_gimbal.commandX = commandX;
-    g_gimbal.commandY = 0;
+    g_gimbal.commandY = Gimbal_SetPitchAxis(0);
     Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
-    Gimbal_SetAxis(MOTOR_GIMBAL_2, 0);
+}
+
+/* 没有视觉或yaw补偿时只停空闲轴，不中断尚未完成的pitch定步运动。 */
+static void Gimbal_ApplyIdleOutput(void)
+{
+    g_gimbal.visionFeedForwardSpsX = 0;
+    g_gimbal.visionFeedForwardSpsY = 0;
+    g_gimbal.commandX = 0;
+    g_gimbal.commandY = Gimbal_SetPitchAxis(0);
+    Gimbal_SetAxis(MOTOR_GIMBAL_1, 0);
 }
 
 /*
@@ -443,11 +474,10 @@ static void Gimbal_ApplyControl(void)
     commandY = Gimbal_LimitPitchCommand(commandY);
 
     g_gimbal.commandX = commandX;
-    g_gimbal.commandY = commandY;
+    g_gimbal.commandY = Gimbal_SetPitchAxis(commandY);
 
     /* X 视觉误差控制左右轴，Y 视觉误差控制上下轴。 */
     Gimbal_SetAxis(MOTOR_GIMBAL_1, commandX);
-    Gimbal_SetAxis(MOTOR_GIMBAL_2, commandY);
 }
 
 /*
@@ -486,6 +516,7 @@ void Gimbal_Init(void)
     g_gimbal.yawLostSearchEnabled = 0U;
     g_gimbal.yawLostSearchActive = 0U;
     g_gimbal.visionTrackingEnabled = 1U;
+    g_gimbal.pitchStepMoveActive = 0U;
     g_gimbal.visionYawGainQ1024 = GIMBAL_VISION_YAW_GAIN_Q1024_SCALE;
     Gimbal_Stop();
 }
@@ -501,6 +532,7 @@ void Gimbal_SetEnabled(uint8_t enabled)
 
     if ((g_gimbal.enabled == 0U) && (nextEnabled != 0U)) {
         Gimbal_ResetRamp();
+        g_gimbal.pitchStepMoveActive = 0U;
         g_gimbal.pitchBaseStep = Motor_GetStepCount(MOTOR_GIMBAL_2);
         g_gimbal.lastVisionTick = xTaskGetTickCount();
         g_gimbal.hasVision = 0U;
@@ -667,7 +699,7 @@ void Gimbal_Task(void)
             Gimbal_ApplyYawSupplementsOnly();
             return;
         }
-        Gimbal_Stop();
+        Gimbal_ApplyIdleOutput();
         return;
     }
 
@@ -691,7 +723,7 @@ void Gimbal_Task(void)
             Gimbal_ApplyYawSupplementsOnly();
             return;
         }
-        Gimbal_Stop();
+        Gimbal_ApplyIdleOutput();
         return;
     }
     if (g_gimbal.controlPending == 0U) {
@@ -714,6 +746,44 @@ void Gimbal_SetYawFeedForward(int16_t speedSps)
     }
     g_gimbal.yawFeedForwardSps = nextSpeedSps;
     g_gimbal.controlPending = 1U;
+    RtosApp_NotifyGimbal();
+}
+
+void Gimbal_StartPitchUpMove(uint32_t steps, uint16_t speedSps)
+{
+    int16_t command;
+    int32_t pitchDelta;
+    uint32_t availableSteps;
+
+    if ((g_gimbal.enabled == 0U) || (steps == 0U) || (speedSps == 0U)) {
+        return;
+    }
+
+    command = Gimbal_ApplyReverse(Gimbal_ClampCommand((int32_t)speedSps),
+        CAR_GIMBAL_PITCH_REVERSE);
+    pitchDelta = Motor_GetStepCount(MOTOR_GIMBAL_2) - g_gimbal.pitchBaseStep;
+    if (command > 0) {
+        if (pitchDelta >= (int32_t)CAR_GIMBAL_PITCH_LIMIT_STEPS) {
+            return;
+        }
+        availableSteps = (uint32_t)
+            ((int32_t)CAR_GIMBAL_PITCH_LIMIT_STEPS - pitchDelta);
+    } else {
+        if (pitchDelta <= -(int32_t)CAR_GIMBAL_PITCH_LIMIT_STEPS) {
+            return;
+        }
+        availableSteps = (uint32_t)
+            (pitchDelta + (int32_t)CAR_GIMBAL_PITCH_LIMIT_STEPS);
+    }
+    if (steps > availableSteps) {
+        steps = availableSteps;
+    }
+
+    g_gimbal.pitchStepMoveActive = 1U;
+    g_gimbal.commandY = command;
+    Motor_MoveSteps(MOTOR_GIMBAL_2,
+        (command > 0) ? MOTOR_FORWARD : MOTOR_REVERSE,
+        Gimbal_Abs16(command), steps);
     RtosApp_NotifyGimbal();
 }
 
@@ -767,6 +837,7 @@ uint8_t Gimbal_IsLostTargetSearchActive(void)
 /* 作用：停止云台两个轴，不改变底盘速度。 */
 void Gimbal_Stop(void)
 {
+    g_gimbal.pitchStepMoveActive = 0U;
     g_gimbal.visionFeedForwardSpsX = 0;
     g_gimbal.visionFeedForwardSpsY = 0;
     g_gimbal.commandX = 0;
@@ -809,3 +880,5 @@ int16_t Gimbal_GetVisionFeedForwardY(void)
 {
     return g_gimbal.visionFeedForwardSpsY;
 }
+
+#endif

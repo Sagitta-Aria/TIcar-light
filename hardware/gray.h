@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#include "library_config.h"
+
+#if CAR_LIBRARY_GRAY_INPUT_ENABLED
+
 #include "board_config.h"
 
 /* GrayChannel：灰度传感器编号，按车头朝前时从左到右排列。 */
@@ -69,5 +73,7 @@ uint8_t Gray_IsCalibrationComplete(void);
 
 /* Gray_CalibrationApply：应用校准结果；数字模式下只刷新状态。 */
 void Gray_CalibrationApply(void);
+
+#endif /* CAR_LIBRARY_GRAY_INPUT_ENABLED */
 
 #endif

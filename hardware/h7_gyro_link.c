@@ -1,4 +1,12 @@
+/*
+ * H7云台姿态链路：GMR在UART3/PB2/PB3收发，普通配置沿用UART0/PA10/PA11。
+ * UART ISR校验并更新共享缓存，Gimbal任务通过原子快照读取；本模块不做二次姿态融合。
+ * GMR的UART0保持为独立调参口，H7二进制数据不会进入Task2/Task5文本解析器。
+ */
+#include "resource_config.h"
 #include "h7_gyro_link.h"
+
+#if CAR_H7_UART_REQUIRED
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -13,10 +21,7 @@
 #define H7_GYRO_LINK_RX_DRAIN_LIMIT      (64U)
 #define H7_GYRO_LINK_FULL_TURN_X100      (36000L)
 #define H7_GYRO_LINK_HALF_TURN_X100      (18000L)
-
-#if (H7GyroLink_BAUD_RATE != LogUart_BAUD_RATE)
-#error "H7 feedback and UART0 log TX must use the same baud rate"
-#endif
+#define H7_GYRO_LINK_TX_TIMEOUT_COUNT    (100000U)
 
 typedef struct {
     volatile int16_t rollX100;
@@ -33,6 +38,7 @@ typedef struct {
     volatile uint32_t badFrameCount;
     uint8_t frame[H7_GYRO_LINK_FRAME_SIZE];
     uint8_t frameIndex;
+    volatile uint8_t txBusy;
     uint8_t hasYaw;
 } H7GyroLinkState;
 
@@ -133,14 +139,15 @@ static void H7GyroLink_ApplyFrame(
     }
 }
 
-static void H7GyroLink_ParseByte(uint8_t data)
+uint8_t H7GyroLink_ConsumeByte(uint8_t data)
 {
     if (g_h7GyroLink.frameIndex == 0U) {
-        if (data == H7_GYRO_LINK_FRAME_HEAD) {
-            g_h7GyroLink.frame[0] = data;
-            g_h7GyroLink.frameIndex = 1U;
+        if (data != H7_GYRO_LINK_FRAME_HEAD) {
+            return 0U;
         }
-        return;
+        g_h7GyroLink.frame[0] = data;
+        g_h7GyroLink.frameIndex = 1U;
+        return 1U;
     }
 
     if ((g_h7GyroLink.frameIndex == 1U) &&
@@ -151,7 +158,7 @@ static void H7GyroLink_ParseByte(uint8_t data)
             g_h7GyroLink.frame[0] = data;
             g_h7GyroLink.frameIndex = 1U;
         }
-        return;
+        return 1U;
     }
 
     g_h7GyroLink.frame[g_h7GyroLink.frameIndex] = data;
@@ -160,6 +167,44 @@ static void H7GyroLink_ParseByte(uint8_t data)
         H7GyroLink_ApplyFrame(g_h7GyroLink.frame);
         g_h7GyroLink.frameIndex = 0U;
     }
+    return 1U;
+}
+
+uint8_t H7GyroLink_TrySendBytes(const uint8_t *data, uint16_t length)
+{
+    uint32_t primask;
+    uint16_t index;
+    uint8_t success = 1U;
+
+    if (data == 0) {
+        return 0U;
+    }
+    primask = H7GyroLink_EnterCritical();
+    if (g_h7GyroLink.txBusy != 0U) {
+        H7GyroLink_ExitCritical(primask);
+        return 0U;
+    }
+    g_h7GyroLink.txBusy = 1U;
+    H7GyroLink_ExitCritical(primask);
+
+    for (index = 0U; index < length; ++index) {
+        uint32_t timeout = H7_GYRO_LINK_TX_TIMEOUT_COUNT;
+
+        while ((timeout > 0U) &&
+            !DL_UART_Main_transmitDataCheck(CAR_H7_UART_INST,
+                data[index])) {
+            --timeout;
+        }
+        if (timeout == 0U) {
+            success = 0U;
+            break;
+        }
+    }
+
+    primask = H7GyroLink_EnterCritical();
+    g_h7GyroLink.txBusy = 0U;
+    H7GyroLink_ExitCritical(primask);
+    return success;
 }
 
 void H7GyroLink_Init(void)
@@ -179,20 +224,21 @@ void H7GyroLink_Init(void)
     g_h7GyroLink.gyroFrameTick = 0U;
     g_h7GyroLink.badFrameCount = 0U;
     g_h7GyroLink.frameIndex = 0U;
+    g_h7GyroLink.txBusy = 0U;
     g_h7GyroLink.hasYaw = 0U;
     for (i = 0U; i < H7_GYRO_LINK_FRAME_SIZE; ++i) {
         g_h7GyroLink.frame[i] = 0U;
     }
 
-    DL_UART_Main_setRXFIFOThreshold(H7GyroLink_INST,
+    DL_UART_Main_setRXFIFOThreshold(CAR_H7_UART_INST,
         DL_UART_MAIN_RX_FIFO_LEVEL_ONE_ENTRY);
-    DL_UART_Main_enableInterrupt(H7GyroLink_INST,
+    DL_UART_Main_enableInterrupt(CAR_H7_UART_INST,
         DL_UART_MAIN_INTERRUPT_RX |
         DL_UART_MAIN_INTERRUPT_OVERRUN_ERROR |
         DL_UART_MAIN_INTERRUPT_FRAMING_ERROR |
         DL_UART_MAIN_INTERRUPT_NOISE_ERROR);
-    NVIC_ClearPendingIRQ(H7GyroLink_INST_INT_IRQN);
-    NVIC_EnableIRQ(H7GyroLink_INST_INT_IRQN);
+    NVIC_ClearPendingIRQ(CAR_H7_UART_INST_INT_IRQN);
+    NVIC_EnableIRQ(CAR_H7_UART_INST_INT_IRQN);
 }
 
 void H7GyroLink_HandleUARTInterrupt(void)
@@ -203,12 +249,12 @@ void H7GyroLink_HandleUARTInterrupt(void)
     uint8_t rxCount;
 
     do {
-        pending = DL_UART_Main_getPendingInterrupt(H7GyroLink_INST);
+        pending = DL_UART_Main_getPendingInterrupt(CAR_H7_UART_INST);
         if (pending == DL_UART_MAIN_IIDX_RX) {
             rxCount = 0U;
             while ((rxCount < H7_GYRO_LINK_RX_DRAIN_LIMIT) &&
-                DL_UART_Main_receiveDataCheck(H7GyroLink_INST, &data)) {
-                H7GyroLink_ParseByte(data);
+                DL_UART_Main_receiveDataCheck(CAR_H7_UART_INST, &data)) {
+                (void)H7GyroLink_ConsumeByte(data);
                 ++rxCount;
             }
         } else if ((pending == DL_UART_MAIN_IIDX_FRAMING_ERROR) ||
@@ -247,3 +293,47 @@ uint8_t H7GyroLink_GetFeedback(H7GyroLinkFeedback *feedback)
     return (uint8_t)(((feedback->angleFrameCount != 0U) ||
         (feedback->gyroFrameCount != 0U)) ? 1U : 0U);
 }
+
+#else
+
+void H7GyroLink_Init(void)
+{
+}
+
+void H7GyroLink_HandleUARTInterrupt(void)
+{
+}
+
+uint8_t H7GyroLink_ConsumeByte(uint8_t data)
+{
+    (void)data;
+    return 0U;
+}
+
+uint8_t H7GyroLink_TrySendBytes(const uint8_t *data, uint16_t length)
+{
+    (void)data;
+    (void)length;
+    return 0U;
+}
+
+uint8_t H7GyroLink_GetFeedback(H7GyroLinkFeedback *feedback)
+{
+    if (feedback != 0) {
+        feedback->rollX100 = 0;
+        feedback->pitchX100 = 0;
+        feedback->yawRawX100 = 0;
+        feedback->yawUnwrappedX100 = 0;
+        feedback->rollRateX100PerSec = 0;
+        feedback->pitchRateX100PerSec = 0;
+        feedback->yawRateX100PerSec = 0;
+        feedback->angleFrameCount = 0U;
+        feedback->gyroFrameCount = 0U;
+        feedback->angleFrameTick = 0U;
+        feedback->gyroFrameTick = 0U;
+        feedback->badFrameCount = 0U;
+    }
+    return 0U;
+}
+
+#endif

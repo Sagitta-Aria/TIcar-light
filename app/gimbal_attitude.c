@@ -1,3 +1,12 @@
+/*
+ * 双IMU云台yaw姿态控制：H7提供云台角度/角速度反馈，JY61提供底座角速度前馈。
+ * Task8/Task5可直接输出STEP速度，Task4辅助模式只把补偿量交给gimbal.c合成。
+ * 由高优先级Gimbal任务调用；反馈过期或超过软件行程时会主动把yaw命令清零。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "gimbal_attitude.h"
 
 #include "FreeRTOS.h"
@@ -483,3 +492,5 @@ uint8_t GimbalAttitude_SetConfig(const GimbalAttitudeConfig *config)
     g_gimbalAttitude.snapshot.active = wasActive;
     return 1U;
 }
+
+#endif /* CAR_PROFILE_IS_FULL */

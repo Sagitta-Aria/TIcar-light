@@ -1,3 +1,7 @@
+/*
+ * K1/K2按键驱动：GPIO边沿只唤醒Input任务，任务内完成消抖、短按和长按判定。
+ * 事件存入固定长度静态队列；不在ISR中切换菜单、刷新LCD或控制电机。
+ */
 #include "key.h"
 
 #include "board_config.h"
@@ -92,10 +96,10 @@ static void Key_ConfigInputPins(void)
     uint32_t resistor = DL_GPIO_RESISTOR_PULL_DOWN;
 #endif
 
-    DL_GPIO_initDigitalInputFeatures(KEY_1_IOMUX,
+    DL_GPIO_initDigitalInputFeatures(PIN_KEY_1_IOMUX,
         DL_GPIO_INVERSION_DISABLE, resistor,
         DL_GPIO_HYSTERESIS_ENABLE, DL_GPIO_WAKEUP_DISABLE);
-    DL_GPIO_initDigitalInputFeatures(KEY_2_IOMUX,
+    DL_GPIO_initDigitalInputFeatures(PIN_KEY_2_IOMUX,
         DL_GPIO_INVERSION_DISABLE, resistor,
         DL_GPIO_HYSTERESIS_ENABLE, DL_GPIO_WAKEUP_DISABLE);
 }
@@ -111,7 +115,7 @@ void Key_Init(void)
     g_keyWasPressed[KEY_ID_1] = 0U;
     g_keyWasPressed[KEY_ID_2] = 0U;
     DL_GPIO_setLowerPinsPolarity(PIN_KEY_PORT,
-        DL_GPIO_PIN_9_EDGE_RISE_FALL | DL_GPIO_PIN_8_EDGE_RISE_FALL);
+        PIN_KEY_1_EDGE_RISE_FALL | PIN_KEY_2_EDGE_RISE_FALL);
     DL_GPIO_clearInterruptStatus(PIN_KEY_PORT, PIN_KEY_1 | PIN_KEY_2);
     DL_GPIO_enableInterrupt(PIN_KEY_PORT, PIN_KEY_1 | PIN_KEY_2);
     NVIC_EnableIRQ(GPIOB_INT_IRQn);

@@ -1,3 +1,12 @@
+/*
+ * 应用层调度桥：把按键、比赛状态机、视觉、云台、通信和UI拆成独立Step入口。
+ * rtos_app.c在各自任务上下文调用这些入口；ISR只能发通知，不能直接调用本文件。
+ * 本模块会推动任务状态和硬件命令，但不创建/删除RTOS任务。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "app.h"
 
 #include "FreeRTOS.h"
@@ -5,13 +14,16 @@
 
 #include "board.h"
 #include "board_config.h"
+#include "bluetooth_service.h"
 #include "body_motion.h"
+#include "car_display.h"
 #include "delay.h"
 #include "gimbal.h"
 #include "gimbal_attitude.h"
 #include "h7_gyro_link.h"
-#include "h7_lcd_display.h"
+#if CAR_JY61P_ENABLED
 #include "jy61p.h"
+#endif
 #include "key.h"
 #include "link.h"
 #include "log_uart.h"
@@ -81,7 +93,7 @@ static CarEvent App_HandleKeyEvent(KeyEvent event)
     return CAR_EVENT_NONE;
 }
 
-/* 作用：Task1 跑 NO YAW 时走快路径，避免 OLED/视觉/云台任务拖慢 240ms 等待。 */
+/* 作用：Task1跑NO YAW时走快路径，避免显示/视觉/云台任务拖慢控制。 */
 static uint8_t App_IsTask1NoYawRunning(void)
 {
     return (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
@@ -113,7 +125,7 @@ static uint8_t g_appLaserMissionId;
 static TickType_t g_appLaserDelayStartTick;
 static AppCameraLaserStage g_appLaserStage;
 
-/* 作用：进入快路径时只刷一次 OLED，避免任务已经启动但屏幕还停在菜单。 */
+/* 作用：进入快路径时只刷一次当前显示后端，避免屏幕仍停在菜单。 */
 static void App_ShowFastMissionOnce(uint8_t missionId)
 {
     if (g_appFastMissionId == missionId) {
@@ -207,6 +219,7 @@ static void App_UpdateCameraLaserCommand(uint8_t missionId)
     g_appLaserStage = APP_CAMERA_LASER_SENT;
 }
 
+/* 历史函数名保留Oled字样，实际通过CarDisplay同步到所有已启用屏幕。 */
 static void App_ShowTask2OledLine(uint8_t index, const char *text)
 {
     char padded[APP_TASK2_OLED_MAX_CHARS + 1U];
@@ -224,10 +237,10 @@ static void App_ShowTask2OledLine(uint8_t index, const char *text)
         ++i;
     }
 
-    H7LcdDisplay_ShowLine(index, padded);
+    CarDisplay_ShowLine(index, padded);
 }
 
-/* 作用：云台任务只在等待视觉和进入追踪时各刷一次 OLED。 */
+/* 作用：云台任务只在等待视觉和进入追踪时各刷新一次显示状态。 */
 static void App_ShowGimbalOledStatus(uint8_t missionId,
     AppTask2OledStatus status)
 {
@@ -259,7 +272,7 @@ static void App_ShowGimbalOledStatus(uint8_t missionId,
     App_ShowTask2OledLine(1U, statusText);
     App_ShowTask2OledLine(2U, "");
     App_ShowTask2OledLine(3U, "");
-    H7LcdDisplay_Refresh();
+    CarDisplay_Refresh();
     if (Board_IsDisplayAvailable() != 0U) {
         g_appTask2OledStatus = status;
     }
@@ -316,27 +329,36 @@ static void App_ClearFastMission(void)
  */
 void App_Init(void)
 {
-    Board_ShowBootProgress("LCD LINK", "UART OK", "Gray OK", "APP...", "");
+    Board_ShowBootProgress("DISPLAY", "UART OK", "Gray OK", "APP...", "");
     LOG_LINE("app: init begin");
+#if CAR_LIBRARY_DISPLAY_ENABLED
     delay_ms(100U);
+#endif
 
     MotorNoYaw_Init();
+    BluetoothService_Init();
     StaticConfig_Init();
     Gimbal_Init();
     Vision_Init();
+#if CAR_LIBRARY_H7_IMU_ENABLED
     H7GyroLink_Init();
+#endif
+#if CAR_JY61P_ENABLED
     JY61P_Init();
+#endif
     BodyMotion_Init();
     GimbalAttitude_Init();
     Menu_Init();
     StateMachine_Init();
 
     LOG_LINE("m0-light-rtos competition init ok");
-    Board_ShowBootProgress("LCD LINK", "UART OK", "Gray OK", "APP OK", "");
+    Board_ShowBootProgress("DISPLAY", "UART OK", "Gray OK", "APP OK", "");
+#if CAR_LIBRARY_DISPLAY_ENABLED
     delay_ms(200U);
+#endif
 
-    H7LcdDisplay_Clear();
-    H7LcdDisplay_Refresh();
+    CarDisplay_Clear();
+    CarDisplay_Refresh();
     Menu_Task(StateMachine_GetState());
 }
 
@@ -359,29 +381,11 @@ uint8_t App_InputHadEvent(void)
     return g_appInputHadEvent;
 }
 
-uint8_t App_InputIsActive(void)
-{
-    return (uint8_t)(((Key_IsPressed(KEY_ID_1) != 0U) ||
-        (Key_IsPressed(KEY_ID_2) != 0U) ||
-        (Key_HasPendingEvent() != 0U)) ? 1U : 0U);
-}
-
-void App_MissionDispatch(CarEvent event)
-{
-    if (event != CAR_EVENT_NONE) {
-        StateMachine_Dispatch(event);
-    }
-}
-
-void App_MissionStep(void)
-{
-    StateMachine_Task();
-}
-
 void App_CommStep(void)
 {
     uint8_t missionId = StateMachine_GetMissionId();
 
+    BluetoothService_Task(5U);
     Link_Task();
     if ((StateMachine_GetState() == CAR_STATE_MISSION) &&
         (missionId == 7U)) {
@@ -485,3 +489,5 @@ void App_Task(void)
     App_HousekeepingStep();
     delay_ms(CAR_APP_LOOP_DELAY_MS);
 }
+
+#endif

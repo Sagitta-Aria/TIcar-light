@@ -1,4 +1,13 @@
+/*
+ * 本地I2C OLED/SSD1306驱动，由library_config.h选择是否编译实际实现。
+ * 该驱动包含同步I2C等待，不能从ISR或10ms控制路径调用；菜单应使用car_display.c。
+ */
 #include "oled.h"
+
+#include "library_config.h"
+
+#if CAR_LIBRARY_LOCAL_OLED_ENABLED
+
 #include "stdlib.h"
 #include "oledfont.h"
 
@@ -673,3 +682,5 @@ void OLED_Init(void)
 {
     (void)OLED_InitAtAddress(g_oledAddress, 1U);
 }
+
+#endif

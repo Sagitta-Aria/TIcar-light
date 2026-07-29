@@ -78,6 +78,12 @@ void Gimbal_SetYawFeedForward(int16_t speedSps);
 /* 写入姿态环的电机方向补偿速度；只允许高优先级 Gimbal 任务调用。 */
 void Gimbal_SetYawAttitudeCompensation(int16_t speedSps);
 
+/*
+ * 非阻塞地让pitch向上移动固定STEP；移动期间pitch暂不接受视觉速度命令。
+ * 会遵守当前闭环的pitch相对软限位，yaw控制不受影响。
+ */
+void Gimbal_StartPitchUpMove(uint32_t steps, uint16_t speedSps);
+
 /* 写入视觉目标长度拟合出的yaw增益，Q1024；不缩放H7/JY61或固定yaw命令。 */
 void Gimbal_SetVisionYawGainQ1024(uint16_t gainQ1024);
 

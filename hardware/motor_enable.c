@@ -1,3 +1,7 @@
+/*
+ * 电机使能兼容层：保存状态机的使能请求，但当前底盘无独立EN、云台EN由硬件固定有效。
+ * 调用这些接口不会翻转MCU GPIO；真正停车必须使用Motor_Stop/Motion_Stop清零输出。
+ */
 #include "motor_enable.h"
 
 /*

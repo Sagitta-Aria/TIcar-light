@@ -1,3 +1,12 @@
+/*
+ * 板载JY61底座姿态估计：展开yaw、滤除角速度噪声、校准零偏并做短时预测。
+ * 由Gimbal任务按10ms周期调用；输出供双IMU云台前馈和转向角度曲线只读使用。
+ * 本模块不直接驱动电机；共享快照通过临界区保护，UART ISR只更新JY61底层缓存。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "body_motion.h"
 
 #include "FreeRTOS.h"
@@ -304,3 +313,5 @@ uint8_t BodyMotion_SetConfig(const BodyMotionConfig *config)
     BodyMotion_ExitCritical(primask);
     return 1U;
 }
+
+#endif

@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "library_config.h"
+
 #ifndef CONFIG_MSPM0G350X
 #define CONFIG_MSPM0G350X
 #endif
@@ -111,19 +113,28 @@ extern "C" {
 #define H7GyroLink_INST_INT_IRQN                                  UART0_INT_IRQn
 #define H7GyroLink_BAUD_RATE                                           (115200)
 
-/* 板载JY61P作为底座前馈：UART1 PB6 TX、PB7 RX。 */
+/* UART1供JY61P底座姿态使用；天猛星需避开PB6/PB7板载Flash。 */
 #define JY61P_INST                                                         UART1
 #define JY61P_INST_FREQUENCY                                            32000000
 #define JY61P_INST_IRQHandler                                   UART1_IRQHandler
 #define JY61P_INST_INT_IRQN                                       UART1_INT_IRQn
 #define GPIO_JY61P_RX_PORT                                                 GPIOB
 #define GPIO_JY61P_TX_PORT                                                 GPIOB
+#if CAR_LIBRARY_BOARD_IS_TIANMENG
+#define GPIO_JY61P_RX_PIN                                          DL_GPIO_PIN_5
+#define GPIO_JY61P_TX_PIN                                          DL_GPIO_PIN_4
+#define GPIO_JY61P_IOMUX_RX                                      (IOMUX_PINCM18)
+#define GPIO_JY61P_IOMUX_TX                                      (IOMUX_PINCM17)
+#define GPIO_JY61P_IOMUX_RX_FUNC                       IOMUX_PINCM18_PF_UART1_RX
+#define GPIO_JY61P_IOMUX_TX_FUNC                       IOMUX_PINCM17_PF_UART1_TX
+#else
 #define GPIO_JY61P_RX_PIN                                          DL_GPIO_PIN_7
 #define GPIO_JY61P_TX_PIN                                          DL_GPIO_PIN_6
 #define GPIO_JY61P_IOMUX_RX                                      (IOMUX_PINCM24)
 #define GPIO_JY61P_IOMUX_TX                                      (IOMUX_PINCM23)
 #define GPIO_JY61P_IOMUX_RX_FUNC                       IOMUX_PINCM24_PF_UART1_RX
 #define GPIO_JY61P_IOMUX_TX_FUNC                       IOMUX_PINCM23_PF_UART1_TX
+#endif
 #define JY61P_BAUD_RATE                                                 (115200)
 
 /* Exchange UART3: PB2 TX, PB3 RX. */
@@ -159,14 +170,27 @@ extern "C" {
 #define GRAY_S6_IOMUX                                             (IOMUX_PINCM59)
 #define GRAY_S7_IOMUX                                             (IOMUX_PINCM60)
 
-/* Keys: PB9/PB8. */
+/* K1/K2：天猛星避开PB8/PB9板载Flash总线。 */
 #define KEY_PORT                                                           GPIOB
+#if CAR_LIBRARY_BOARD_IS_TIANMENG
+#define KEY_1_PIN                                                   DL_GPIO_PIN_0
+#define KEY_1_IIDX                                                DL_GPIO_IIDX_DIO0
+#define KEY_1_IOMUX                                                (IOMUX_PINCM12)
+#define KEY_1_EDGE_RISE_FALL                         DL_GPIO_PIN_0_EDGE_RISE_FALL
+#define KEY_2_PIN                                                   DL_GPIO_PIN_1
+#define KEY_2_IIDX                                                DL_GPIO_IIDX_DIO1
+#define KEY_2_IOMUX                                                (IOMUX_PINCM13)
+#define KEY_2_EDGE_RISE_FALL                         DL_GPIO_PIN_1_EDGE_RISE_FALL
+#else
 #define KEY_1_PIN                                                   DL_GPIO_PIN_9
 #define KEY_1_IIDX                                                DL_GPIO_IIDX_DIO9
 #define KEY_1_IOMUX                                                (IOMUX_PINCM26)
+#define KEY_1_EDGE_RISE_FALL                         DL_GPIO_PIN_9_EDGE_RISE_FALL
 #define KEY_2_PIN                                                   DL_GPIO_PIN_8
 #define KEY_2_IIDX                                                DL_GPIO_IIDX_DIO8
 #define KEY_2_IOMUX                                                (IOMUX_PINCM25)
+#define KEY_2_EDGE_RISE_FALL                         DL_GPIO_PIN_8_EDGE_RISE_FALL
+#endif
 
 void SYSCFG_DL_init(void);
 void SYSCFG_DL_initPower(void);

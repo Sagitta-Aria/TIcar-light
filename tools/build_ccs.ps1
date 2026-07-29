@@ -3,6 +3,12 @@ param(
     [string]$SdkDir = "D:\Ti\mspm0_sdk_2_10_00_04",
     [string]$CcsDir = "D:\Ti\ccs",
     [string]$BuildDir = "",
+    [string]$Profile = "",
+    [string]$Board = "Tianmeng",
+    [string]$BluetoothRole = "Disabled",
+    [string]$Jy61 = "Enabled",
+    [string]$Log = "Enabled",
+    [string[]]$Defines = @(),
     [switch]$Clean
 )
 
@@ -49,8 +55,87 @@ $ProjectDir = (Resolve-Path -LiteralPath $ProjectDir).Path
 $SdkDir = (Resolve-Path -LiteralPath $SdkDir).Path
 $CcsDir = (Resolve-Path -LiteralPath $CcsDir).Path
 
+$legacyProfile = $null
+foreach ($define in $Defines) {
+    if ($define -match '^CAR_LIBRARY_GMR_CONFIG_ENABLED=(0|1)(?:U)?$') {
+        $legacyProfile = if ($Matches[1] -eq '1') { 'Gmr' } else { 'Full' }
+    }
+    if ($define -match '^CAR_ACTIVE_PROFILE=') {
+        throw "Use -Profile Gmr or -Profile Full instead of defining CAR_ACTIVE_PROFILE"
+    }
+    if ($define -match '^CAR_BLUETOOTH_ROLE=') {
+        throw "Use -BluetoothRole Disabled, Master, or Slave instead of defining CAR_BLUETOOTH_ROLE"
+    }
+    if ($define -match '^CAR_LIBRARY_BOARD_PROFILE=') {
+        throw "Use -Board Tianmeng or -Board Dimeng instead of defining CAR_LIBRARY_BOARD_PROFILE"
+    }
+    if ($define -match '^CAR_JY61P_ENABLED=') {
+        throw "Use -Jy61 Enabled or -Jy61 Disabled instead of defining CAR_JY61P_ENABLED"
+    }
+    if ($define -match '^CAR_ENABLE_LOG_UART(?:_RX)?=') {
+        throw "Use -Log Enabled or -Log Disabled instead of defining CAR_ENABLE_LOG_UART"
+    }
+}
+if ([string]::IsNullOrWhiteSpace($Profile)) {
+    $Profile = if ($null -ne $legacyProfile) { $legacyProfile } else { 'Gmr' }
+}
+if (($Profile -ne 'Gmr') -and ($Profile -ne 'Full')) {
+    throw "Profile must be Gmr or Full"
+}
+if (($null -ne $legacyProfile) -and ($legacyProfile -ne $Profile)) {
+    throw "-Profile $Profile conflicts with legacy define selecting $legacyProfile"
+}
+$profileValue = if ($Profile -eq 'Gmr') { 1 } else { 0 }
+$profileSlug = $Profile.ToLowerInvariant()
+
+if (($Board -ne 'Tianmeng') -and ($Board -ne 'Dimeng')) {
+    throw "Board must be Tianmeng or Dimeng"
+}
+$boardValue = if ($Board -eq 'Dimeng') { 1 } else { 2 }
+$boardSlug = $Board.ToLowerInvariant()
+
+if (($BluetoothRole -ne 'Disabled') -and ($BluetoothRole -ne 'Master') -and
+    ($BluetoothRole -ne 'Slave')) {
+    throw "BluetoothRole must be Disabled, Master, or Slave"
+}
+$bluetoothRoleValue = if ($BluetoothRole -eq 'Master') {
+    1
+}
+elseif ($BluetoothRole -eq 'Slave') {
+    2
+}
+else {
+    0
+}
+$bluetoothRoleSlug = $BluetoothRole.ToLowerInvariant()
+
+if (($Jy61 -ne 'Enabled') -and ($Jy61 -ne 'Disabled')) {
+    throw "Jy61 must be Enabled or Disabled"
+}
+$jy61Value = if ($Jy61 -eq 'Enabled') { 1 } else { 0 }
+
+if (($Log -ne 'Enabled') -and ($Log -ne 'Disabled')) {
+    throw "Log must be Enabled or Disabled"
+}
+$logValue = if ($Log -eq 'Enabled') { 1 } else { 0 }
+
+if (($Profile -eq 'Full') -and ($Board -eq 'Dimeng') -and
+    ($BluetoothRole -ne 'Disabled')) {
+    throw "Full/Dimeng cannot enable Bluetooth because K230 owns UART3 PB2/PB3"
+}
+
 if ([string]::IsNullOrWhiteSpace($BuildDir)) {
-    $BuildDir = Join-Path $ProjectDir "Debug\codex-build"
+    $buildName = "profile-$profileSlug-$boardSlug"
+    if ($bluetoothRoleValue -ne 0) {
+        $buildName += "-bt-$bluetoothRoleSlug"
+    }
+    if ($jy61Value -eq 0) {
+        $buildName += "-no-jy61"
+    }
+    if ($logValue -eq 0) {
+        $buildName += "-no-log"
+    }
+    $BuildDir = Join-Path $ProjectDir "Debug\$buildName"
 }
 
 $ToolRoot = Join-Path $CcsDir "tools\compiler\ti-cgt-armllvm_4.0.4.LTS"
@@ -112,8 +197,21 @@ $compileArgs = @(
     "-O2",
     "-gdwarf-3",
     "-D__MSPM0G3507__",
-    "-D__USE_SYSCONFIG__"
+    "-D__USE_SYSCONFIG__",
+    "-DCAR_ACTIVE_PROFILE=$profileValue",
+    "-DCAR_LIBRARY_BOARD_PROFILE=$boardValue",
+    "-DCAR_BLUETOOTH_ROLE=$bluetoothRoleValue",
+    "-DCAR_JY61P_ENABLED=$jy61Value",
+    "-DCAR_ENABLE_LOG_UART=$logValue"
 )
+if ($logValue -eq 0) {
+    $compileArgs += "-DCAR_ENABLE_LOG_UART_RX=0"
+}
+foreach ($define in $Defines) {
+    if (-not [string]::IsNullOrWhiteSpace($define)) {
+        $compileArgs += "-D$define"
+    }
+}
 foreach ($includeDir in $includeDirs) {
     $compileArgs += @("-I", $includeDir)
 }
@@ -121,6 +219,38 @@ foreach ($includeDir in $includeDirs) {
 $sources = @()
 foreach ($dir in $sourceDirs) {
     $sources += Get-ChildItem -LiteralPath $dir -Filter *.c -File
+}
+$gmrOnlySources = @(
+    "app\gmr_app.c",
+    "app\gmr_bluetooth_mission.c",
+    "app\gmr_menu.c",
+    "app\gmr_state_machine.c",
+    "app\gmr_tuning_console.c",
+    "app\gmr_yaw_control.c",
+    "hardware\gmr_motor.c"
+)
+$fullOnlySources = @(
+    "app\app.c",
+    "app\body_motion.c",
+    "app\gimbal.c",
+    "app\gimbal_attitude.c",
+    "app\menu.c",
+    "app\state_machine.c",
+    "app\staticconfig.c",
+    "app\tuning_console.c",
+    "app\vision.c",
+    "hardware\link.c",
+    "hardware\motor.c",
+    "hardware\stepper_pulse.c"
+)
+$excludedSources = if ($Profile -eq 'Gmr') {
+    $fullOnlySources
+} else {
+    $gmrOnlySources
+}
+$sources = $sources | Where-Object {
+    $relativePath = $_.FullName.Substring($ProjectDir.Length).TrimStart('\')
+    $excludedSources -notcontains $relativePath
 }
 $sources += @(
     (Get-Item -LiteralPath (Join-Path $FreeRtosDir "tasks.c"))
@@ -181,4 +311,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "Link failed"
 }
 
-Write-Host "Build OK: $output"
+Write-Host "Build OK [$Profile/$Board/$BluetoothRole/JY61=$Jy61/Log=$Log]: $output"

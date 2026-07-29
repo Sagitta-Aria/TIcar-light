@@ -1,9 +1,20 @@
+/*
+ * 数字灰度循迹与直角转向状态机：支持速度闭环/PWM循迹、锁内轮和双轮反转。
+ * CarControl任务每10ms运行主状态；TIMG0 ISR只做灰度快采样并生成入弯/回线事件。
+ * S1/S7决定双轮反转法何时退出强转，JY61只辅助速度曲线，不取代灰度出弯判断。
+ */
+#include "library_config.h"
+
+#if CAR_LIBRARY_LINE_FOLLOW_ENABLED
+
 #include "motor_no_yaw.h"
 
 #include "board_config.h"
 #include "control_config.h"
 #include "gray.h"
+#if CAR_LIBRARY_TURN_SPEED_USES_JY61
 #include "jy61p.h"
+#endif
 #include "motion.h"
 #include "motor.h"
 #include "motor_enable.h"
@@ -42,9 +53,11 @@
 #error "CAR_MOTOR_NO_YAW_LINE_CONFIRM_SAMPLES must be 1..255"
 #endif
 
+#if CAR_LIBRARY_TURN_SPEED_USES_JY61
 #if ((CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100 == 0U) || \
     (CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100 > 18000U))
 #error "JY61 turn target must be 0.01..180.00 degrees"
+#endif
 #endif
 
 #if ((CAR_MOTOR_NO_YAW_RETURN_CONFIRM_SAMPLES == 0U) || \
@@ -52,7 +65,7 @@
 #error "CAR_MOTOR_NO_YAW_RETURN_CONFIRM_SAMPLES must be 1..255"
 #endif
 
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
 
 #if ((CAR_MOTOR_NO_YAW_TASK1_PID_MIN_SPEED_COUNTS_PER_PERIOD > \
         CAR_MOTOR_NO_YAW_TASK1_PID_BASE_SPEED_COUNTS_PER_PERIOD) || \
@@ -225,7 +238,7 @@ typedef enum {
 typedef struct {
     int16_t lineWeight[GRAY_SENSOR_COUNT];
     int16_t lineDeadband;
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
     int16_t baseSpeedCounts;
     int16_t minLineSpeedCounts;
     int16_t maxLineSpeedCounts;
@@ -258,7 +271,7 @@ typedef struct {
 static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = {
     {
         {
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
             CAR_MOTOR_NO_YAW_TASK1_PID_S1_WEIGHT,
             CAR_MOTOR_NO_YAW_TASK1_PID_S2_WEIGHT,
             CAR_MOTOR_NO_YAW_TASK1_PID_S3_WEIGHT,
@@ -276,7 +289,7 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
             CAR_MOTOR_NO_YAW_TASK1_PWM_S7_WEIGHT
 #endif
         },
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
         (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_LINE_DEADBAND,
         (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_BASE_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK1_PID_MIN_SPEED_COUNTS_PER_PERIOD,
@@ -309,7 +322,7 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
     },
     {
         {
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
             CAR_MOTOR_NO_YAW_TASK4_PID_S1_WEIGHT,
             CAR_MOTOR_NO_YAW_TASK4_PID_S2_WEIGHT,
             CAR_MOTOR_NO_YAW_TASK4_PID_S3_WEIGHT,
@@ -327,7 +340,7 @@ static const MotorNoYawConfig g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_COUNT] = 
             CAR_MOTOR_NO_YAW_TASK4_PWM_S7_WEIGHT
 #endif
         },
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_LINE_DEADBAND,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_BASE_SPEED_COUNTS_PER_PERIOD,
         (int16_t)CAR_MOTOR_NO_YAW_TASK4_PID_MIN_SPEED_COUNTS_PER_PERIOD,
@@ -435,6 +448,7 @@ static uint16_t MotorNoYaw_MsToTicks(uint16_t timeMs)
         CHASSIS_CONTROL_PERIOD_MS);
 }
 
+#if CAR_LIBRARY_TURN_SPEED_USES_JY61
 /* 把跨越正负180度的JY61航向差换算为0..180度的绝对最短角差。 */
 static uint16_t MotorNoYaw_AbsYawDeltaX100(int16_t yawX100,
     int16_t baseYawX100)
@@ -488,6 +502,7 @@ static void MotorNoYaw_UpdateTurnYaw(void)
         g_motorNoYaw.turnYawDeltaX100 = deltaX100;
     }
 }
+#endif
 
 /* 按已完成转角把外轮从初始速度线性降到粗略参考角对应的速度。 */
 static int16_t MotorNoYaw_CalculateTurnOuterSpeed(
@@ -495,6 +510,7 @@ static int16_t MotorNoYaw_CalculateTurnOuterSpeed(
 {
     int16_t startSpeed = (direction == MOTOR_NO_YAW_TURN_LEFT) ?
         config->leftTurnSpeedCounts : config->rightTurnSpeedCounts;
+#if CAR_LIBRARY_TURN_SPEED_USES_JY61
     int16_t nearSpeed = (direction == MOTOR_NO_YAW_TURN_LEFT) ?
         config->leftTurnNearSpeedCounts : config->rightTurnNearSpeedCounts;
     int32_t startMagnitude = (startSpeed < 0) ?
@@ -517,6 +533,9 @@ static int16_t MotorNoYaw_CalculateTurnOuterSpeed(
     }
     return (startSpeed < 0) ?
         (int16_t)-magnitude : (int16_t)magnitude;
+#else
+    return startSpeed;
+#endif
 }
 
 static uint32_t MotorNoYaw_AbsEncoderDelta(int32_t now, int32_t base)
@@ -525,7 +544,7 @@ static uint32_t MotorNoYaw_AbsEncoderDelta(int32_t now, int32_t base)
         (uint32_t)(base - now);
 }
 
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
 
 /* 作用：把速度限制在普通循迹允许范围，普通循迹不允许单轮停车。 */
 static int16_t MotorNoYaw_ClampLineSpeed(
@@ -681,7 +700,7 @@ static uint8_t MotorNoYaw_CalcDigitalLineError(
     return 1U;
 }
 
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
 
 static void MotorNoYaw_CalculateLineTargets(const MotorNoYawConfig *config,
     int16_t error, int16_t errorDelta, int16_t *leftTargetCounts,
@@ -727,7 +746,7 @@ static void MotorNoYaw_CalculateLinePwm(const MotorNoYawConfig *config,
 static int32_t MotorNoYaw_GetCrossSyncGainQ1024(
     const MotorNoYawConfig *config, uint8_t digitalMask)
 {
-#if CAR_MOTOR_NO_YAW_ENABLE_CROSS_SYNC
+#if CAR_LIBRARY_LINE_DRIVE_USES_PWM_ENCODER_SYNC
     return ((digitalMask & MOTOR_NO_YAW_S4_MASK) != 0U) ?
         config->syncGainQ1024 : 0L;
 #else
@@ -744,7 +763,7 @@ uint8_t MotorNoYaw_ApplyTask1LineCommand(uint8_t digitalMask)
     const MotorNoYawConfig *config =
         &g_motorNoYawConfigs[MOTOR_NO_YAW_PROFILE_TASK1];
     int16_t error;
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
     int16_t leftTargetCounts;
     int16_t rightTargetCounts;
 #else
@@ -754,7 +773,7 @@ uint8_t MotorNoYaw_ApplyTask1LineCommand(uint8_t digitalMask)
 
     Motor_SetChassisZeroTargetBrake(0U, 0U);
     if (MotorNoYaw_CalcDigitalLineError(config, digitalMask, &error) == 0U) {
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
         Motion_SetChassisPeriodCommand(0, 0);
 #else
         Motor_SetChassisCrossCoupledPwm(0, 0, 0L,
@@ -762,7 +781,7 @@ uint8_t MotorNoYaw_ApplyTask1LineCommand(uint8_t digitalMask)
 #endif
         return 0U;
     }
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
     MotorNoYaw_CalculateLineTargets(
         config, error, 0, &leftTargetCounts, &rightTargetCounts);
     Motion_SetChassisPeriodCommand(leftTargetCounts, rightTargetCounts);
@@ -781,7 +800,7 @@ static void MotorNoYaw_ApplyLineControl(void)
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
     int16_t error = 0;
     int16_t errorDelta = 0;
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
     int16_t leftSpeed;
     int16_t rightSpeed;
 #else
@@ -800,7 +819,7 @@ static void MotorNoYaw_ApplyLineControl(void)
         g_motorNoYaw.lineError = error;
     }
     Motor_SetChassisZeroTargetBrake(0U, 0U);
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
     MotorNoYaw_CalculateLineTargets(config, g_motorNoYaw.lineError,
         errorDelta, &leftSpeed, &rightSpeed);
     g_motorNoYaw.lastLeftTargetCounts = leftSpeed;
@@ -826,7 +845,7 @@ static void MotorNoYaw_ApplyLineLostCommand(void)
 
     Motor_SetChassisZeroTargetBrake(0U, 0U);
     if (g_motorNoYaw.hasLastLineCommand != 0U) {
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
         Motion_SetChassisPeriodCommand(g_motorNoYaw.lastLeftTargetCounts,
             g_motorNoYaw.lastRightTargetCounts);
 #else
@@ -838,7 +857,7 @@ static void MotorNoYaw_ApplyLineLostCommand(void)
         return;
     }
 
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
     Motion_SetChassisPeriodCommand(config->defaultSearchSpeedCounts, 0);
 #else
     Motor_SetChassisCrossCoupledPwm(config->searchPwmCounts, 0,
@@ -919,7 +938,9 @@ static uint8_t MotorNoYaw_RecordRightTurnSample(uint8_t mask)
 /* 作用：左右直角触发后，先让车头继续往直角里走一点。 */
 static void MotorNoYaw_StartTurnApproach(MotorNoYawTurnDirection direction)
 {
+#if CAR_LIBRARY_TURN_SPEED_USES_JY61
     (void)MotorNoYaw_CaptureTurnYawBase();
+#endif
     g_motorNoYaw.turnDirection = direction;
     g_motorNoYaw.turnTicks = 0U;
     g_motorNoYaw.lineLostTicks = 0U;
@@ -937,8 +958,9 @@ static void MotorNoYaw_StartTurnApproach(MotorNoYawTurnDirection direction)
     }
 }
 
-/* 作用：按锁存方向写强转目标；内轮使用轻微反向闭环目标。 */
-static void MotorNoYaw_ApplyTurnCommand(const MotorNoYawConfig *config)
+/* 作用：保留旧式单外轮转向，供配置宏随时切回。 */
+static void MotorNoYaw_ApplyLegacyTurnCommand(
+    const MotorNoYawConfig *config)
 {
     int16_t outerSpeed = MotorNoYaw_CalculateTurnOuterSpeed(config,
         g_motorNoYaw.turnDirection);
@@ -952,6 +974,37 @@ static void MotorNoYaw_ApplyTurnCommand(const MotorNoYawConfig *config)
     }
 }
 
+/* 作用：内轮反转、外轮前进，以更小半径完成直角转向。 */
+static void MotorNoYaw_ApplyCounterRotateTurnCommand(
+    const MotorNoYawConfig *config)
+{
+    int16_t outerSpeed = MotorNoYaw_CalculateTurnOuterSpeed(config,
+        g_motorNoYaw.turnDirection);
+    int16_t innerSpeed = config->turnInnerSpeedCounts;
+
+    Motor_SetChassisZeroTargetBrake(0U, 0U);
+    if (g_motorNoYaw.turnDirection == MOTOR_NO_YAW_TURN_LEFT) {
+        Motion_SetChassisPeriodCommand(innerSpeed, outerSpeed);
+    } else {
+        Motion_SetChassisPeriodCommand(outerSpeed, innerSpeed);
+    }
+}
+
+/* 作用：按编译期方法宏选择强转轮速，不改变对外状态和调用位置。 */
+static void MotorNoYaw_ApplyTurnCommand(const MotorNoYawConfig *config)
+{
+#if (CAR_LIBRARY_RIGHT_ANGLE_TURN_METHOD == \
+    CAR_LIBRARY_RIGHT_ANGLE_TURN_LOCKED_INNER)
+    MotorNoYaw_ApplyLegacyTurnCommand(config);
+#elif (CAR_LIBRARY_RIGHT_ANGLE_TURN_METHOD == \
+    CAR_LIBRARY_RIGHT_ANGLE_TURN_COUNTER_ROTATE)
+    MotorNoYaw_ApplyCounterRotateTurnCommand(config);
+#else
+    (void)config;
+    Motion_SetChassisPeriodCommand(0, 0);
+#endif
+}
+
 /* 作用：切换内外轮目标后，进入已锁存方向的强转状态。 */
 static void MotorNoYaw_StartTurn(void)
 {
@@ -961,7 +1014,7 @@ static void MotorNoYaw_StartTurn(void)
     g_motorNoYaw.lineLostTicks = 0U;
     g_motorNoYaw.hasLastLineCommand = 0U;
     g_motorNoYaw.turnFlag = 0U;      /* 强转中不准再次进入强转。 */
-    g_motorNoYaw.returnFlag = 0U;    /* 必须先等转向侧最外传感器释放。 */
+    g_motorNoYaw.returnFlag = 0U;    /* 旧方法用来记录最外传感器已经释放。 */
     g_motorNoYaw.returnConfirmSamples = 0U;
     g_motorNoYaw.turnRequest = (uint8_t)MOTOR_NO_YAW_TURN_NONE;
     g_motorNoYaw.returnLineRequest = 0U;
@@ -1030,9 +1083,11 @@ uint8_t MotorNoYaw_TimerSample(void)
 {
     static uint16_t sampleDivTicks;
     uint8_t mask;
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     uint8_t leftTurnDetected;
     uint8_t rightTurnDetected;
     uint8_t returnMask;
+#endif
     MotorNoYawState state;
 
     if (g_motorNoYaw.running == 0U) {
@@ -1051,6 +1106,7 @@ uint8_t MotorNoYaw_TimerSample(void)
     state = g_motorNoYaw.state;
 
     if (state == MOTOR_NO_YAW_STATE_LINE) {  //检测强转
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
         if (g_motorNoYaw.turnFlag == 0U) {
             if ((mask & MOTOR_NO_YAW_ALL_TURN_MASK) == 0U) {
                 if (g_motorNoYaw.turnReleaseSamples <
@@ -1078,12 +1134,18 @@ uint8_t MotorNoYaw_TimerSample(void)
             return 1U;
         }
         return 0U;
+#else
+        return 0U;
+#endif
     }
 
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     if ((state == MOTOR_NO_YAW_STATE_TURN_LEFT) ||
         (state == MOTOR_NO_YAW_STATE_TURN_RIGHT)) {
         returnMask = (state == MOTOR_NO_YAW_STATE_TURN_LEFT) ?
             MOTOR_NO_YAW_LEFT_RETURN_MASK : MOTOR_NO_YAW_RIGHT_RETURN_MASK;
+#if (CAR_LIBRARY_RIGHT_ANGLE_TURN_METHOD == \
+    CAR_LIBRARY_RIGHT_ANGLE_TURN_LOCKED_INNER)
         if (g_motorNoYaw.returnFlag == 0U) {
             g_motorNoYaw.returnConfirmSamples = 0U;
             if ((mask & returnMask) == 0U) {
@@ -1091,6 +1153,7 @@ uint8_t MotorNoYaw_TimerSample(void)
             }
             return 0U;
         }
+#endif
         if ((mask & returnMask) == 0U) {
             g_motorNoYaw.returnConfirmSamples = 0U;
             return 0U;
@@ -1106,6 +1169,7 @@ uint8_t MotorNoYaw_TimerSample(void)
             return 1U;
         }
     }
+#endif
 
     return 0U;
 }
@@ -1151,9 +1215,11 @@ static void MotorNoYaw_TaskTurnApproach(void)
     uint16_t approachTicks =
         MotorNoYaw_MsToTicks(MotorNoYaw_GetConfig()->turnApproachMs);
 
+#if CAR_LIBRARY_TURN_SPEED_USES_JY61
     MotorNoYaw_UpdateTurnYaw();
+#endif
     if (g_motorNoYaw.hasLastLineCommand != 0U) {
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
             Motion_SetChassisPeriodCommand(
                 g_motorNoYaw.lastLeftTargetCounts,
                 g_motorNoYaw.lastRightTargetCounts);
@@ -1166,7 +1232,7 @@ static void MotorNoYaw_TaskTurnApproach(void)
                 MotorNoYaw_GetConfig()->syncLimitPwmCounts);
 #endif
     } else {
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
             Motion_SetChassisPeriodCommand(
                 (int16_t)MotorNoYaw_GetConfig()->baseSpeedCounts,
                 (int16_t)MotorNoYaw_GetConfig()->baseSpeedCounts);
@@ -1188,7 +1254,7 @@ static void MotorNoYaw_TaskTurnApproach(void)
     }
 }
 
-/* 作用：内轮停车、外轮转向；优先响应灰度回线，姿态角只辅助减速。 */
+/* 作用：执行所选强转方法；优先响应最外灰度，姿态角只辅助外轮减速。 */
 static void MotorNoYaw_TaskTurn(void)
 {
     const MotorNoYawConfig *config = MotorNoYaw_GetConfig();
@@ -1199,7 +1265,9 @@ static void MotorNoYaw_TaskTurn(void)
         MotorNoYaw_StartTurnExit();
         return;
     }
+#if CAR_LIBRARY_TURN_SPEED_USES_JY61
     MotorNoYaw_UpdateTurnYaw();
+#endif
     MotorNoYaw_ApplyTurnCommand(config);
     if (g_motorNoYaw.turnTicks < MOTOR_NO_YAW_INVALID_TICKS) {
         ++g_motorNoYaw.turnTicks;
@@ -1297,7 +1365,7 @@ void MotorNoYaw_Stop(void)
     Motor_SetChassisZeroTargetBrake(0U, 0U);
     if (g_motorNoYaw.state != MOTOR_NO_YAW_STATE_IDLE) {
         Motion_SetChassisPeriodCommand(0, 0);
-    MotorEnable_SetChassis(0U);
+        MotorEnable_SetChassis(0U);
     }
     g_motorNoYaw.running = 0U;
     MotorNoYaw_SetSampleTimerEnabled(0U);
@@ -1413,3 +1481,5 @@ int16_t MotorNoYaw_GetLineError(void)
 {
     return g_motorNoYaw.lineError;
 }
+
+#endif /* CAR_LIBRARY_LINE_FOLLOW_ENABLED */

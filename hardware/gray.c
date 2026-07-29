@@ -1,3 +1,12 @@
+/*
+ * 七路灰度硬件抽象：按library_config选择GPIO数字输入或ADC模拟输入，并统一输出mask/误差。
+ * 普通任务可调用Gray_Update；TIMG0 ISR应走Gray_ReadDigitalMaskFast，避免ADC等待和复杂滤波。
+ * 数字模式不使用模拟阈值校准，但保留兼容接口以便快速切换比赛传感器方案。
+ */
+#include "library_config.h"
+
+#if CAR_LIBRARY_GRAY_INPUT_ENABLED
+
 #include "gray.h"
 
 #include "board_config.h"
@@ -5,7 +14,7 @@
 
 #define GRAY_CALIBRATION_MIN_SPAN   (64U)
 
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
 #if GRAY_DIGITAL_INPUT_PULL_UP
 #define GRAY_DIGITAL_RESISTOR       DL_GPIO_RESISTOR_PULL_UP
 #else
@@ -13,7 +22,7 @@
 #endif
 #endif
 
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
 typedef struct {
     GPIO_Regs *port;
     uint32_t pin;
@@ -26,7 +35,7 @@ typedef struct {
 } GrayAdcSlot;
 #endif
 
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
 /* g_grayDigitalMap：把从左到右的 7 路数字灰度输出映射到 GPIO。 */
 static const GrayDigitalSlot g_grayDigitalMap[GRAY_SENSOR_COUNT] = {
     {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_1, PIN_GRAY_1_IOMUX},
@@ -136,7 +145,7 @@ static void Gray_LoadDefaultThresholds(void)
     }
 }
 
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
 /*
  * 作用：把灰度引脚切成数字 GPIO 输入。
  * 使用场景：模块已经输出 0/1 黑白结果时。
@@ -169,6 +178,7 @@ static uint8_t Gray_ReadDigitalActive(uint32_t index)
     return (levelHigh == 0U) ? 1U : 0U;
 #endif
 }
+
 #else
 /*
  * 作用：等待 ADC 序列完成。
@@ -224,7 +234,7 @@ static uint8_t Gray_ReadRawOnce(uint16_t values[GRAY_SENSOR_COUNT])
  */
 static uint8_t Gray_RawToDigital(uint16_t raw, uint16_t threshold)
 {
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     (void)threshold;
     return (raw != 0U) ? 1U : 0U;
 #else
@@ -238,7 +248,7 @@ static uint8_t Gray_RawToDigital(uint16_t raw, uint16_t threshold)
 
 static uint16_t Gray_GetLineStrength(uint32_t index)
 {
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     return (g_grayDigital[index] != 0U) ? 1U : 0U;
 #else
     uint16_t raw;
@@ -337,7 +347,7 @@ void Gray_Init(void)
     g_grayFilterReady = 0U;
     Gray_LoadDefaultThresholds();
     Gray_CalibrationReset();
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     Gray_ConfigDigitalInputs();
 #else
     DL_ADC12_enableConversions(PIN_GRAY_ADC0);
@@ -348,7 +358,7 @@ void Gray_Init(void)
 
 void Gray_StartConversion(void)
 {
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     /* 数字灰度模式下没有 ADC 转换需要启动。 */
 #else
     if (!DL_ADC12_isConversionStarted(PIN_GRAY_ADC0)) {
@@ -368,7 +378,7 @@ void Gray_StartConversion(void)
  */
 uint8_t Gray_Update(void)
 {
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     uint32_t i;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
@@ -441,7 +451,7 @@ uint8_t Gray_GetDigitalMask(void)
 
 uint8_t Gray_ReadDigitalMaskFast(void)
 {
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     uint8_t mask = 0U;
     uint32_t pins = DL_GPIO_readPins(PIN_GRAY_DIGITAL_PORT,
         PIN_GRAY_1 | PIN_GRAY_2 | PIN_GRAY_3 | PIN_GRAY_4 |
@@ -663,7 +673,7 @@ uint8_t Gray_IsCalibrationComplete(void)
  */
 void Gray_CalibrationApply(void)
 {
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     if (g_grayValid) {
         Gray_UpdateDigitalFromRaw();
     }
@@ -681,3 +691,5 @@ void Gray_CalibrationApply(void)
     }
 #endif
 }
+
+#endif /* CAR_LIBRARY_GRAY_INPUT_ENABLED */

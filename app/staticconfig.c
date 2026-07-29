@@ -1,4 +1,13 @@
+/*
+ * 二维视觉云台的实车调参表：只保存point与circle两套PD/前馈和限幅参数。
+ * 比赛时可直接修改下方常量结构体；运行中通过只读指针提供给gimbal.c。
+ * 距离增益不在这里分档，vision.c会根据每帧目标长度连续计算yaw缩放。
+ */
 #include "staticconfig.h"
+
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
 
 /*
  * 云台视觉只保留两套基准参数：point使用第1/2个误差，circle使用第3/4个。
@@ -9,6 +18,8 @@
 
 /* 默认增益缩放：反馈和视觉速度前馈都除以100。 */
 #define STATICCONFIG_GAIN_SCALE_DEFAULT (100U)
+
+#if CAR_LIBRARY_GIMBAL_TRACKING_ENABLED
 
 /* 矩形中心点基准参数；只用于centerDx/centerDy，不保存距离档。 */
 static const StaticConfigGimbalTask g_taskPoint = {
@@ -57,6 +68,24 @@ static const StaticConfigGimbalTask g_taskCircle = {
     .offsetY = 0,
     .useCircleError = 1U
 };
+
+#else
+
+/* 二维视觉库关闭时的只读占位表，状态机不会进入视觉比赛任务。 */
+static const StaticConfigGimbalTask g_taskPoint = {
+    .name = "disabled",
+    .mode = STATICCONFIG_MODE_CENTER,
+    .gainScale = STATICCONFIG_GAIN_SCALE_DEFAULT
+};
+
+static const StaticConfigGimbalTask g_taskCircle = {
+    .name = "disabled",
+    .mode = STATICCONFIG_MODE_CIRCLE,
+    .gainScale = STATICCONFIG_GAIN_SCALE_DEFAULT,
+    .useCircleError = 1U
+};
+
+#endif
 
 static const StaticConfigGimbalTask *const g_tasks[STATICCONFIG_TASK_COUNT] = {
     &g_taskPoint,
@@ -112,3 +141,5 @@ void StaticConfig_SetActiveMode(StaticConfigMode mode)
     StaticConfig_SetActiveTask((mode == STATICCONFIG_MODE_CIRCLE) ?
         STATICCONFIG_TASK_CIRCLE : STATICCONFIG_TASK_POINT);
 }
+
+#endif

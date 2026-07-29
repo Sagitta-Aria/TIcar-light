@@ -21,6 +21,16 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
     uint16_t speedSps);
 
 /*
+ * 按给定方向输出精确数量的 STEP，上层的新速度命令会取消未完成的定步运动。
+ * 仅用于云台轴；stepCount为0时等同于停止该轴。
+ */
+void StepperPulse_SetMoveTarget(MotorId motor, int8_t directionSign,
+    uint16_t speedSps, uint32_t stepCount);
+
+/* 定步运动尚有未输出脉冲或末个高电平尚未结束时返回1。 */
+uint8_t StepperPulse_IsMoveActive(MotorId motor);
+
+/*
  * StepperPulse_SetRampStep：单独设置某一路 STEP 斜坡速度。
  * 使用场景：Task4 强转时临时提高云台 yaw 轴响应，不影响底盘。
  */

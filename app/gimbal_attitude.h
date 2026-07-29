@@ -6,6 +6,11 @@
 #include "body_motion.h"
 #include "h7_gyro_link.h"
 
+/*
+ * GimbalAttitudeConfig：双IMU yaw姿态控制参数的运行时副本。
+ * 方向字段只能取+1/-1；增益均为Q1024；速度单位为step/s。
+ * 在线修改只在RAM中生效，复位后恢复control_config.h默认值。
+ */
 typedef struct {
     uint16_t stepsPerRevolution;
     int8_t motorDirectionSign;
@@ -19,6 +24,10 @@ typedef struct {
     uint32_t positionLimitSteps;
 } GimbalAttitudeConfig;
 
+/*
+ * GimbalAttitudeSnapshot：Task5/H7 LCD只读诊断快照。
+ * 包含两路传感器状态、中间误差和最终STEP输出；读取不会改变控制器状态。
+ */
 typedef struct {
     BodyMotionSnapshot motion;
     H7GyroLinkFeedback feedback;
@@ -73,11 +82,22 @@ void GimbalAttitude_SetFeedForwardEnabled(uint8_t enabled);
 /* 明确请求时才重抓H7参考；Task4固定跟车矫正期间必须保持关闭。 */
 void GimbalAttitude_SetReferenceTracking(uint8_t enabled);
 
+/* 姿态模块已启动时返回1；不等同于当前一定有STEP输出。 */
 uint8_t GimbalAttitude_IsActive(void);
+
+/* Task8/Task5直驱yaw时返回1；Task4辅助模式返回0。 */
 uint8_t GimbalAttitude_DrivesMotorDirectly(void);
+
+/* 读取姿态环最新有符号yaw命令，单位step/s。 */
 int16_t GimbalAttitude_GetCommandSps(void);
+
+/* 原子复制完整诊断快照；snapshot不能为空。 */
 void GimbalAttitude_GetSnapshot(GimbalAttitudeSnapshot *snapshot);
+
+/* 复制当前运行参数；config不能为空，本函数不停止控制器。 */
 void GimbalAttitude_GetConfig(GimbalAttitudeConfig *config);
+
+/* 校验并更新RAM参数；非法方向/限幅返回0且保留旧配置。 */
 uint8_t GimbalAttitude_SetConfig(const GimbalAttitudeConfig *config);
 
 #endif

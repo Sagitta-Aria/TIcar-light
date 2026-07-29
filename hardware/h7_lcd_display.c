@@ -1,6 +1,20 @@
+/*
+ * H7 LCD后端：把0至9行转换成@L命令，只发送发生变化的行。
+ * GMR通过UART3/PB2发送，普通配置沿用UART0/PA10。
+ * UI任务负责刷新，ISR和10ms控制任务只能更新业务状态，不能直接阻塞发送显示数据。
+ * UART忙时未发送内容会保留到下次重试，不应把显示失败当成电机控制失败。
+ */
 #include "h7_lcd_display.h"
 
+#include "library_config.h"
+
+#if CAR_LIBRARY_H7_LCD_ENABLED
+
+#if CAR_PROFILE_IS_GMR
+#include "h7_gyro_link.h"
+#else
 #include "log_uart.h"
+#endif
 #include "ti_msp_dl_config.h"
 
 #define H7_LCD_DISPLAY_ALL_ROWS_DIRTY (0x03FFU)
@@ -56,6 +70,16 @@ static void H7LcdDisplay_CopyText(char *destination, const char *source)
     destination[index] = '\0';
 }
 
+static uint8_t H7LcdDisplay_TrySendBytes(const uint8_t *data,
+    uint16_t length)
+{
+#if CAR_PROFILE_IS_GMR
+    return H7GyroLink_TrySendBytes(data, length);
+#else
+    return LogUart_TrySendBytes(data, length);
+#endif
+}
+
 static uint8_t H7LcdDisplay_SendRow(uint8_t row, const char *text)
 {
     uint8_t command[H7_LCD_DISPLAY_COMMAND_SIZE];
@@ -72,7 +96,7 @@ static uint8_t H7LcdDisplay_SendRow(uint8_t row, const char *text)
         ++index;
     }
     command[length++] = (uint8_t)'\n';
-    return LogUart_TrySendBytes(command, length);
+    return H7LcdDisplay_TrySendBytes(command, length);
 }
 
 void H7LcdDisplay_Init(void)
@@ -147,7 +171,7 @@ void H7LcdDisplay_Refresh(void)
     g_h7LcdClearPending = 0U;
     H7LcdDisplay_ExitCritical(primask);
     if ((clearPending != 0U) &&
-        (LogUart_TrySendBytes(clearCommand,
+        (H7LcdDisplay_TrySendBytes(clearCommand,
             (uint16_t)(sizeof(clearCommand) - 1U)) == 0U)) {
         primask = H7LcdDisplay_EnterCritical();
         g_h7LcdClearPending = 1U;
@@ -178,3 +202,5 @@ uint8_t H7LcdDisplay_IsReady(void)
 {
     return g_h7LcdReady;
 }
+
+#endif

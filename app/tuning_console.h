@@ -3,12 +3,14 @@
 
 #include <stdint.h>
 
+/* Task5两点前馈标定的内部阶段。 */
 typedef enum {
-    TUNING_CONSOLE_SET_STAGE_IDLE = 0,
-    TUNING_CONSOLE_SET_STAGE_SETTLING,
-    TUNING_CONSOLE_SET_STAGE_SAMPLING
+    TUNING_CONSOLE_SET_STAGE_IDLE = 0, /* 没有正在执行的set采样。 */
+    TUNING_CONSOLE_SET_STAGE_SETTLING, /* 已给速度，等待电机进入稳态。 */
+    TUNING_CONSOLE_SET_STAGE_SAMPLING  /* 正在累计编码器平均值。 */
 } TuningConsoleSetStage;
 
+/* 左右轮两点标定各自的结果状态。 */
 typedef enum {
     TUNING_CONSOLE_SET_RESULT_NONE = 0,
     TUNING_CONSOLE_SET_RESULT_RUNNING,
@@ -17,6 +19,7 @@ typedef enum {
     TUNING_CONSOLE_SET_RESULT_ERROR
 } TuningConsoleSetResult;
 
+/* Task5 H7 LCD页面编号，只决定显示内容，不改变控制模式。 */
 typedef enum {
     TUNING_CONSOLE_OLED_FF = 0,
     TUNING_CONSOLE_OLED_START,
@@ -26,6 +29,10 @@ typedef enum {
     TUNING_CONSOLE_OLED_GIMBAL
 } TuningConsoleOledPage;
 
+/*
+ * Task5显示只读快照：集中保存底盘标定、灰度、视觉和姿态页需要的数据。
+ * 数值来自多个控制模块，调用方只能显示，禁止写回作为控制命令。
+ */
 typedef struct {
     TuningConsoleOledPage oledPage;
     TuningConsoleSetStage setStage;
@@ -69,18 +76,33 @@ typedef struct {
     int32_t gimbalRateX100PerSec;
     int32_t gimbalAngleErrorX100;
     int16_t gimbalCommandSps;
+    uint8_t h7ImuFresh;
+    uint32_t h7ImuAgeMs;
+    int16_t h7RollX100;
+    int16_t h7PitchX100;
+    int32_t h7YawX100;
+    int32_t h7YawRateX100PerSec;
 } TuningConsoleDisplayStatus;
 
-/* Start and stop the Task5 UART calibration session. */
+/* 进入底盘调参会话并默认显示FF页；不会自动让电机转动。 */
 void TuningConsole_Start(void);
+
+/* GMR Task5入口：显示M0航向页；首帧有效yaw到达后会启动前进保持。 */
+void TuningConsole_StartYaw(void);
+
+/* 退出Task5并停止底盘、视觉和姿态实验输出。 */
 void TuningConsole_Stop(void);
 
-/* Run from the 5 ms communication task while Task5 is selected. */
+/* Task5启用时由5ms Comm任务调用，解析UART命令并发送低频状态。 */
 void TuningConsole_Task(void);
+
+/* Task5底盘测试的10ms控制入口；只能由CarControl任务调用。 */
 void TuningConsole_ChassisControlPeriod(void);
+
+/* 当前处于Task5调参会话时返回1。 */
 uint8_t TuningConsole_IsActive(void);
 
-/* Read the current set progress and FF results for the Task5 OLED page. */
+/* 原子读取Task5显示数据；只读，不触发采样或电机命令。 */
 void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status);
 
 #endif

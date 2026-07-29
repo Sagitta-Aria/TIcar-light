@@ -1,3 +1,8 @@
+/*
+ * UART0共享传输层：PA10可承载普通日志和H7 LCD命令，PA11接收H7姿态帧。
+ * 多任务发送通过短临界区锁保证一条消息不交叉；所有轮询都有上限，不能无限阻塞控制任务。
+ * 日志宏关闭后不发送普通日志；若H7 LCD开启，PA10仍保留显示命令发送能力。
+ */
 #include "log_uart.h"
 
 #include "board_config.h"
@@ -66,6 +71,15 @@ static void LogUart_PushRxByte(uint8_t data)
     g_logRxWriteIndex = next;
 }
 
+void LogUart_ConsumeRxByte(uint8_t data)
+{
+#if CAR_ENABLE_LOG_UART && CAR_ENABLE_LOG_UART_RX
+    LogUart_PushRxByte(data);
+#else
+    (void)data;
+#endif
+}
+
 /*
  * 作用：带超时发送 1 字节日志。
  * 使用场景：启动日志、状态机日志、菜单监视数据。
@@ -73,7 +87,7 @@ static void LogUart_PushRxByte(uint8_t data)
  */
 static uint8_t LogUart_TrySendByte(uint8_t data)
 {
-#if CAR_ENABLE_LOG_UART
+#if CAR_UART0_TX_REQUIRED
     uint32_t timeout = LOG_UART_TX_TIMEOUT_COUNT;
 
     while (timeout > 0U) {
@@ -90,7 +104,7 @@ static uint8_t LogUart_TrySendByte(uint8_t data)
 
 void LogUart_Init(void)
 {
-#if CAR_ENABLE_LOG_UART
+#if CAR_UART0_REQUIRED
     g_logRxWriteIndex = 0U;
     g_logRxReadIndex = 0U;
     g_logRxDropCount = 0U;
@@ -128,7 +142,7 @@ void LogUart_HandleUARTInterrupt(void)
             rxCount = 0U;
             while ((rxCount < LOG_UART_IRQ_RX_DRAIN_LIMIT) &&
                 DL_UART_Main_receiveDataCheck(LogUart_INST, &data)) {
-                LogUart_PushRxByte(data);
+                LogUart_ConsumeRxByte(data);
                 ++rxCount;
             }
         } else if ((pending == DL_UART_MAIN_IIDX_FRAMING_ERROR) ||

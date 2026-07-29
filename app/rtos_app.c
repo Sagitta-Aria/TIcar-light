@@ -1,3 +1,8 @@
+/*
+ * FreeRTOS静态调度层：创建固定任务、栈、队列和通知，并定义各任务的周期/唤醒规则。
+ * 所有对象在编译期分配，比赛中不创建或删除任务；ISR只通过FromISR通知接口唤醒任务。
+ * 修改优先级或阻塞策略会影响10ms底盘/云台截止时间，必须结合README调度说明评估。
+ */
 #include "rtos_app.h"
 
 #include "FreeRTOS.h"
@@ -7,11 +12,15 @@
 #include "app.h"
 #include "board_config.h"
 #include "control_config.h"
+#if CAR_PROFILE_IS_FULL
 #include "gimbal.h"
+#endif
 #include "menu.h"
 #include "motor.h"
 #include "state_machine.h"
+#if CAR_PROFILE_IS_FULL
 #include "vision.h"
+#endif
 
 /*
  * RTOS 应用调度总览
@@ -51,7 +60,9 @@
 
 /* StaticTask_t 保存内核任务控制块；实际任务栈由下一组数组提供。 */
 static StaticTask_t g_controlTaskControl;
+#if CAR_PROFILE_IS_FULL
 static StaticTask_t g_gimbalTaskControl;
+#endif
 static StaticTask_t g_inputTaskControl;
 #if CAR_ENABLE_UI_WATCHDOG
 static StaticTask_t g_watchdogTaskControl;
@@ -61,7 +72,9 @@ static StaticTask_t g_commTaskControl;
 static StaticTask_t g_uiTaskControl;
 
 static StackType_t g_controlTaskStack[RTOS_CONTROL_STACK_WORDS];
+#if CAR_PROFILE_IS_FULL
 static StackType_t g_gimbalTaskStack[RTOS_GIMBAL_STACK_WORDS];
+#endif
 static StackType_t g_inputTaskStack[RTOS_INPUT_STACK_WORDS];
 #if CAR_ENABLE_UI_WATCHDOG
 static StackType_t g_watchdogTaskStack[CAR_WATCHDOG_TASK_STACK_WORDS];
@@ -79,7 +92,9 @@ static uint8_t g_eventQueueStorage[
     RTOS_EVENT_QUEUE_LENGTH * sizeof(CarEvent)];
 static QueueHandle_t g_eventQueue;
 static TaskHandle_t g_controlTaskHandle;
+#if CAR_PROFILE_IS_FULL
 static TaskHandle_t g_gimbalTaskHandle;
+#endif
 static TaskHandle_t g_inputTaskHandle;
 static TaskHandle_t g_missionTaskHandle;
 static TaskHandle_t g_uiTaskHandle;
@@ -158,6 +173,7 @@ static TickType_t RtosApp_GetControlWaitTicks(TickType_t lastControlTime)
  * 视觉通知只会提前唤醒任务，不会移动 lastCorrectionTime，因此连续视觉帧
  * 也不能把固定 10 ms 姿态矫正周期向后推迟。
  */
+#if CAR_PROFILE_IS_FULL
 static TickType_t RtosApp_GetGimbalWaitTicks(TickType_t lastCorrectionTime)
 {
     TickType_t period = pdMS_TO_TICKS(BODY_MOTION_PERIOD_MS);
@@ -165,6 +181,7 @@ static TickType_t RtosApp_GetGimbalWaitTicks(TickType_t lastCorrectionTime)
 
     return (elapsed >= period) ? 0U : period - elapsed;
 }
+#endif
 
 /*
  * CarControl（优先级 6）：
@@ -217,6 +234,7 @@ static void RtosApp_ControlTask(void *parameter)
  * - Task4转向及释放延时内，视觉通知只消费输入，姿态矫正仍按固定10 ms运行；
  * - 通知与固定截止点同时到达时只执行一次，避免同一 tick 重复输出。
  */
+#if CAR_PROFILE_IS_FULL
 static void RtosApp_GimbalTask(void *parameter)
 {
     TickType_t lastCorrectionTime = xTaskGetTickCount();
@@ -257,6 +275,7 @@ static void RtosApp_GimbalTask(void *parameter)
         }
     }
 }
+#endif
 
 /* 纯云台任务和Task9手推测试不需要底盘周期，由Mission统一挂起CarControl。 */
 static uint8_t RtosApp_ShouldSuspendControl(void)
@@ -406,7 +425,7 @@ static void RtosApp_CommTask(void *parameter)
 
 /*
  * UI（优先级 1）：状态变化通知可立即触发重绘，同时最多每 20 ms 醒来做
- * Board housekeeping；Task5/6/8/9动态页另以100 ms限速刷新。显示和板级
+ * Board housekeeping；动态任务页另以100 ms限速刷新。显示和板级
  * 恢复都放在最低业务优先级，避免阻塞控制任务。
  */
 static void RtosApp_UiTask(void *parameter)
@@ -441,7 +460,10 @@ static void RtosApp_UiTask(void *parameter)
         }
 
         dynamicUi = (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
-            ((StateMachine_GetMissionId() == 5U) ||
+            ((StateMachine_GetMissionId() == 1U) ||
+                (StateMachine_GetMissionId() == 3U) ||
+                (StateMachine_GetMissionId() == 4U) ||
+                (StateMachine_GetMissionId() == 5U) ||
                 (StateMachine_GetMissionId() == 6U) ||
                 (StateMachine_GetMissionId() == 8U) ||
                 (StateMachine_GetMissionId() == 9U)));
@@ -476,10 +498,12 @@ static void RtosApp_CreateObjects(void)
         RTOS_CONTROL_STACK_WORDS, 0, RTOS_CONTROL_PRIORITY,
         g_controlTaskStack, &g_controlTaskControl);
     configASSERT(g_controlTaskHandle != 0);
+#if CAR_PROFILE_IS_FULL
     g_gimbalTaskHandle = xTaskCreateStatic(RtosApp_GimbalTask, "Gimbal",
         RTOS_GIMBAL_STACK_WORDS, 0, RTOS_GIMBAL_PRIORITY,
         g_gimbalTaskStack, &g_gimbalTaskControl);
     configASSERT(g_gimbalTaskHandle != 0);
+#endif
     g_inputTaskHandle = xTaskCreateStatic(RtosApp_InputTask, "Input",
         RTOS_INPUT_STACK_WORDS, 0, RTOS_INPUT_PRIORITY,
         g_inputTaskStack, &g_inputTaskControl);
@@ -503,7 +527,9 @@ static void RtosApp_CreateObjects(void)
 
     xTaskNotifyGive(g_inputTaskHandle);
     xTaskNotifyGive(g_missionTaskHandle);
+#if CAR_PROFILE_IS_FULL
     xTaskNotifyGive(g_gimbalTaskHandle);
+#endif
     xTaskNotifyGive(g_uiTaskHandle);
 #if CAR_ENABLE_UI_WATCHDOG
     RtosApp_InitWatchdog();
@@ -531,7 +557,9 @@ static void RtosApp_NotifyTaskFromISR(TaskHandle_t task)
 
 void RtosApp_NotifyGimbal(void)
 {
+#if CAR_PROFILE_IS_FULL
     RtosApp_NotifyTask(g_gimbalTaskHandle);
+#endif
 }
 
 void RtosApp_NotifyMission(void)
@@ -546,7 +574,9 @@ void RtosApp_NotifyUi(void)
 
 void RtosApp_NotifyGimbalFromISR(void)
 {
+#if CAR_PROFILE_IS_FULL
     RtosApp_NotifyTaskFromISR(g_gimbalTaskHandle);
+#endif
 }
 
 void RtosApp_NotifyControlFromISR(void)

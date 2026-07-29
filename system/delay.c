@@ -1,3 +1,4 @@
+/* 上电阶段忙等延时实现；调度器启动后必须改用RTOS延时，避免阻塞同优先级任务。 */
 #include "delay.h"
 
 #include "board_config.h"

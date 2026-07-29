@@ -3,14 +3,14 @@
 
 #include <stdint.h>
 
-/* CarState：比赛正式版顶层状态。 */
+/* CarState：比赛正式版顶层状态；任务细分阶段不应再增加顶层状态。 */
 typedef enum {
-    CAR_STATE_INIT = 0,
-    CAR_STATE_MENU,
-    CAR_STATE_MISSION,
-    CAR_STATE_FINISHED,
-    CAR_STATE_STOP,
-    CAR_STATE_ERROR
+    CAR_STATE_INIT = 0, /* 应用初始化尚未完成。 */
+    CAR_STATE_MENU,     /* 等待K1/K2选择比赛任务。 */
+    CAR_STATE_MISSION,  /* 某个Task正在运行。 */
+    CAR_STATE_FINISHED, /* 任务正常达到完成条件。 */
+    CAR_STATE_STOP,     /* 用户长按停止或任务安全停车。 */
+    CAR_STATE_ERROR     /* 板级致命错误，禁止启动电机。 */
 } CarState;
 
 /* CarEvent：按键、任务完成和异常统一转成事件。 */
@@ -47,7 +47,7 @@ typedef enum {
     CAR_MISSION4_ROUTE_COUNT
 } CarMission4Route;
 
-/* Task6 底盘调试模式；开环速度单位为 PWM%，闭环为 count/控制周期。 */
+/* 底盘调试模式；GMR Task1 / Full Task6使用。 */
 typedef enum {
     CAR_CHASSIS_DRIVE_OPEN_LOOP = 0,
     CAR_CHASSIS_DRIVE_CLOSED_LOOP
@@ -77,6 +77,9 @@ const char *StateMachine_GetStateName(CarState state);
 /* StateMachine_GetMissionId：读取当前任务编号，0 表示未进入任务。 */
 uint8_t StateMachine_GetMissionId(void);
 
+/* 按 library_config.h 的当前组合判断某个比赛任务是否可以进入。 */
+uint8_t StateMachine_IsMissionAvailable(uint8_t missionId);
+
 /* StateMachine_SetMission1LapCount：设置 Task 1 要跑的圈数，范围 1~5。 */
 void StateMachine_SetMission1LapCount(uint8_t lapCount);
 
@@ -87,14 +90,14 @@ uint8_t StateMachine_GetMission1LapCount(void);
 void StateMachine_SetMission4Route(CarMission4Route route);
 CarMission4Route StateMachine_GetMission4Route(void);
 
-/* 设置 Task6 的开闭环模式和对应速度；仅 missionId=6 有效。 */
+/* 设置底盘调试任务的开闭环模式和速度；有效missionId由Profile决定。 */
 void StateMachine_SetMissionDriveConfig(uint8_t missionId,
     CarChassisDriveMode mode, uint16_t speed);
 
-/* 读取 Task6 当前选择的底盘控制模式。 */
+/* 读取底盘调试任务当前选择的控制模式。 */
 CarChassisDriveMode StateMachine_GetMissionDriveMode(uint8_t missionId);
 
-/* 读取 Task6 当前速度；单位由控制模式决定。 */
+/* 读取底盘调试任务当前速度；单位由控制模式决定。 */
 uint16_t StateMachine_GetMissionDriveSpeed(uint8_t missionId);
 
 /* StateMachine_GetMission4Stage：读取 Task4 当前内部阶段。 */

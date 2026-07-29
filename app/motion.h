@@ -9,7 +9,7 @@ void Motion_Stop(void);
 /* Motion_SetChassisCommand：设置底盘左右目标 CPS，正负号表示方向。 */
 void Motion_SetChassisCommand(int16_t leftSpeedCps, int16_t rightSpeedCps);
 
-/* 设置左右目标 encoder count/控制周期；用于 NO YAW 与 Task5 共用速度刻度。 */
+/* 设置左右目标encoder count/20ms；底层速度环仍每10ms执行一次。 */
 void Motion_SetChassisPeriodCommand(int16_t leftCounts,
     int16_t rightCounts);
 

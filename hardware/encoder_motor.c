@@ -1,3 +1,8 @@
+/*
+ * 两路TB6612编码直流电机驱动：正交计数、20kHz PWM、10ms速度PI/前馈和Task5标定。
+ * GPIO ISR只更新编码器累计值；CarControl任务读取并清零速度窗口后计算下一拍PWM。
+ * 方向、编码器符号和PWM限幅属于上板高风险参数，修改后必须先架空轮子验证。
+ */
 #include "encoder_motor.h"
 
 #include "board_config.h"
@@ -1057,6 +1062,19 @@ int32_t EncoderMotor_GetTotalCount(uint8_t motorIndex)
     count = g_totalCount[motorIndex];
     EncoderMotor_ExitCritical(primask);
     return count;
+}
+
+void EncoderMotor_GetTotalCounts(int32_t *leftCount, int32_t *rightCount)
+{
+    uint32_t primask;
+
+    if ((leftCount == 0) || (rightCount == 0)) {
+        return;
+    }
+    primask = EncoderMotor_EnterCritical();
+    *leftCount = g_totalCount[ENCODER_MOTOR_LEFT];
+    *rightCount = g_totalCount[ENCODER_MOTOR_RIGHT];
+    EncoderMotor_ExitCritical(primask);
 }
 
 void EncoderMotor_ResetTotalCount(uint8_t motorIndex)

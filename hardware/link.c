@@ -1,3 +1,12 @@
+/*
+ * UART3/K230文本行传输层：ISR拼接字节，以换行提交最新完整视觉帧。
+ * Vision任务负责字段语义，本文件只处理缓冲、覆盖策略、错误计数和有限等待发送。
+ * 缓冲满或新帧覆盖旧帧会增加诊断计数，控制路径始终优先消费最新帧。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "link.h"
 
 #include "board_config.h"
@@ -323,3 +332,5 @@ uint32_t Link_GetRxNoiseErrorCount(void)
 {
     return g_linkRxNoiseErrorCount;
 }
+
+#endif

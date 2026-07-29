@@ -1,3 +1,12 @@
+/*
+ * Task5串口调参台：解析底盘FF/PI、灰度、视觉和双IMU姿态实验命令并输出SerialPlot帧。
+ * Comm任务负责命令解析，CarControl任务调用专用10ms入口；两条路径通过受控状态共享数据。
+ * 在线参数只保存在RAM，复位不会写Flash；退出Task5时必须停止所有测试输出。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "tuning_console.h"
 
 #include "FreeRTOS.h"
@@ -14,6 +23,7 @@
 #include "motor_enable.h"
 #include "motor_no_yaw.h"
 #include "staticconfig.h"
+#include "tuning_common.h"
 #include "vision.h"
 
 #define TUNING_LINE_MAX                 (80U)
@@ -23,7 +33,6 @@
 #define TUNING_VISION_PLOT_PERIOD_MS    (20U)
 #define TUNING_TARGET_COUNT_LIMIT \
     ((int32_t)CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD)
-#define TUNING_PWM_PERCENT_MAX          (100L)
 #define TUNING_SET_SETTLE_MS            (4000U)
 #define TUNING_SET_SAMPLE_DURATION_MS   (1000U)
 #define TUNING_SET_SAMPLE_WINDOWS \
@@ -126,6 +135,11 @@ static void TuningConsole_StopChassisActivity(void)
 static void TuningConsole_SetMode(TuningMode mode)
 {
     if (mode == TUNING_MODE_GIMBAL) {
+#if !CAR_LIBRARY_GIMBAL_ATTITUDE_ENABLED
+        LogUart_SendString(
+            "#ERR dual-IMU gimbal library is disabled in library_config.h\r\n");
+        return;
+#endif
         TuningConsole_StopVisionActivity();
         TuningConsole_StopChassisActivity();
         GimbalAttitude_Start();
@@ -137,6 +151,11 @@ static void TuningConsole_SetMode(TuningMode mode)
         LogUart_SendString(
             "#OK mode=gimbal; H7 feedback active, JY61 feedforward off\r\n");
     } else if (mode == TUNING_MODE_VISION) {
+#if !CAR_LIBRARY_GIMBAL_TRACKING_ENABLED
+        LogUart_SendString(
+            "#ERR 2D vision gimbal library is disabled in library_config.h\r\n");
+        return;
+#endif
         TuningConsole_StopChassisActivity();
         GimbalAttitude_Stop();
         TuningConsole_StopVisionActivity();
@@ -161,96 +180,13 @@ static void TuningConsole_SetMode(TuningMode mode)
     g_forceStatus = 1U;
 }
 
-static uint8_t TuningConsole_TextEquals(const char *left,
-    const char *right)
-{
-    while ((*left != '\0') && (*right != '\0')) {
-        if (*left != *right) {
-            return 0U;
-        }
-        ++left;
-        ++right;
-    }
-    return (uint8_t)((*left == '\0') && (*right == '\0'));
-}
-
-static void TuningConsole_ToLower(char *text)
-{
-    while (*text != '\0') {
-        if ((*text >= 'A') && (*text <= 'Z')) {
-            *text = (char)(*text + ('a' - 'A'));
-        }
-        ++text;
-    }
-}
-
-static uint8_t TuningConsole_ParseInt32(const char *text, int32_t *value)
-{
-    uint32_t magnitude = 0U;
-    uint32_t limit = 0x7FFFFFFFUL;
-    uint8_t negative = 0U;
-    uint8_t hasDigit = 0U;
-
-    if ((text == 0) || (value == 0)) {
-        return 0U;
-    }
-    if (*text == '-') {
-        negative = 1U;
-        limit = 0x80000000UL;
-        ++text;
-    } else if (*text == '+') {
-        ++text;
-    }
-
-    while ((*text >= '0') && (*text <= '9')) {
-        uint32_t digit = (uint32_t)(*text - '0');
-
-        hasDigit = 1U;
-        if (magnitude > ((limit - digit) / 10U)) {
-            return 0U;
-        }
-        magnitude = magnitude * 10U + digit;
-        ++text;
-    }
-    if ((hasDigit == 0U) || (*text != '\0')) {
-        return 0U;
-    }
-
-    if (negative != 0U) {
-        *value = (magnitude == 0x80000000UL) ?
-            (int32_t)0x80000000UL : -(int32_t)magnitude;
-    } else {
-        *value = (int32_t)magnitude;
-    }
-    return 1U;
-}
-
-static uint8_t TuningConsole_Split(char *line, char *tokens[],
-    uint8_t maxTokens)
-{
-    uint8_t count = 0U;
-
-    while (*line != '\0') {
-        while ((*line == ' ') || (*line == '\t')) {
-            ++line;
-        }
-        if (*line == '\0') {
-            break;
-        }
-        if (count >= maxTokens) {
-            return (uint8_t)(maxTokens + 1U);
-        }
-        tokens[count++] = line;
-        while ((*line != '\0') && (*line != ' ') && (*line != '\t')) {
-            ++line;
-        }
-        if (*line != '\0') {
-            *line = '\0';
-            ++line;
-        }
-    }
-    return count;
-}
+#define TuningConsole_TextEquals   TuningCommon_TextEquals
+#define TuningConsole_ToLower      TuningCommon_ToLower
+#define TuningConsole_ParseInt32   TuningCommon_ParseInt32
+#define TuningConsole_Split        TuningCommon_Split
+#define TuningConsole_PercentToPwm TuningCommon_PercentToPwm
+#define TuningConsole_PwmToPercent TuningCommon_PwmToPercent
+#define TUNING_PWM_PERCENT_MAX     TUNING_COMMON_PWM_PERCENT_MAX
 
 static uint8_t TuningConsole_ParsePair(char *tokens[], int32_t *left,
     int32_t *right)
@@ -285,25 +221,6 @@ static void TuningConsole_SendUnsignedPair(const char *name, uint32_t left,
     LogUart_SendString(",");
     LogUart_SendUnsigned(right);
     LogUart_SendString("\r\n");
-}
-
-static int16_t TuningConsole_PercentToPwm(int32_t percent)
-{
-    return (int16_t)((percent * (int32_t)CHASSIS_PWM_LIMIT_COUNTS) /
-        TUNING_PWM_PERCENT_MAX);
-}
-
-static int32_t TuningConsole_PwmToPercent(int32_t pwm)
-{
-    int32_t scaled = pwm * TUNING_PWM_PERCENT_MAX;
-    int32_t halfScale = (int32_t)CHASSIS_PWM_LIMIT_COUNTS / 2;
-
-    if (scaled > 0) {
-        scaled += halfScale;
-    } else if (scaled < 0) {
-        scaled -= halfScale;
-    }
-    return scaled / (int32_t)CHASSIS_PWM_LIMIT_COUNTS;
 }
 
 static const char *TuningConsole_GetModeName(EncoderMotorMode mode)
@@ -2131,3 +2048,5 @@ void TuningConsole_GetDisplayStatus(TuningConsoleDisplayStatus *status)
         TuningConsole_GetAverage(ENCODER_MOTOR_RIGHT);
     status->grayMask = g_grayMask;
 }
+
+#endif /* CAR_PROFILE_IS_FULL */

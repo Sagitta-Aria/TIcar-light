@@ -4,7 +4,7 @@
 #include "board_config.h"
 #include <stdint.h>
 
-/* LogUart_Init：初始化UART0日志TX；H7占用PA11时不启用文本RX。 */
+/* 初始化UART0共享状态；日志/H7 LCD使用PA10，H7姿态反馈使用PA11。 */
 void LogUart_Init(void);
 
 /* LogUart_Task：日志串口后台任务入口，当前发送为同步有限等待。 */
@@ -12,6 +12,9 @@ void LogUart_Task(void);
 
 /* LogUart_HandleUARTInterrupt：仅在CAR_ENABLE_LOG_UART_RX启用时缓存文本。 */
 void LogUart_HandleUARTInterrupt(void);
+
+/* UART0复用解析器把已确认不是二进制IMU帧的单字节送入Task5命令缓冲。仅ISR调用。 */
+void LogUart_ConsumeRxByte(uint8_t data);
 
 /* LogUart_TryReadByte：文本RX关闭时固定返回0。 */
 uint8_t LogUart_TryReadByte(uint8_t *data);

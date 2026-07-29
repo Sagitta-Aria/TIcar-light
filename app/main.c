@@ -1,3 +1,7 @@
+/*
+ * 固件唯一入口：完成板级/应用初始化后创建静态FreeRTOS任务并启动调度器。
+ * 正常运行不会返回；失败路径停止全部电机并用PA14状态灯报告致命错误。
+ */
 #include "app.h"
 #include "board.h"
 #include "board_config.h"

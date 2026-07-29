@@ -1,3 +1,12 @@
+/*
+ * 比赛顶层状态机：统一处理菜单事件、Task1至Task9生命周期和Task4分阶段流程。
+ * Mission任务负责状态推进，CarControl/Gimbal任务通过专用入口执行周期控制。
+ * 状态切换可能启停底盘、云台、视觉和Task5调参，新增任务必须同时检查库依赖和停车路径。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "state_machine.h"
 
 #include "FreeRTOS.h"
@@ -48,6 +57,13 @@ static TickType_t g_missionGimbalPrepDelayStartTick;
 
 #if (CAR_MISSION4_EXTRA_ENCODER_COUNTS == 0U)
 #error "CAR_MISSION4_EXTRA_ENCODER_COUNTS must be greater than zero"
+#endif
+
+#if ((CAR_MISSION4_GIMBAL_PITCH_EXIT_STEPS == 0U) || \
+    (CAR_MISSION4_GIMBAL_PITCH_EXIT_STEPS > CAR_GIMBAL_PITCH_LIMIT_STEPS) || \
+    (CAR_MISSION4_GIMBAL_PITCH_EXIT_SPEED_SPS == 0U) || \
+    (CAR_MISSION4_GIMBAL_PITCH_EXIT_SPEED_SPS > CAR_STEPPER_SPEED_MAX_SPS))
+#error "Task4 pitch exit compensation parameters are invalid"
 #endif
 
 typedef struct {
@@ -102,6 +118,32 @@ static uint8_t StateMachine_GetMissionIdFromEvent(CarEvent event)
         return 8U;
     case CAR_EVENT_MISSION_9_START:
         return 9U;
+    default:
+        return 0U;
+    }
+}
+
+/* 作用：把库选择转换成当前固件可进入的任务集合。 */
+uint8_t StateMachine_IsMissionAvailable(uint8_t missionId)
+{
+    switch (missionId) {
+    case 1U:
+        return (uint8_t)(CAR_LIBRARY_LINE_FOLLOW_ENABLED &&
+            CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED);
+    case 2U:
+    case 3U:
+    case 7U:
+        return (uint8_t)CAR_LIBRARY_GIMBAL_TRACKING_ENABLED;
+    case 4U:
+        return (uint8_t)(CAR_LIBRARY_LINE_FOLLOW_ENABLED &&
+            CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED &&
+            CAR_LIBRARY_GIMBAL_TRACKING_ENABLED);
+    case 8U:
+        return (uint8_t)CAR_LIBRARY_GIMBAL_ATTITUDE_ENABLED;
+    case 5U:
+    case 6U:
+    case 9U:
+        return 1U;
     default:
         return 0U;
     }
@@ -171,11 +213,16 @@ static void StateMachine_SetMission4TurnControlActive(uint8_t active)
 {
     uint8_t nextActive = (active != 0U) ? 1U : 0U;
 
+#if CAR_LIBRARY_GIMBAL_ATTITUDE_ENABLED
     GimbalAttitude_SetHoldEnabled(nextActive);
     GimbalAttitude_SetFeedForwardEnabled(nextActive);
     if (nextActive == 0U) {
         Gimbal_SetYawAttitudeCompensation(0);
     }
+#else
+    (void)nextActive;
+    Gimbal_SetYawAttitudeCompensation(0);
+#endif
     Gimbal_SetVisionTrackingEnabled((nextActive != 0U) ? 0U : 1U);
 }
 
@@ -279,7 +326,8 @@ static void StateMachine_StartMission4Line(void)
     /* LINE从直线开始，姿态矫正等进入实际左/右转状态后再开门。 */
     StateMachine_SetMission4TurnControlActive(0U);
     GimbalAttitude_SetReferenceTracking(0U);
-    Gimbal_SetLostTargetSearchEnabled(1U);
+    Gimbal_SetLostTargetSearchEnabled(
+        (uint8_t)CAR_LIBRARY_GIMBAL_LOST_TARGET_ENABLED);
     MotorNoYaw_StartMission4();
     g_mission4LastNoYawState = MotorNoYaw_GetState();
     g_mission4Stage = CAR_MISSION4_STAGE_LINE;
@@ -349,9 +397,13 @@ static void StateMachine_UpdateMission4YawControl(void)
     if ((turnStateActive != 0U) && (lastTurnStateActive == 0U)) {
         g_mission4CorrectionReleasePending = 0U;
         StateMachine_SetMission4TurnControlActive(1U);
+#if CAR_LIBRARY_GIMBAL_TURN_FOLLOW_ENABLED
         g_mission4YawTurnBase = Motor_GetStepCount(MOTOR_GIMBAL_1);
         g_mission4YawTurnActive = 1U;
         StateMachine_SetMission4YawTurnRamp(1U);
+#else
+        g_mission4YawTurnActive = 0U;
+#endif
     } else if ((turnStateActive == 0U) &&
         (lastTurnStateActive != 0U)) {
         g_mission4CorrectionReleaseStartTick = xTaskGetTickCount();
@@ -372,8 +424,12 @@ static void StateMachine_UpdateMission4YawControl(void)
                 CAR_MISSION4_GIMBAL_CORRECTION_RELEASE_DELAY_MS))) {
         g_mission4CorrectionReleasePending = 0U;
         StateMachine_SetMission4TurnControlActive(0U);
+        Gimbal_StartPitchUpMove(
+            (uint32_t)CAR_MISSION4_GIMBAL_PITCH_EXIT_STEPS,
+            (uint16_t)CAR_MISSION4_GIMBAL_PITCH_EXIT_SPEED_SPS);
     }
 
+#if CAR_LIBRARY_GIMBAL_TURN_FOLLOW_ENABLED
     if (g_mission4YawTurnActive != 0U) {
         if (StateMachine_AbsStepDelta(Motor_GetStepCount(MOTOR_GIMBAL_1),
             g_mission4YawTurnBase) < (uint32_t)
@@ -385,6 +441,9 @@ static void StateMachine_UpdateMission4YawControl(void)
             StateMachine_SetMission4YawTurnRamp(0U);
         }
     }
+#else
+    yawCommand = 0;
+#endif
 
     Gimbal_SetYawFeedForward(yawCommand);
     g_mission4LastNoYawState = noYawState;
@@ -508,7 +567,11 @@ static void StateMachine_EnterMission(void)
         /* Task4姿态模块保持活动，但只在实际左/右转时开HOLD和JY61前馈。 */
         StateMachine_ResetMission4();
         StateMachine_ApplyMission4GimbalConfig();
+#if CAR_LIBRARY_GIMBAL_ATTITUDE_ENABLED
         GimbalAttitude_StartAssist();
+#else
+        GimbalAttitude_Stop();
+#endif
         StateMachine_SetMission4TurnControlActive(0U);
         StateMachine_StartMissionGimbalPrep(4U);
     } else if (g_missionId == 5U) {
@@ -607,7 +670,8 @@ void StateMachine_Dispatch(CarEvent event)
 
     if (g_carState == CAR_STATE_MENU) {
         missionId = StateMachine_GetMissionIdFromEvent(event);
-        if (missionId != 0U) {
+        if ((missionId != 0U) &&
+            (StateMachine_IsMissionAvailable(missionId) != 0U)) {
             g_missionId = missionId;
             StateMachine_Enter(CAR_STATE_MISSION);
         }
@@ -787,3 +851,5 @@ uint8_t StateMachine_IsMissionGimbalPrepDone(void)
     return (uint8_t)(g_missionGimbalPrepStage ==
         MISSION_GIMBAL_PREP_DONE);
 }
+
+#endif

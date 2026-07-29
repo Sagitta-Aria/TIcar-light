@@ -1,3 +1,12 @@
+/*
+ * 底盘编码电机与云台步进电机的统一门面：按MotorId把命令分发到对应底层驱动。
+ * 底盘速度由encoder_motor.c闭环，云台STEP由stepper_pulse.c定时器调度。
+ * 单位随电机类型不同，调用前必须看motor.h接口注释，不能把count/s当成step/s。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "motor.h"
 
 #include "board_config.h"
@@ -101,6 +110,42 @@ void Motor_Set(MotorId motor, MotorDir dir, uint16_t speedSps)
         return;
     }
     Motor_SetGimbal(motor, dir, speedSps);
+}
+
+void Motor_MoveSteps(MotorId motor, MotorDir dir, uint16_t speedSps,
+    uint32_t stepCount)
+{
+    GimbalStepper *stepper;
+    int8_t directionSign;
+
+    if (((motor != MOTOR_GIMBAL_1) && (motor != MOTOR_GIMBAL_2)) ||
+        (dir == MOTOR_COAST) || (dir == MOTOR_BRAKE) ||
+        (speedSps == 0U) || (stepCount == 0U)) {
+        if ((motor == MOTOR_GIMBAL_1) || (motor == MOTOR_GIMBAL_2)) {
+            Motor_SetGimbal(motor, MOTOR_COAST, 0U);
+        }
+        return;
+    }
+
+    stepper = Motor_GetGimbal(motor);
+    directionSign = (dir == MOTOR_REVERSE) ? -1 : 1;
+    if (directionSign != stepper->directionSign) {
+        StepperPulse_SetTarget(motor, stepper->directionSign, 0U);
+    }
+    if (dir == MOTOR_REVERSE) {
+        DL_GPIO_setPins(stepper->dirPort, stepper->dirPin);
+    } else {
+        DL_GPIO_clearPins(stepper->dirPort, stepper->dirPin);
+    }
+    stepper->directionSign = directionSign;
+    stepper->speedSps = Motor_ClampStepperSpeed(speedSps);
+    StepperPulse_SetMoveTarget(motor, directionSign, stepper->speedSps,
+        stepCount);
+}
+
+uint8_t Motor_IsStepMoveActive(MotorId motor)
+{
+    return StepperPulse_IsMoveActive(motor);
 }
 
 void Motor_SetRampStep(MotorId motor, uint16_t accelStepSps,
@@ -211,3 +256,5 @@ void Motor_ResetAllStepCounts(void)
     EncoderMotor_ResetAllCounts();
     StepperPulse_ResetAllStepCounts();
 }
+
+#endif

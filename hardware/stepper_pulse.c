@@ -1,3 +1,12 @@
+/*
+ * 两轴云台STEP/DIR脉冲调度器：TIMG6以20kHz按需运行，并对目标SPS执行加减速斜坡。
+ * 任务上下文只更新目标；ISR做固定时间的GPIO翻转和累计STEP，不能日志或调用RTOS阻塞API。
+ * 两轴目标都为0时自动停止定时器中断，避免空闲时持续占用CPU。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "stepper_pulse.h"
 
 #include "board_config.h"
@@ -38,6 +47,7 @@ typedef struct {
     volatile uint8_t highTicksLeft;
     volatile int8_t directionSign;
     volatile int32_t stepCount;
+    volatile uint32_t remainingSteps;
 } StepperPulseChannel;
 
 typedef struct {
@@ -56,7 +66,7 @@ static StepperPulseChannel g_stepperPulse[STEPPER_GIMBAL_CHANNEL_COUNT] = {
         0U, 0U, 0U, 0U,
         (uint16_t)CAR_STEPPER_ACCEL_STEP_SPS,
         (uint16_t)CAR_STEPPER_DECEL_STEP_SPS,
-        0U, 1, 0
+        0U, 1, 0, 0U
     },
     {
         PIN_STEPPER_GIMBAL_PITCH_STEP_PORT,
@@ -64,7 +74,7 @@ static StepperPulseChannel g_stepperPulse[STEPPER_GIMBAL_CHANNEL_COUNT] = {
         0U, 0U, 0U, 0U,
         (uint16_t)CAR_STEPPER_ACCEL_STEP_SPS,
         (uint16_t)CAR_STEPPER_DECEL_STEP_SPS,
-        0U, 1, 0
+        0U, 1, 0, 0U
     }
 };
 
@@ -81,12 +91,13 @@ static uint32_t StepperPulse_GetIndex(MotorId motor)
     return (uint32_t)motor - (uint32_t)MOTOR_GIMBAL_1;
 }
 
-static uint8_t StepperPulse_HasActiveTarget(void)
+static uint8_t StepperPulse_HasActiveOutput(void)
 {
     uint32_t i;
 
     for (i = 0U; i < STEPPER_GIMBAL_CHANNEL_COUNT; ++i) {
-        if (g_stepperPulse[i].targetRateHz != 0U) {
+        if ((g_stepperPulse[i].targetRateHz != 0U) ||
+            (g_stepperPulse[i].highTicksLeft != 0U)) {
             return 1U;
         }
     }
@@ -139,6 +150,7 @@ static void StepperPulse_ResetOne(StepperPulseChannel *channel)
     channel->decelStepSps = (uint16_t)CAR_STEPPER_DECEL_STEP_SPS;
     channel->highTicksLeft = 0U;
     channel->directionSign = 1;
+    channel->remainingSteps = 0U;
     DL_GPIO_clearPins(channel->stepPort, channel->stepPin);
 }
 
@@ -248,6 +260,15 @@ static void StepperPulse_TickOne(StepperPulseChannel *channel,
             channel->stepPin, 1U);
         channel->highTicksLeft = CAR_STEPPER_PULSE_HIGH_TICKS;
         channel->stepCount += (int32_t)channel->directionSign;
+        if (channel->remainingSteps != 0U) {
+            --channel->remainingSteps;
+            if (channel->remainingSteps == 0U) {
+                channel->stepRateHz = 0U;
+                channel->targetRateHz = 0U;
+                channel->accumulator = 0U;
+                channel->rampTicks = 0U;
+            }
+        }
     }
 }
 
@@ -269,6 +290,7 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
     channel = &g_stepperPulse[StepperPulse_GetIndex(motor)];
     primask = StepperPulse_EnterCritical();
     channel->directionSign = (directionSign < 0) ? -1 : 1;
+    channel->remainingSteps = 0U;
     if (speedSps == 0U) {
         channel->stepRateHz = 0U;
         channel->targetRateHz = 0U;
@@ -279,8 +301,56 @@ void StepperPulse_SetTarget(MotorId motor, int8_t directionSign,
     } else {
         channel->targetRateHz = speedSps;
     }
-    StepperPulse_SetTimerEnabled(StepperPulse_HasActiveTarget());
+    StepperPulse_SetTimerEnabled(StepperPulse_HasActiveOutput());
     StepperPulse_ExitCritical(primask);
+}
+
+void StepperPulse_SetMoveTarget(MotorId motor, int8_t directionSign,
+    uint16_t speedSps, uint32_t stepCount)
+{
+    StepperPulseChannel *channel;
+    uint32_t primask;
+
+    if (!StepperPulse_IsValid(motor)) {
+        return;
+    }
+
+    channel = &g_stepperPulse[StepperPulse_GetIndex(motor)];
+    primask = StepperPulse_EnterCritical();
+    channel->directionSign = (directionSign < 0) ? -1 : 1;
+    channel->remainingSteps = stepCount;
+    if ((speedSps == 0U) || (stepCount == 0U)) {
+        channel->stepRateHz = 0U;
+        channel->targetRateHz = 0U;
+        channel->accumulator = 0U;
+        channel->rampTicks = 0U;
+        channel->highTicksLeft = 0U;
+        channel->remainingSteps = 0U;
+        DL_GPIO_clearPins(channel->stepPort, channel->stepPin);
+    } else {
+        channel->targetRateHz = speedSps;
+    }
+    StepperPulse_SetTimerEnabled(StepperPulse_HasActiveOutput());
+    StepperPulse_ExitCritical(primask);
+}
+
+uint8_t StepperPulse_IsMoveActive(MotorId motor)
+{
+    StepperPulseChannel *channel;
+    uint8_t active;
+    uint32_t primask;
+
+    if (!StepperPulse_IsValid(motor)) {
+        return 0U;
+    }
+
+    primask = StepperPulse_EnterCritical();
+    channel = &g_stepperPulse[StepperPulse_GetIndex(motor)];
+    active = ((channel->remainingSteps != 0U) ||
+        ((channel->targetRateHz == 0U) &&
+            (channel->highTicksLeft != 0U))) ? 1U : 0U;
+    StepperPulse_ExitCritical(primask);
+    return active;
 }
 
 void StepperPulse_SetRampStep(MotorId motor, uint16_t accelStepSps,
@@ -387,8 +457,14 @@ void StepperPulse_HandleTimerInterrupt(void)
                 StepperPulse_TickOne(&g_stepperPulse[i], &batch);
             }
             StepperPulse_ApplyBatch(&batch);
+            if (StepperPulse_HasActiveOutput() == 0U) {
+                StepperPulse_SetTimerEnabled(0U);
+            }
             break;
         default:
             break;
     }
 }
+
+
+#endif /* CAR_PROFILE_IS_FULL */

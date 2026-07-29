@@ -1,31 +1,28 @@
+/*
+ * 比赛菜单与运行状态显示：把K1/K2选择转换成CarEvent，并渲染统一显示行。
+ * 只允许UI/Input任务上下文调用，不能在ISR刷新显示；关闭的库会让依赖任务自动跳过。
+ * 菜单只修改任务选择参数，不直接运行底盘、云台或视觉控制器。
+ */
+#include "library_config.h"
+
+#if CAR_PROFILE_IS_FULL
+
 #include "menu.h"
 
 #include "board.h"
 #include "board_config.h"
+#include "car_display.h"
 #include "control_config.h"
 #include "encoder_motor.h"
 #include "gimbal_attitude.h"
-#include "h7_lcd_display.h"
 #include "motor_no_yaw.h"
+#include "task_registry.h"
 #include "tuning_console.h"
 
-#define MENU_TASK_COUNT       (9U)
 #define MENU_TASK4_ROUTE_COUNT ((uint8_t)CAR_MISSION4_ROUTE_COUNT)
 #define MENU_MONO_MAX_CHARS   (18U)
 #define MENU_LINE_SIZE        (24U)
 #define MENU_TASK5_REFRESH_TICKS (5U)
-
-static const char *const g_taskNames[MENU_TASK_COUNT] = {
-    "Task 1",
-    "Task 2",
-    "Task 3",
-    "Task 4",
-    "Task 5 PID",
-    "Task 6 Drive",
-    "Task 7 Circle",
-    "Task 8 IMU",
-    "Task 9 Encoder"
-};
 
 static const char *const g_task4RouteNames[MENU_TASK4_ROUTE_COUNT] = {
     "Point Track 1L",
@@ -51,6 +48,39 @@ static uint16_t g_task6OpenSpeed;
 static uint8_t g_forceRefresh;
 static uint16_t g_refreshTicks;
 static CarState g_lastState;
+
+/* 从当前项向后寻找下一个由库组合支持的任务。 */
+static uint8_t Menu_FindNextAvailableTask(uint8_t current)
+{
+    uint8_t count;
+    uint8_t next = current;
+
+    for (count = 0U; count < TaskRegistry_GetCount(); ++count) {
+        next = (uint8_t)((next + 1U) % TaskRegistry_GetCount());
+        if (StateMachine_IsMissionAvailable((uint8_t)(next + 1U)) != 0U) {
+            return next;
+        }
+    }
+    return current;
+}
+
+/* 从当前项向前寻找上一个由库组合支持的任务。 */
+static uint8_t Menu_FindPreviousAvailableTask(uint8_t current)
+{
+    uint8_t count;
+    uint8_t previous = current;
+
+    for (count = 0U; count < TaskRegistry_GetCount(); ++count) {
+        previous = (previous == 0U) ?
+            (uint8_t)(TaskRegistry_GetCount() - 1U) :
+            (uint8_t)(previous - 1U);
+        if (StateMachine_IsMissionAvailable(
+            (uint8_t)(previous + 1U)) != 0U) {
+            return previous;
+        }
+    }
+    return current;
+}
 
 static char *Menu_AppendText(char *write, char *end, const char *text)
 {
@@ -179,7 +209,7 @@ static void Menu_ShowMonoLine(uint8_t index, const char *text)
         ++i;
     }
 
-    H7LcdDisplay_ShowLine(index, padded);
+    CarDisplay_ShowLine(index, padded);
 }
 
 static void Menu_RenderLines(const char *line0, const char *line1,
@@ -193,7 +223,7 @@ static void Menu_RenderLines(const char *line0, const char *line1,
     Menu_ShowMonoLine(1U, line1);
     Menu_ShowMonoLine(2U, line2);
     Menu_ShowMonoLine(3U, line3);
-    H7LcdDisplay_Refresh();
+    CarDisplay_Refresh();
 }
 
 static void Menu_BuildTaskLine(char line[MENU_LINE_SIZE], uint8_t task,
@@ -203,7 +233,7 @@ static void Menu_BuildTaskLine(char line[MENU_LINE_SIZE], uint8_t task,
     char *end = &line[MENU_LINE_SIZE - 1U];
 
     write = Menu_AppendChar(write, end, selected ? '>' : ' ');
-    (void)Menu_AppendText(write, end, g_taskNames[task]);
+    (void)Menu_AppendText(write, end, TaskRegistry_GetName(task));
 }
 
 static void Menu_RenderTaskMenu(void)
@@ -216,10 +246,9 @@ static void Menu_RenderTaskMenu(void)
     uint8_t next;
     uint8_t next2;
 
-    prev = (g_taskIndex == 0U) ? (MENU_TASK_COUNT - 1U) :
-        (uint8_t)(g_taskIndex - 1U);
-    next = (uint8_t)((g_taskIndex + 1U) % MENU_TASK_COUNT);
-    next2 = (uint8_t)((g_taskIndex + 2U) % MENU_TASK_COUNT);
+    prev = Menu_FindPreviousAvailableTask(g_taskIndex);
+    next = Menu_FindNextAvailableTask(g_taskIndex);
+    next2 = Menu_FindNextAvailableTask(next);
 
     Menu_BuildTaskLine(line0, prev, 0U);
     Menu_BuildTaskLine(line1, g_taskIndex, 1U);
@@ -413,7 +442,7 @@ static void Menu_RenderTask5(void)
     }
     if (status.oledPage == TUNING_CONSOLE_OLED_GRAY) {
         Menu_BuildGrayMaskLine(line1, status.grayMask);
-#if CAR_MOTOR_NO_YAW_USE_SPEED_PID
+#if CAR_LIBRARY_LINE_DRIVE_USES_SPEED_LOOP
         Menu_BuildSignedPair(line2, "T ", status.leftTargetCounts,
             status.rightTargetCounts, "");
 #else
@@ -759,6 +788,10 @@ void Menu_Init(void)
 {
     g_menuPage = MENU_PAGE_MAIN;
     g_taskIndex = 0U;
+    if (StateMachine_IsMissionAvailable(1U) == 0U) {
+        g_taskIndex = Menu_FindNextAvailableTask(
+            (uint8_t)(TaskRegistry_GetCount() - 1U));
+    }
     g_task1LapCount = 1U;
     g_task4Route = CAR_MISSION4_POINT_ONE_LAP;
     g_task6DriveMode = (CHASSIS_TASK6_DEFAULT_CLOSED_LOOP != 0U) ?
@@ -791,7 +824,7 @@ void Menu_Next(void)
             g_task6OpenSpeed = Menu_NextDriveSpeed(g_task6OpenSpeed);
         }
     } else {
-        g_taskIndex = (uint8_t)((g_taskIndex + 1U) % MENU_TASK_COUNT);
+        g_taskIndex = Menu_FindNextAvailableTask(g_taskIndex);
     }
     Menu_RequestRefresh();
 }
@@ -802,6 +835,11 @@ void Menu_Next(void)
  */
 CarEvent Menu_Confirm(void)
 {
+    if ((g_menuPage == MENU_PAGE_MAIN) &&
+        (StateMachine_IsMissionAvailable(
+            (uint8_t)(g_taskIndex + 1U)) == 0U)) {
+        return CAR_EVENT_NONE;
+    }
     if (g_menuPage == MENU_PAGE_TASK1_LAPS) {
         StateMachine_SetMission1LapCount(g_task1LapCount);
         return CAR_EVENT_MISSION_1_START;
@@ -820,34 +858,22 @@ CarEvent Menu_Confirm(void)
             Menu_GetDriveSpeed(6U));
         return CAR_EVENT_MISSION_6_START;
     }
-    switch (g_taskIndex) {
-    case 0U:
+    if (g_taskIndex == 0U) {
         g_menuPage = MENU_PAGE_TASK1_LAPS;
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
-    case 1U:
-        return CAR_EVENT_MISSION_2_START;
-    case 2U:
-        return CAR_EVENT_MISSION_3_START;
-    case 3U:
+    }
+    if (g_taskIndex == 3U) {
         g_menuPage = MENU_PAGE_TASK4_ROUTE;
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
-    case 4U:
-        return CAR_EVENT_MISSION_5_START;
-    case 5U:
+    }
+    if (g_taskIndex == 5U) {
         g_menuPage = MENU_PAGE_TASK6_MODE;
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
-    case 6U:
-        return CAR_EVENT_MISSION_7_START;
-    case 7U:
-        return CAR_EVENT_MISSION_8_START;
-    case 8U:
-        return CAR_EVENT_MISSION_9_START;
-    default:
-        return CAR_EVENT_NONE;
     }
+    return TaskRegistry_GetStartEvent(g_taskIndex);
 }
 
 uint8_t Menu_Back(void)
@@ -902,3 +928,5 @@ void Menu_Task(CarState state)
         g_forceRefresh = 1U;
     }
 }
+
+#endif

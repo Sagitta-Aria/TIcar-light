@@ -1,20 +1,34 @@
+/*
+ * MSPM0G3507板级初始化与维护：按安全顺序配置时钟、UART、传感器、显示和电机。
+ * 负责锁存复位原因、板级错误与板载灯心跳；不会创建RTOS任务。
+ * generated/ti_msp_dl_config由SysConfig拥有，本文件只在手写扩展点配置运行时行为。
+ */
 #include "board.h"
 
 #include "board_config.h"
+#include "car_display.h"
 #include "delay.h"
+#if CAR_LIBRARY_GRAY_INPUT_ENABLED
 #include "gray.h"
-#include "h7_lcd_display.h"
+#endif
 #include "interrupt.h"
+#if CAR_LIBRARY_IMU660RX_ENABLED
+#include "imu660rx.h"
+#endif
 #include "key.h"
+#if CAR_PROFILE_IS_FULL
 #include "link.h"
+#endif
 #include "log_uart.h"
 #include "motor.h"
+#include "pin_map.h"
+#include "resource_config.h"
 #include "ti_msp_dl_config.h"
 
 #define BOARD_BOOT_STEP_DELAY_MS    (80U)
-#define BOARD_DEBUG_LED_PORT        (GPIOA)
-#define BOARD_DEBUG_LED_IOMUX       (IOMUX_PINCM36)
-#define BOARD_DEBUG_LED_PIN         (DL_GPIO_PIN_14)
+#define BOARD_DEBUG_LED_PORT        PIN_DEBUG_LED_PORT
+#define BOARD_DEBUG_LED_IOMUX       PIN_DEBUG_LED_IOMUX
+#define BOARD_DEBUG_LED_PIN         PIN_DEBUG_LED
 #define BOARD_FATAL_ERROR_MASK      (BOARD_ERROR_CLOCK)
 /* Board_Task由20ms UI任务调用，50拍约1s翻转一次。 */
 #define BOARD_SIGNAL_BLINK_TICKS    (50U)
@@ -24,7 +38,7 @@
 #define BOARD_RECOVERY_POWER_DELAY  (16U)
 #define BOARD_RECOVERY_UART_TIMEOUT (100000U)
 #define BOARD_RECOVERY_UART_TEXT \
-    "RECOVERY SAFE BUILD RUNNING, PA14 BLINK, UART OK\r\n"
+    "RECOVERY SAFE BUILD RUNNING, DEBUG LED BLINK, UART OK\r\n"
 #define BOARD_BOOT_MAX_CHARS        (21U)
 #define BOARD_BOOT_VISIBLE_LINES    (4U)
 
@@ -66,16 +80,16 @@ static void Board_LogResetCause(void)
 #endif
 
 /*
- * 作用：清掉H7 LCD上的上一页启动探针内容。
+ * 作用：清掉所有已启用显示后端的上一页启动探针内容。
  * 使用场景：每次刷新启动探针页前调用。
  */
 static void Board_ClearBootArea(void)
 {
-    H7LcdDisplay_Clear();
+    CarDisplay_Clear();
 }
 
 /*
- * 作用：把启动阶段的一行状态写到H7 LCD缓存。
+ * 作用：把启动阶段的一行状态写到统一显示出口。
  * 使用场景：排查时钟、I2C、UART、灰度输入、应用层初始化卡在哪一步。
  */
 static void Board_ShowBootLine(uint8_t line, const char *text)
@@ -99,7 +113,7 @@ static void Board_ShowBootLine(uint8_t line, const char *text)
         }
     }
 
-    H7LcdDisplay_ShowLine(line, buffer);
+    CarDisplay_ShowLine(line, buffer);
 }
 
 /*
@@ -115,20 +129,27 @@ void Board_ShowBootProgress(const char *clkStatus, const char *i2cStatus,
     Board_ShowBootLine(2U, uartStatus);
     Board_ShowBootLine(3U, adcStatus);
     if ((appStatus != 0) && (appStatus[0] != '\0')) {
-        H7LcdDisplay_ShowLine(4U, appStatus);
+        CarDisplay_ShowLine(4U, appStatus);
     }
-    H7LcdDisplay_Refresh();
+    CarDisplay_Refresh();
 }
 
 /*
  * 作用：按初始化顺序显示当前正在执行的步骤。
- * 使用场景：某个外设初始化卡死时，H7 LCD会停在对应RUN行。
+ * 使用场景：某个外设初始化卡死时，已启用屏幕会停在对应RUN行。
  */
 static void Board_ShowBootStep(const char *done, const char *running,
     const char *waiting1, const char *waiting2)
 {
+#if CAR_LIBRARY_DISPLAY_ENABLED
     Board_ShowBootProgress(done, running, waiting1, waiting2, "");
     delay_ms(BOARD_BOOT_STEP_DELAY_MS);
+#else
+    (void)done;
+    (void)running;
+    (void)waiting1;
+    (void)waiting2;
+#endif
 }
 
 #if CAR_RECOVERY_SAFE_BUILD
@@ -193,11 +214,11 @@ static void Board_RecoveryUartSendAll(const char *text)
 /*
  * 作用：初始化板载 LED 调试灯。
  * 使用场景：临时把按键/状态反馈映射到灯上，便于不看 OLED 也能确认事件。
- * 说明：ccs1.2 已把灰度 S1 迁走，PA14 固定作为状态灯。
+ * 说明：实际引脚由CAR_LIBRARY_BOARD_PROFILE决定。
  */
 void Board_DebugLedInit(void)
 {
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
     DL_GPIO_initDigitalOutput(BOARD_DEBUG_LED_IOMUX);
     DL_GPIO_enableOutput(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
     DL_GPIO_clearPins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
@@ -210,7 +231,7 @@ void Board_DebugLedInit(void)
  */
 void Board_DebugLedSet(uint8_t enabled)
 {
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
     if (enabled != 0U) {
         DL_GPIO_setPins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
     } else {
@@ -227,14 +248,14 @@ void Board_DebugLedSet(uint8_t enabled)
  */
 void Board_DebugLedToggle(void)
 {
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
     DL_GPIO_togglePins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
 }
 
 /*
  * 作用：Board_Init 后半段诊断探针。
- * 使用场景：UART 已初始化后，用 Type-C 日志和 PA14 翻转定位卡在哪个初始化步骤。
+ * 使用场景：UART已初始化后，用Type-C日志和板载灯翻转定位初始化步骤。
  */
 static void Board_BootProbe(const char *stage)
 {
@@ -254,7 +275,7 @@ static void Board_BootProbe(const char *stage)
 void Board_ReportError(BoardErrorCode error)
 {
     g_boardErrors |= (uint32_t)error;
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
     DL_GPIO_setPins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
 }
@@ -276,11 +297,15 @@ uint8_t Board_HasFatalError(void)  //有致命错误返回 1，没有返回 0
 
 uint8_t Board_IsDisplayAvailable(void)
 {
-    return H7LcdDisplay_IsReady();
+    return CarDisplay_IsAvailable();
 }
 
 void Board_Init(void)
 {
+#if CAR_LIBRARY_IMU660RX_ENABLED
+    IMU660RXStatus imu660rxStatus;
+#endif
+
     /* RSTCAUSE可能被后续启动代码读取，必须在任何外设初始化前先锁存。 */
     g_boardResetCause = (uint32_t)DL_SYSCTL_getResetCause();
     g_boardErrors = BOARD_ERROR_NONE;
@@ -306,12 +331,12 @@ void Board_Init(void)
     return;
 #else
     /*
-     * 先初始化电源和GPIO；H7 LCD内容先写软件缓存，UART0就绪后统一发出。
+     * 先初始化电源和GPIO；H7 LCD先写缓存，OLED等待正式时钟后初始化。
      */
     SYSCFG_DL_initPower();
     SYSCFG_DL_GPIO_init();
     Board_DebugLedInit();
-    H7LcdDisplay_Init();
+    CarDisplay_Init();
     Board_ShowBootStep("OK Power GPIO", "RUN Clock", "WAIT UART Gray",
         "WAIT Drivers");
 
@@ -327,10 +352,22 @@ void Board_Init(void)
         return;
     }
 
+#if CAR_LIBRARY_LOCAL_OLED_ENABLED
+    /* OLED依赖正式系统时钟；失败只记录非致命I2C错误，车辆控制仍可运行。 */
+    if (CarDisplay_InitLocalOled() == 0U) {
+        Board_ReportError(BOARD_ERROR_OLED_I2C);
+    }
+#endif
+
     Interrupt_Init();
 
+#if CAR_PROFILE_IS_GMR
+    Board_ShowBootStep("OK Clock", "RUN UART0", "WAIT Motor",
+        "WAIT Key");
+#else
     Board_ShowBootStep("OK Clock", "RUN Stepper", "WAIT UART Gray",
         "WAIT Drivers");
+#endif
 
     /*
      * 剩余外设在系统时钟就绪后统一拉起。
@@ -340,18 +377,28 @@ void Board_Init(void)
     Board_ShowBootStep("OK Stepper GPIO", "RUN UART", "WAIT Gray",
         "WAIT Drivers");
 
+#if CAR_PROFILE_IS_FULL || CAR_M0_ATTITUDE_UART_REQUIRED || \
+    CAR_H7_UART_REQUIRED
     SYSCFG_DL_Exchange_init();
+#endif
+#if CAR_JY61P_ENABLED
     SYSCFG_DL_JY61P_init();
-#if CAR_ENABLE_LOG_UART
+#endif
+#if CAR_UART0_REQUIRED
     SYSCFG_DL_LogUart_init();
     LogUart_Init();
-    H7LcdDisplay_SetReady(1U);
-    H7LcdDisplay_Refresh();
+#endif
+#if CAR_LIBRARY_H7_LCD_ENABLED
+    CarDisplay_SetH7Ready(1U);
+    CarDisplay_Refresh();
+#endif
+#if CAR_ENABLE_LOG_UART
     Board_LogResetCause();
     Board_BootProbe("after log uart init");
     LOG_LINE("board uart: log/exchange ok");
     LOG_U32("clock mclk hz=", CPUCLK_FREQ);
     LOG_U32("clock bus hz=", LogUart_INST_FREQUENCY);
+#if CAR_PROFILE_IS_FULL
     LOG_U32("step timer clk hz=", STEPPER_TIMER_CLOCK_HZ);
     LOG_U32("step tick hz=", STEPPER_TIMER_TICK_HZ);
     LOG_U32("step load=", STEPPER_TIMER_LOAD_VALUE);
@@ -359,21 +406,44 @@ void Board_Init(void)
     LOG_U32("step ramp ms=", CAR_STEPPER_RAMP_PERIOD_MS);
     LOG_U32("step accel sps/ramp=", CAR_STEPPER_ACCEL_STEP_SPS);
     LOG_U32("step decel sps/ramp=", CAR_STEPPER_DECEL_STEP_SPS);
+#else
+    LOG_LINE("board mode: gmr minimal");
 #endif
+#endif
+#if CAR_LIBRARY_IMU660RX_ENABLED
+    Board_BootProbe("before imu660rx init");
+    Board_ShowBootStep("OK UART", "RUN IMU660RX", "WAIT Drivers",
+        "WAIT App");
+    imu660rxStatus = IMU660RX_Init();
+    if (imu660rxStatus != IMU660RX_STATUS_OK) {
+        Board_ReportError(BOARD_ERROR_IMU660RX);
+    }
 #if CAR_ENABLE_LOG_UART
-#if CAR_GRAY_INPUT_DIGITAL
+    LOG_U32("imu660rx status=", (uint32_t)imu660rxStatus);
+    LOG_U32("imu660rx model=", (uint32_t)IMU660RX_GetModel());
+#endif
+    Board_BootProbe("after imu660rx init");
+#endif
+#if CAR_PROFILE_IS_GMR
+    Board_BootProbe("before bootstep gmr motor");
+    Board_ShowBootStep("OK UART0", "RUN Motor", "WAIT Key",
+        "WAIT App");
+    Board_BootProbe("after bootstep gmr motor");
+#else
+#if CAR_UART0_REQUIRED
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     Board_BootProbe("before bootstep gray gpio");
-    Board_ShowBootStep("OK UART Log/Ex", "RUN Gray GPIO", "WAIT Drivers",
+    Board_ShowBootStep("OK UART0/Ex", "RUN Gray GPIO", "WAIT Drivers",
         "WAIT App");
     Board_BootProbe("after bootstep gray gpio");
 #else
     Board_BootProbe("before bootstep gray adc");
-    Board_ShowBootStep("OK UART Log/Ex", "RUN Gray ADC", "WAIT Drivers",
+    Board_ShowBootStep("OK UART0/Ex", "RUN Gray ADC", "WAIT Drivers",
         "WAIT App");
     Board_BootProbe("after bootstep gray adc");
 #endif
 #else
-#if CAR_GRAY_INPUT_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     Board_ShowBootStep("OK UART Ex", "RUN Gray GPIO", "WAIT Drivers",
         "WAIT App");
 #else
@@ -382,7 +452,7 @@ void Board_Init(void)
 #endif
 #endif
 
-#if (CAR_GRAY_INPUT_DIGITAL == 0U)
+#if !CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     Board_BootProbe("before gray adc init");
     SYSCFG_DL_GRAY_ADC0_init();
     SYSCFG_DL_GRAY_ADC1_init();
@@ -395,27 +465,47 @@ void Board_Init(void)
 #endif
     Board_BootProbe("before stepper timer init");
     SYSCFG_DL_STEPPER_TIMER_init();
-    SYSCFG_DL_GRAY_SAMPLE_TIMER_init();
     Board_BootProbe("after stepper timer init");
     Board_ShowBootStep("OK Stepper TIM", "RUN Motor", "WAIT Gray",
         "WAIT Key UART");
+#endif
+#if CAR_LIBRARY_LINE_FOLLOW_ENABLED
+    Board_BootProbe("before gray sample timer init");
+    SYSCFG_DL_GRAY_SAMPLE_TIMER_init();
+    Board_BootProbe("after gray sample timer init");
+#endif
     Board_BootProbe("before motor init");
     Motor_Init();
     Board_BootProbe("after motor init");
+#if CAR_LIBRARY_GRAY_INPUT_ENABLED
     Board_ShowBootStep("OK Motor", "RUN Gray", "WAIT Key",
-        "WAIT Key UART");
+        "WAIT App");
     Board_BootProbe("before gray init");
     Gray_Init();
     Board_BootProbe("after gray init");
+#if CAR_PROFILE_IS_GMR
+    Board_ShowBootStep("OK Gray", "RUN Key", "WAIT App", "");
+#else
     Board_ShowBootStep("OK Gray", "RUN Key", "WAIT UART Wrap",
         "WAIT App");
+#endif
+#elif CAR_PROFILE_IS_GMR
+    Board_ShowBootStep("OK Motor", "RUN Key", "WAIT App", "");
+#else
+    Board_ShowBootStep("OK Motor", "RUN Key", "WAIT UART Wrap",
+        "WAIT App");
+#endif
     Board_BootProbe("before key init");
     Key_Init();
     Board_BootProbe("after key init");
+#if CAR_PROFILE_IS_GMR
+    Board_ShowBootStep("OK Key", "RUN App", "", "");
+#else
     Board_ShowBootStep("OK Key", "RUN Link", "WAIT App", "");
     Board_BootProbe("before link init");
     Link_Init();
     Board_BootProbe("after link init");
+#endif
 
     Board_BootProbe("before board done bootstep");
     Board_ShowBootStep("OK Board", "RUN App", "", "");
@@ -425,9 +515,9 @@ void Board_Init(void)
 
 /*
  * 作用：用板载灯输出系统状态信号。
- * 使用场景：H7 LCD未连接或换板测试时，用肉眼判断程序是否还在主循环。
- * 显示规则：PA14 慢闪表示主循环存活；PA14 快闪表示普通错误；PA14 常亮表示致命错误。
- * 说明：只有 CAR_ENABLE_PA14_DEBUG_LED 为 1 时才真正驱动 PA14。
+ * 使用场景：显示屏未连接或换板测试时，用肉眼判断程序是否还在主循环。
+ * 显示规则：慢闪表示主循环存活，快闪表示普通错误，常亮表示致命错误。
+ * 说明：只有CAR_ENABLE_DEBUG_LED为1时才驱动当前板型的状态灯。
  */
 uint8_t Board_Task(void)
 {
@@ -436,7 +526,7 @@ uint8_t Board_Task(void)
 
 #if CAR_RECOVERY_SAFE_BUILD
     delay_cycles(BOARD_RECOVERY_BLINK_CYCLES);
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
     DL_GPIO_togglePins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
     Board_RecoveryUartSendAll(BOARD_RECOVERY_UART_TEXT);
@@ -444,7 +534,7 @@ uint8_t Board_Task(void)
 #endif
 
     if (Board_HasFatalError() != 0U) {
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
         DL_GPIO_setPins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
         return 0U;
@@ -454,7 +544,7 @@ uint8_t Board_Task(void)
         ++errorCounter;
         if (errorCounter >= BOARD_ERROR_BLINK_TICKS) {
             errorCounter = 0U;
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
             DL_GPIO_togglePins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
         }
@@ -463,7 +553,7 @@ uint8_t Board_Task(void)
         ++signalCounter;
         if (signalCounter >= BOARD_SIGNAL_BLINK_TICKS) {
             signalCounter = 0U;
-#if CAR_ENABLE_PA14_DEBUG_LED
+#if CAR_ENABLE_DEBUG_LED
             DL_GPIO_togglePins(BOARD_DEBUG_LED_PORT, BOARD_DEBUG_LED_PIN);
 #endif
         }
