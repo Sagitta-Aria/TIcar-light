@@ -25,15 +25,32 @@ static CarEvent App_HandleKeyEvent(KeyEvent event)
         return CAR_EVENT_NONE;
     }
     state = StateMachine_GetState();
-    if (event == KEY_EVENT_2_LONG) {
+    if (event == KEY_EVENT_3) {
+        if (state == CAR_STATE_MENU) {
+            (void)Menu_Back();
+            return CAR_EVENT_NONE;
+        }
         return (state == CAR_STATE_MISSION) ? CAR_EVENT_STOP : CAR_EVENT_MENU;
+    }
+    if ((state == CAR_STATE_MENU) && (event == KEY_EVENT_1)) {
+        Menu_Next();
+        return CAR_EVENT_NONE;
+    }
+    if ((state == CAR_STATE_MENU) && (event == KEY_EVENT_4)) {
+        Menu_Previous();
+        return CAR_EVENT_NONE;
     }
     if ((state == CAR_STATE_MENU) && (event == KEY_EVENT_2)) {
         return Menu_Confirm();
     }
-    if (((state == CAR_STATE_STOP) || (state == CAR_STATE_FINISHED) ||
-        (state == CAR_STATE_ERROR)) && (event == KEY_EVENT_2)) {
-        return CAR_EVENT_MENU;
+    if ((state == CAR_STATE_MISSION) &&
+        (StateMachine_GetMissionId() == 5U)) {
+        if (event == KEY_EVENT_1) {
+            return CAR_EVENT_MISSION_4_MODE_TOGGLE;
+        }
+        if (event == KEY_EVENT_2) {
+            return CAR_EVENT_MISSION_4_RUN_TOGGLE;
+        }
     }
     return CAR_EVENT_NONE;
 }
@@ -77,6 +94,18 @@ void App_CommStep(void)
     command = H7ControlUart_TakeCommand();
     if (command == H7_CONTROL_COMMAND_START_ATTITUDE) {
         (void)RtosApp_PostEvent(CAR_EVENT_MISSION_1_START);
+    } else if (command == H7_CONTROL_COMMAND_START_GRAY_FOLLOW) {
+        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_2_START);
+    } else if (command == H7_CONTROL_COMMAND_START_ENCODER) {
+        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_3_START);
+    } else if (command == H7_CONTROL_COMMAND_START_DRIVE) {
+        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_4_START);
+    } else if (command == H7_CONTROL_COMMAND_START_DIRECTION) {
+        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_5_START);
+    } else if (command == H7_CONTROL_COMMAND_START_GRAY) {
+        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_6_START);
+    } else if (command == H7_CONTROL_COMMAND_START_LINE_FOLLOW) {
+        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_7_START);
     } else if (command == H7_CONTROL_COMMAND_STOP) {
         (void)RtosApp_PostEvent(CAR_EVENT_STOP);
     }

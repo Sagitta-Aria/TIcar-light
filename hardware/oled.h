@@ -173,6 +173,9 @@ void OLED_Refresh(void);
  */
 void OLED_Clear(void);
 
+/* 只清空OLED显存，不立即发起I2C刷新；用于一次性重绘完整页面。 */
+void OLED_ClearBuffer(void);
+
 /**
  * @brief 在显存中点亮一个像素点
  *

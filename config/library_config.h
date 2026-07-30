@@ -31,13 +31,17 @@
 #define CAR_LIBRARY_BOARD_TIANMENG_64P              (2U) /* 天猛星 64P 开发板。 */
 
 /*
- * 选择实际使用的主控板；平时只修改这一行的方法名。
- * 当前实车使用地猛星接线；切换板型会自动改变
- * 电机方向脚、K1/K2、UART1 和板载状态灯的引脚定义。
+ * 未由构建参数指定板型时，使用各产品 Profile 的发布板型。
+ * 切换板型会自动改变电机方向脚、按键、UART1 和板载状态灯的引脚定义。
  */
 #ifndef CAR_LIBRARY_BOARD_PROFILE
+#if CAR_PROFILE_IS_GMR
+#define CAR_LIBRARY_BOARD_PROFILE \
+    CAR_LIBRARY_BOARD_TIANMENG_64P
+#else
 #define CAR_LIBRARY_BOARD_PROFILE \
     CAR_LIBRARY_BOARD_DIMENG_48P
+#endif
 #endif
 
 #define CAR_LIBRARY_BOARD_IS_DIMENG \
@@ -50,9 +54,13 @@
 #error "Unknown main-board pin profile"
 #endif
 
-/* 板载JY61 UART1可按固件变体完全停止初始化；默认保持启用。 */
+/* 板载JY61 UART1可按固件变体完全停止初始化；GMR发布目标默认关闭。 */
 #ifndef CAR_JY61P_ENABLED
+#if CAR_PROFILE_IS_GMR
+#define CAR_JY61P_ENABLED                           (0U)
+#else
 #define CAR_JY61P_ENABLED                           (1U)
+#endif
 #endif
 
 #if ((CAR_JY61P_ENABLED != 0U) && (CAR_JY61P_ENABLED != 1U))
@@ -63,6 +71,7 @@
 #define CAR_LIBRARY_GRAY_INPUT_NONE                 (0U) /* 方法编号0：完全关闭灰度输入和采样外设。 */
 #define CAR_LIBRARY_GRAY_INPUT_DIGITAL_GPIO_7       (1U) /* 方法编号1：读取7路GPIO数字灰度，只得到黑/白状态。 */
 #define CAR_LIBRARY_GRAY_INPUT_ANALOG_ADC_7         (2U) /* 方法编号2：读取7路ADC模拟灰度，可得到连续强度值。 */
+#define CAR_LIBRARY_GRAY_INPUT_INFRARED_GPIO_8      (3U) /* 方法编号3：八路红外GPIO，黑线输出高电平。 */
 
 /* ---------- 循迹算法库 ---------- */
 #define CAR_LIBRARY_LINE_FOLLOW_NONE                 (0U) /* 方法编号0：关闭循迹算法，不根据灰度误差控制底盘。 */
@@ -136,10 +145,17 @@
  * 它们是选择结果，不是新的方法选项；手动修改会造成配置显示与实际代码不一致。
  */
 
-/* 当前灰度输入是否为7路GPIO数字量。 */
+/* 当前灰度输入是否为GPIO数字量。 */
 #define CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL \
+    ((CAR_LIBRARY_GRAY_INPUT_METHOD == \
+         CAR_LIBRARY_GRAY_INPUT_DIGITAL_GPIO_7) || \
+        (CAR_LIBRARY_GRAY_INPUT_METHOD == \
+         CAR_LIBRARY_GRAY_INPUT_INFRARED_GPIO_8))
+
+/* 当前是否选择独立封装的八路红外循迹模块。 */
+#define CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8 \
     (CAR_LIBRARY_GRAY_INPUT_METHOD == \
-        CAR_LIBRARY_GRAY_INPUT_DIGITAL_GPIO_7)
+        CAR_LIBRARY_GRAY_INPUT_INFRARED_GPIO_8)
 
 /* 当前是否需要初始化任意灰度输入。 */
 #define CAR_LIBRARY_GRAY_INPUT_ENABLED \
@@ -243,12 +259,14 @@
  * 之间缺少必要依赖时，编译器会直接报出对应的 #error，而不是让错误带到赛场。
  */
 
-/* 灰度输入可关闭，或选择7路数字GPIO/7路模拟ADC。 */
+/* 灰度输入可关闭，或选择旧7路数字、7路模拟、八路红外数字输入。 */
 #if ((CAR_LIBRARY_GRAY_INPUT_METHOD != CAR_LIBRARY_GRAY_INPUT_NONE) && \
     (CAR_LIBRARY_GRAY_INPUT_METHOD != \
         CAR_LIBRARY_GRAY_INPUT_DIGITAL_GPIO_7) && \
     (CAR_LIBRARY_GRAY_INPUT_METHOD != \
-        CAR_LIBRARY_GRAY_INPUT_ANALOG_ADC_7))
+        CAR_LIBRARY_GRAY_INPUT_ANALOG_ADC_7) && \
+    (CAR_LIBRARY_GRAY_INPUT_METHOD != \
+        CAR_LIBRARY_GRAY_INPUT_INFRARED_GPIO_8))
 #error "Unknown gray input library method"
 #endif
 

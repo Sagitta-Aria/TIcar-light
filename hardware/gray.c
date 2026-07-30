@@ -1,5 +1,5 @@
 /*
- * 七路灰度硬件抽象：按library_config选择GPIO数字输入或ADC模拟输入，并统一输出mask/误差。
+ * 灰度硬件抽象：数字8路委托给infrared_track，旧数字7路和ADC7路保持兼容。
  * 普通任务可调用Gray_Update；TIMG0 ISR应走Gray_ReadDigitalMaskFast，避免ADC等待和复杂滤波。
  * 数字模式不使用模拟阈值校准，但保留兼容接口以便快速切换比赛传感器方案。
  */
@@ -11,6 +11,9 @@
 
 #include "board_config.h"
 #include "pin_map.h"
+#if CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
+#include "infrared_track.h"
+#endif
 
 #define GRAY_CALIBRATION_MIN_SPAN   (64U)
 
@@ -23,11 +26,13 @@
 #endif
 
 #if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
+#if !CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
 typedef struct {
     GPIO_Regs *port;
     uint32_t pin;
     uint32_t iomux;
 } GrayDigitalSlot;
+#endif
 #else
 typedef struct {
     ADC12_Regs *adc;
@@ -36,6 +41,7 @@ typedef struct {
 #endif
 
 #if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
+#if !CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
 /* g_grayDigitalMap：把从左到右的 7 路数字灰度输出映射到 GPIO。 */
 static const GrayDigitalSlot g_grayDigitalMap[GRAY_SENSOR_COUNT] = {
     {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_1, PIN_GRAY_1_IOMUX},
@@ -46,6 +52,7 @@ static const GrayDigitalSlot g_grayDigitalMap[GRAY_SENSOR_COUNT] = {
     {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_6, PIN_GRAY_6_IOMUX},
     {PIN_GRAY_DIGITAL_PORT, PIN_GRAY_7, PIN_GRAY_7_IOMUX},
 };
+#endif
 #else
 /* g_grayMap：把从左到右的 7 路传感器映射到对应 ADC 和 MEM 槽位。 */
 static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
@@ -59,9 +66,13 @@ static const GrayAdcSlot g_grayMap[GRAY_SENSOR_COUNT] = {
 };
 #endif
 
-/* g_grayWeight：线路位置权重，当前实车左右反接，S5~S7 在车体右侧。 */
+/* g_grayWeight：通用误差接口的位置权重；GMR任务使用自己的可调权重。 */
 static const int16_t g_grayWeight[GRAY_SENSOR_COUNT] = {
+#if (GRAY_SENSOR_COUNT == 8U)
+    -4, -3, -2, -1, 1, 2, 3, 4
+#else
     -1, -1, -1, 0, 1, 1, 1
+#endif
 };
 
 /* g_grayRaw：最新原始采样值；数字模式下只会是 0 或 4095。 */
@@ -86,7 +97,7 @@ static uint8_t g_grayCandidate[GRAY_SENSOR_COUNT];
 /* g_grayConfirmCount：候选状态连续出现的次数。 */
 static uint8_t g_grayConfirmCount[GRAY_SENSOR_COUNT];
 
-/* g_grayMask：把黑白结果压缩成 bit6~bit0，对应 S1~S7。 */
+/* g_grayMask：S1放在最高有效位，最后一路放在bit0。 */
 static uint8_t g_grayMask;
 
 /* g_grayValid：上一轮灰度更新是否成功。 */
@@ -100,7 +111,7 @@ static uint8_t Gray_IsValidChannel(GrayChannel channel)
     return ((uint32_t)channel < GRAY_SENSOR_COUNT) ? 1U : 0U;
 }
 
-/* 作用：把 S1~S7 的数组序号映射成 bit6~bit0。 */
+/* 作用：把通道数组序号映射到对应的状态位。 */
 static uint8_t Gray_BitForIndex(uint32_t index)
 {
     return (uint8_t)(1U << ((GRAY_SENSOR_COUNT - 1U) - index));
@@ -152,6 +163,9 @@ static void Gray_LoadDefaultThresholds(void)
  */
 static void Gray_ConfigDigitalInputs(void)
 {
+#if CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
+    InfraredTrack_Init();
+#else
     uint32_t i;
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
@@ -159,8 +173,10 @@ static void Gray_ConfigDigitalInputs(void)
             DL_GPIO_INVERSION_DISABLE, GRAY_DIGITAL_RESISTOR,
             DL_GPIO_HYSTERESIS_ENABLE, DL_GPIO_WAKEUP_DISABLE);
     }
+#endif
 }
 
+#if !CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
 /*
  * 作用：读取某一路数字灰度是否压线。
  * 使用场景：Gray_Update 里把模块输出的数字量转换成 g_grayDigital。
@@ -178,6 +194,7 @@ static uint8_t Gray_ReadDigitalActive(uint32_t index)
     return (levelHigh == 0U) ? 1U : 0U;
 #endif
 }
+#endif
 
 #else
 /*
@@ -270,7 +287,7 @@ static uint16_t Gray_GetLineStrength(uint32_t index)
 }
 
 /*
- * 作用：重新拼接 7 路黑白状态的位图。
+ * 作用：重新拼接全部通道的黑白状态位图。
  * 使用场景：任何黑白状态更新后。
  * 不要用于：原始采样更新阶段还没完成时。
  */
@@ -380,14 +397,22 @@ uint8_t Gray_Update(void)
 {
 #if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
     uint32_t i;
+#if CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
+    uint8_t inputMask = InfraredTrack_ReadMask();
+#endif
 
     for (i = 0U; i < GRAY_SENSOR_COUNT; ++i) {
         if (Gray_IsTrackSensorEnabled(i) == 0U) {
             g_grayRaw[i] = 0U;
             continue;
         }
+#if CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
+        g_grayRaw[i] = ((inputMask & Gray_BitForIndex(i)) != 0U) ?
+            GRAY_ADC_MAX_VALUE : 0U;
+#else
         g_grayRaw[i] = (Gray_ReadDigitalActive(i) != 0U) ?
             GRAY_ADC_MAX_VALUE : 0U;
+#endif
     }
 
     Gray_UpdateDigitalFromRaw();
@@ -452,6 +477,10 @@ uint8_t Gray_GetDigitalMask(void)
 uint8_t Gray_ReadDigitalMaskFast(void)
 {
 #if CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL
+#if CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
+    uint8_t mask = (uint8_t)(InfraredTrack_ReadMask() &
+        CAR_GRAY_TRACK_SENSOR_MASK);
+#else
     uint8_t mask = 0U;
     uint32_t pins = DL_GPIO_readPins(PIN_GRAY_DIGITAL_PORT,
         PIN_GRAY_1 | PIN_GRAY_2 | PIN_GRAY_3 | PIN_GRAY_4 |
@@ -476,6 +505,7 @@ uint8_t Gray_ReadDigitalMaskFast(void)
 #endif
 
     mask = (uint8_t)(mask & CAR_GRAY_TRACK_SENSOR_MASK);
+#endif
     g_grayMask = mask;
     return mask;
 #else

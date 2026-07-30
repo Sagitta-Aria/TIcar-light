@@ -44,7 +44,7 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 | 模块 | 信号 | MCU管脚 | 说明 |
 | --- | --- | --- | --- |
 | 本地OLED（当前启用） | I2C0 SDA / SCL | PA0 / PA1 | SSD1306菜单显示 |
-| K1 / K2 | 按键 | PB0 / PB1 | 低有效，内部上拉 |
+| K1 / K2 / K3 / K4 / K5 | 按键 | PB0 / PB1 / PB11 / PB10 / PB21 | 低有效，内部上拉；K5已纳入按键驱动 |
 | 状态灯 | LED | PB22 | 天猛星板载USER_LED，高电平点亮 |
 | Gmr H7 LCD / 任务控制 | UART2 TX / RX | PB15 / PB16 | 115200 8-N-1；TX/RX交叉 |
 | Full H7云台反馈 / LCD输出 | UART0 TX / RX | PA10 / PA11 | 仅Full使用 |
@@ -58,7 +58,7 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 云台STEP资源不初始化。Full仍使用UART0连接H7、UART3连接K230。模块必须共地。
 | BSL invoke | 输入 | PA18 | 不要连接会在启动时拉低的外设 |
 
-## 数字灰度
+## 默认七路数字灰度
 
 `CAR_LIBRARY_GRAY_INPUT_METHOD`当前选择
 `CAR_LIBRARY_GRAY_INPUT_DIGITAL_GPIO_7`，`GRAY_DIGITAL_ACTIVE_HIGH = 1`。
@@ -73,9 +73,11 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 | S6 | PA26 | `0x02` |
 | S7 | PA27 | `0x01` |
 
+八路红外驱动仍保留，预留S8为PA14；默认构建不会初始化PA14，也不会读取S8。
+
 ## 端口冲突核对
 
-当前底盘十个信号与四路UART、七路灰度、两键、状态灯、云台STEP/DIR、SWD和HFXT均没有重复PINCM。本地OLED使用PA0/PA1。特别注意以下旧定义已经失效：
+当前底盘十个信号与四路UART、七路灰度、五个按键、状态灯、云台STEP/DIR、SWD和HFXT均没有重复PINCM。本地OLED使用PA0/PA1。特别注意以下旧定义已经失效：
 
 - PA12/PA22 不再是底盘 STEP/DIR，而是 PWMB/PWMA。
 - PA13/PB24 不再是底盘 STEP/DIR，而是 Encoder2 A/B。

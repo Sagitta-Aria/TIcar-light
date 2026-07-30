@@ -128,15 +128,13 @@ uint8_t StateMachine_IsMissionAvailable(uint8_t missionId)
 {
     switch (missionId) {
     case 1U:
-        return (uint8_t)(CAR_LIBRARY_LINE_FOLLOW_ENABLED &&
-            CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED);
+        return (uint8_t)CAR_LIBRARY_LINE_FOLLOW_ENABLED;
     case 2U:
     case 3U:
     case 7U:
         return (uint8_t)CAR_LIBRARY_GIMBAL_TRACKING_ENABLED;
     case 4U:
         return (uint8_t)(CAR_LIBRARY_LINE_FOLLOW_ENABLED &&
-            CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED &&
             CAR_LIBRARY_GIMBAL_TRACKING_ENABLED);
     case 8U:
         return (uint8_t)CAR_LIBRARY_GIMBAL_ATTITUDE_ENABLED;
@@ -501,8 +499,10 @@ static void StateMachine_TaskMissionGimbalPrep(void)
 /* 作用：Task4 循迹时用已完成转向次数当 flag，按 flag 切云台参数。 */
 static void StateMachine_TaskMission4Line(void)
 {
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     uint32_t flag;
     uint32_t targetTurns = StateMachine_GetMission4TargetTurns();
+#endif
 
     MotorNoYaw_Task();
     if (MotorNoYaw_IsRunning() == 0U) {
@@ -516,6 +516,7 @@ static void StateMachine_TaskMission4Line(void)
     }
     StateMachine_UpdateMission4YawControl();
 
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     flag = MotorNoYaw_GetTurnCount();
     if (flag != g_mission4Flag) {
         g_mission4Flag = flag;
@@ -534,6 +535,7 @@ static void StateMachine_TaskMission4Line(void)
             (uint32_t)CAR_MISSION4_EXTRA_ENCODER_COUNTS)) {
         StateMachine_Enter(CAR_STATE_FINISHED);
     }
+#endif
 }
 
 static void StateMachine_TaskMission4(void)
@@ -707,7 +709,9 @@ void StateMachine_Task(void)
 
 void StateMachine_ChassisControlPeriod(void)
 {
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     uint32_t targetTurns;
+#endif
 
     if (g_carState != CAR_STATE_MISSION) {
         return;
@@ -736,10 +740,12 @@ void StateMachine_ChassisControlPeriod(void)
         return;
     }
 
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     targetTurns = (uint32_t)g_mission1LapCount * 4U;
     if (MotorNoYaw_GetTurnCount() >= targetTurns) {
         StateMachine_Enter(CAR_STATE_FINISHED);
     }
+#endif
 }
 
 void StateMachine_HandleChassisFastEvent(void)

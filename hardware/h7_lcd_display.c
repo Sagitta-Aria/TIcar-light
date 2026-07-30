@@ -26,6 +26,9 @@ static char g_h7LcdRows[H7_LCD_DISPLAY_ROW_COUNT]
 static volatile uint16_t g_h7LcdDirtyRows;
 static volatile uint8_t g_h7LcdClearPending;
 static volatile uint8_t g_h7LcdReady;
+static char g_h7LcdTimerText[6];
+static volatile uint8_t g_h7LcdTimerMode;
+static volatile uint8_t g_h7LcdTimerDirty;
 
 static uint32_t H7LcdDisplay_EnterCritical(void)
 {
@@ -109,6 +112,9 @@ void H7LcdDisplay_Init(void)
     g_h7LcdDirtyRows = 0U;
     g_h7LcdClearPending = 1U;
     g_h7LcdReady = 0U;
+    g_h7LcdTimerText[0] = '\0';
+    g_h7LcdTimerMode = 0U;
+    g_h7LcdTimerDirty = 0U;
 }
 
 void H7LcdDisplay_SetReady(uint8_t ready)
@@ -117,8 +123,12 @@ void H7LcdDisplay_SetReady(uint8_t ready)
 
     g_h7LcdReady = (ready != 0U) ? 1U : 0U;
     if (g_h7LcdReady != 0U) {
-        g_h7LcdClearPending = 1U;
-        g_h7LcdDirtyRows = H7_LCD_DISPLAY_ALL_ROWS_DIRTY;
+        if (g_h7LcdTimerMode != 0U) {
+            g_h7LcdTimerDirty = 1U;
+        } else {
+            g_h7LcdClearPending = 1U;
+            g_h7LcdDirtyRows = H7_LCD_DISPLAY_ALL_ROWS_DIRTY;
+        }
     }
     H7LcdDisplay_ExitCritical(primask);
 }
@@ -133,6 +143,8 @@ void H7LcdDisplay_Clear(void)
     }
     g_h7LcdDirtyRows = 0U;
     g_h7LcdClearPending = 1U;
+    g_h7LcdTimerMode = 0U;
+    g_h7LcdTimerDirty = 0U;
     H7LcdDisplay_ExitCritical(primask);
 }
 
@@ -147,6 +159,12 @@ void H7LcdDisplay_ShowLine(uint8_t row, const char *text)
 
     H7LcdDisplay_CopyText(next, text);
     primask = H7LcdDisplay_EnterCritical();
+    if (g_h7LcdTimerMode != 0U) {
+        g_h7LcdTimerMode = 0U;
+        g_h7LcdTimerDirty = 0U;
+        g_h7LcdClearPending = 1U;
+        g_h7LcdDirtyRows = H7_LCD_DISPLAY_ALL_ROWS_DIRTY;
+    }
     if (H7LcdDisplay_TextEquals(g_h7LcdRows[row], next) == 0U) {
         H7LcdDisplay_CopyText(g_h7LcdRows[row], next);
         g_h7LcdDirtyRows |= (uint16_t)(1U << row);
@@ -154,15 +172,73 @@ void H7LcdDisplay_ShowLine(uint8_t row, const char *text)
     H7LcdDisplay_ExitCritical(primask);
 }
 
+void H7LcdDisplay_ShowTimer(uint32_t elapsedSeconds)
+{
+    char next[6];
+    uint32_t minutes = elapsedSeconds / 60U;
+    uint32_t primask;
+
+    if (minutes > 99U) {
+        minutes = 99U;
+        elapsedSeconds = (99U * 60U) + 59U;
+    }
+    next[0] = (char)('0' + (minutes / 10U));
+    next[1] = (char)('0' + (minutes % 10U));
+    next[2] = ':';
+    next[3] = (char)('0' + ((elapsedSeconds / 10U) % 6U));
+    next[4] = (char)('0' + (elapsedSeconds % 10U));
+    next[5] = '\0';
+
+    primask = H7LcdDisplay_EnterCritical();
+    if ((g_h7LcdTimerMode == 0U) ||
+        (H7LcdDisplay_TextEquals(g_h7LcdTimerText, next) == 0U)) {
+        H7LcdDisplay_CopyText(g_h7LcdTimerText, next);
+        g_h7LcdTimerMode = 1U;
+        g_h7LcdTimerDirty = 1U;
+        g_h7LcdClearPending = 0U;
+    }
+    H7LcdDisplay_ExitCritical(primask);
+}
+
 void H7LcdDisplay_Refresh(void)
 {
     static const uint8_t clearCommand[] = "@CLEAR\n";
+    uint8_t timerCommand[9];
     char line[H7_LCD_DISPLAY_MAX_CHARS + 1U];
     uint32_t primask;
     uint8_t clearPending;
+    uint8_t timerDirty;
+    uint8_t timerMode;
     uint8_t row;
 
     if (g_h7LcdReady == 0U) {
+        return;
+    }
+
+    primask = H7LcdDisplay_EnterCritical();
+    timerMode = g_h7LcdTimerMode;
+    timerDirty = g_h7LcdTimerDirty;
+    if ((timerMode != 0U) && (timerDirty != 0U)) {
+        timerCommand[0] = (uint8_t)'@';
+        timerCommand[1] = (uint8_t)'T';
+        timerCommand[2] = (uint8_t)'=';
+        timerCommand[3] = (uint8_t)g_h7LcdTimerText[0];
+        timerCommand[4] = (uint8_t)g_h7LcdTimerText[1];
+        timerCommand[5] = (uint8_t)g_h7LcdTimerText[2];
+        timerCommand[6] = (uint8_t)g_h7LcdTimerText[3];
+        timerCommand[7] = (uint8_t)g_h7LcdTimerText[4];
+        timerCommand[8] = (uint8_t)'\n';
+        g_h7LcdTimerDirty = 0U;
+    }
+    H7LcdDisplay_ExitCritical(primask);
+    if (timerMode != 0U) {
+        if ((timerDirty != 0U) &&
+            (H7LcdDisplay_TrySendBytes(timerCommand,
+                (uint16_t)sizeof(timerCommand)) == 0U)) {
+            primask = H7LcdDisplay_EnterCritical();
+            g_h7LcdTimerDirty = 1U;
+            H7LcdDisplay_ExitCritical(primask);
+        }
         return;
     }
 

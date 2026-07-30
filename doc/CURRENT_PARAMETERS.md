@@ -59,7 +59,7 @@
 | `CAR_WATCHDOG_HW_TIMER_PERIOD` | `12_BITS` | 硬件超时约1秒 |
 | `CAR_CHASSIS_LEFT_REVERSE` | 0 | 左轮命令方向不反转 |
 | `CAR_CHASSIS_RIGHT_REVERSE` | 1 | 右轮命令方向反转 |
-| `CAR_KEY_ACTIVE_LOW` | 1 | K1/K2低电平按下 |
+| `CAR_KEY_ACTIVE_LOW` | 1 | K1~K4低电平按下，K5仅保留 |
 
 ## 显示参数
 
@@ -129,10 +129,10 @@
 | 默认搜线速度 | 10 | 启动即丢线且无上一拍时使用 |
 | S1至S7权重 | `13, 11, 3, 0, -3, -11, -13` | Task4独立权重 |
 
-## 双轮反转直角转向
+## 直角转向（当前关闭）
 
-当前方法为内轮后退、外轮前进。左转由S1确认回线，右转由S7确认回线，随后
-内外轮同向前进一小段。速度单位均为 `count/20ms`。
+当前两个Profile均选择`CAR_LIBRARY_RIGHT_ANGLE_TURN_NONE`。以下数值是旧方法的
+历史参考，不参与当前固件的左右轮输出。
 
 ### Task1转向参数
 

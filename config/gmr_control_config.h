@@ -1,7 +1,7 @@
 #ifndef GMR_CONTROL_CONFIG_H
 #define GMR_CONTROL_CONFIG_H
 
-/* TIMA0 底盘 PWM，Task2 串口百分比按 0..1200 raw count 换算。 */
+/* TIMA0 底盘 PWM，开环百分比按 0..1200 raw count 换算。 */
 #define CHASSIS_PWM_PERIOD_COUNTS             (1600U)
 #define CHASSIS_PWM_HARDWARE_MAX_COUNTS       (CHASSIS_PWM_PERIOD_COUNTS - 1U)
 #define CHASSIS_PWM_LIMIT_COUNTS              (1200U)
@@ -38,7 +38,49 @@
 #define CHASSIS_TASK1_CLOSED_SPEED_DEFAULT     (20U)
 #define CHASSIS_TASK1_OPEN_SPEED_DEFAULT       (20U)
 
-/* Task6主车每50ms记录实际编码增量，从车收到OVER后按距离闭环回放。 */
+/* Mission4可调闭环目标，单位与编码器速度环一致：count/20ms。 */
+#define GMR_MISSION4_LEFT_SPEED_COUNTS_PER_PERIOD   (15U)
+#define GMR_MISSION4_RIGHT_SPEED_COUNTS_PER_PERIOD  (27U)
+#define GMR_MISSION4_SPEED_MIN_COUNTS_PER_PERIOD     (0U)
+#define GMR_MISSION4_SPEED_MAX_COUNTS_PER_PERIOD   (100U)
+#define GMR_MISSION4_SPEED_STEP_COUNTS_PER_PERIOD    (1U)
+
+/* Mission5方向测试：开环单位为PWM百分比，闭环单位为count/20ms。 */
+#define GMR_MISSION5_DIRECTION_PWM_PERCENT          (20U)
+#define GMR_MISSION5_DIRECTION_SPEED_COUNTS_PER_PERIOD (20U)
+
+/* Task2/6/7共用灰度加权差速；默认七路，八路红外保留独立权重。 */
+#define GMR_MISSION2_LEFT_STOP_COUNT                 (36100L)
+#define GMR_MISSION2_RIGHT_STOP_COUNT                (45600L)
+#define GMR_MISSION2_START_SPEED_COUNTS_PER_PERIOD       (12)
+#define GMR_MISSION2_START_RAMP_MS                    (2000U)
+#define GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD  (35)
+#define GMR_LINE_FOLLOW_MIN_SPEED_COUNTS_PER_PERIOD   (0)
+#define GMR_LINE_FOLLOW_MAX_SPEED_COUNTS_PER_PERIOD  (42)
+#define GMR_LINE_FOLLOW_GAIN                         (2)
+#define GMR_LINE_FOLLOW_CORRECTION_LIMIT_COUNTS     (15)
+#define GMR_LINE_FOLLOW_LOST_HOLD_MS              (2000U)
+
+#if CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
+#define GMR_LINE_FOLLOW_S1_WEIGHT                   (14)
+#define GMR_LINE_FOLLOW_S2_WEIGHT                   (10)
+#define GMR_LINE_FOLLOW_S3_WEIGHT                    (6)
+#define GMR_LINE_FOLLOW_S4_WEIGHT                    (2)
+#define GMR_LINE_FOLLOW_S5_WEIGHT                   (-2)
+#define GMR_LINE_FOLLOW_S6_WEIGHT                   (-6)
+#define GMR_LINE_FOLLOW_S7_WEIGHT                  (-10)
+#define GMR_LINE_FOLLOW_S8_WEIGHT                  (-14)
+#else
+#define GMR_LINE_FOLLOW_S1_WEIGHT                   (13)
+#define GMR_LINE_FOLLOW_S2_WEIGHT                    (7)
+#define GMR_LINE_FOLLOW_S3_WEIGHT                    (3)
+#define GMR_LINE_FOLLOW_S4_WEIGHT                    (0)
+#define GMR_LINE_FOLLOW_S5_WEIGHT                   (-3)
+#define GMR_LINE_FOLLOW_S6_WEIGHT                   (-7)
+#define GMR_LINE_FOLLOW_S7_WEIGHT                  (-13)
+#endif
+
+/* 旧双车功能的未链接参数，当前GMR Task2/7普通巡线不使用。 */
 #define GMR_BLUETOOTH_MISSION_SAMPLE_PERIOD_MS (50U)
 #define GMR_BLUETOOTH_MISSION_MAX_SAMPLES      (2048U)
 #define GMR_BLUETOOTH_MISSION_TARGET_TURNS     (4U)
@@ -54,7 +96,7 @@
 
 /*
  * GMR 编码器 PI 初始值：只保证参数合法和输出保守，不代表实车最终值。
- * 先用 Task2 的 pwm/set 测两点，再回写 Start/RunStart/FF；随后调 Kp/Ki。
+ * 先用 Task5 的PWM/闭环方向测试测两点，再回写Start/RunStart/FF；随后调Kp/Ki。
  */
 #define CHASSIS_START_PWM_SPEED_THRESHOLD_COUNTS_PER_PERIOD (5U)   //判断是否速度小于xx启用不同的start前馈
 #define CHASSIS_LEFT_START_PWM_COUNTS           (80)
@@ -67,16 +109,17 @@
 #define CHASSIS_RIGHT_RUN_START_PWM_COUNTS      (60)
 #define CHASSIS_RIGHT_KP_Q1024               (8192L)
 #define CHASSIS_RIGHT_KI_Q1024                  (1024L)
-#define CHASSIS_RIGHT_FF_Q1024                  (8100)
+#define CHASSIS_RIGHT_FF_Q1024                  (7600)
 #define CHASSIS_RIGHT_INTEGRAL_LIMIT_PWM_COUNTS (120)
 #define CHASSIS_LEFT_STARTUP_COMPENSATION_PWM_COUNTS (0)  //起步积分补偿
 
 /* 正 PWM 必须得到正反馈；若方向相反只改这里或板级 REVERSE。 */
-#define CHASSIS_LEFT_ENCODER_SIGN             (-1)
-#define CHASSIS_RIGHT_ENCODER_SIGN             (1)
+#define CHASSIS_LEFT_ENCODER_SIGN             (1)
+#define CHASSIS_RIGHT_ENCODER_SIGN             (-1)
 
 /*
- * Task5外部M0姿态航向保持。第一帧有效yaw作为上电目标，车体向右偏时
+ * 旧M0航向保持功能的未链接参数，当前GMR Task2/6/7灰度巡线不使用。
+ * 第一帧有效yaw作为上电目标，车体向右偏时
  * error=current-target为正，按left=base-correction、right=base+correction
  * 向左修正。修正量不超过base，保证内轮只减速而不会反转。
  */
@@ -124,6 +167,64 @@
     (GMR_M0_YAW_DEADBAND_X100 > 18000U) || \
     (GMR_M0_YAW_KP_Q1024 < 0L))
 #error "GMR M0 yaw stale/deadband/gain configuration is invalid"
+#endif
+
+#if ((GMR_MISSION4_SPEED_STEP_COUNTS_PER_PERIOD == 0U) || \
+    (GMR_MISSION4_SPEED_MIN_COUNTS_PER_PERIOD > \
+        GMR_MISSION4_SPEED_MAX_COUNTS_PER_PERIOD) || \
+    (GMR_MISSION4_SPEED_MAX_COUNTS_PER_PERIOD > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (((GMR_MISSION4_SPEED_MAX_COUNTS_PER_PERIOD - \
+        GMR_MISSION4_SPEED_MIN_COUNTS_PER_PERIOD) % \
+        GMR_MISSION4_SPEED_STEP_COUNTS_PER_PERIOD) != 0U) || \
+    (GMR_MISSION4_LEFT_SPEED_COUNTS_PER_PERIOD < \
+        GMR_MISSION4_SPEED_MIN_COUNTS_PER_PERIOD) || \
+    (GMR_MISSION4_LEFT_SPEED_COUNTS_PER_PERIOD > \
+        GMR_MISSION4_SPEED_MAX_COUNTS_PER_PERIOD) || \
+    (GMR_MISSION4_RIGHT_SPEED_COUNTS_PER_PERIOD < \
+        GMR_MISSION4_SPEED_MIN_COUNTS_PER_PERIOD) || \
+    (GMR_MISSION4_RIGHT_SPEED_COUNTS_PER_PERIOD > \
+        GMR_MISSION4_SPEED_MAX_COUNTS_PER_PERIOD))
+#error "GMR Mission4 wheel speed is outside the chassis target range"
+#endif
+
+#if ((GMR_MISSION5_DIRECTION_PWM_PERCENT == 0U) || \
+    (GMR_MISSION5_DIRECTION_PWM_PERCENT > 100U) || \
+    (GMR_MISSION5_DIRECTION_SPEED_COUNTS_PER_PERIOD == 0U) || \
+    (GMR_MISSION5_DIRECTION_SPEED_COUNTS_PER_PERIOD > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD))
+#error "GMR Mission5 direction-test command is outside the valid range"
+#endif
+
+#if ((GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD <= 0) || \
+    (GMR_LINE_FOLLOW_MIN_SPEED_COUNTS_PER_PERIOD < 0) || \
+    (GMR_LINE_FOLLOW_MIN_SPEED_COUNTS_PER_PERIOD > \
+        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (GMR_LINE_FOLLOW_MAX_SPEED_COUNTS_PER_PERIOD < \
+        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (GMR_LINE_FOLLOW_MAX_SPEED_COUNTS_PER_PERIOD > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (GMR_LINE_FOLLOW_GAIN <= 0) || \
+    (GMR_LINE_FOLLOW_CORRECTION_LIMIT_COUNTS <= 0) || \
+    (GMR_LINE_FOLLOW_CORRECTION_LIMIT_COUNTS > \
+        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (GMR_LINE_FOLLOW_LOST_HOLD_MS < CHASSIS_CONTROL_PERIOD_MS) || \
+    ((GMR_LINE_FOLLOW_LOST_HOLD_MS % CHASSIS_CONTROL_PERIOD_MS) != \
+        0U))
+#error "GMR line-follow gray differential limits are invalid"
+#endif
+
+#if ((GMR_MISSION2_LEFT_STOP_COUNT <= 0L) || \
+    (GMR_MISSION2_RIGHT_STOP_COUNT <= 0L))
+#error "GMR Mission2 encoder stop counts must be positive"
+#endif
+
+#if ((GMR_MISSION2_START_SPEED_COUNTS_PER_PERIOD <= 0) || \
+    (GMR_MISSION2_START_SPEED_COUNTS_PER_PERIOD > \
+        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (GMR_MISSION2_START_RAMP_MS < CHASSIS_CONTROL_PERIOD_MS) || \
+    ((GMR_MISSION2_START_RAMP_MS % CHASSIS_CONTROL_PERIOD_MS) != 0U))
+#error "GMR Mission2 startup ramp configuration is invalid"
 #endif
 
 #if ((GMR_BLUETOOTH_DISTANCE_TOLERANCE_COUNTS == 0U) || \

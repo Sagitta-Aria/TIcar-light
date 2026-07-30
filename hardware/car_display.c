@@ -17,6 +17,7 @@
 #endif
 
 static uint8_t g_carDisplayLocalOledReady;
+static uint32_t g_carDisplayLocalTimerSeconds;
 
 /* 重置后端软件状态，不访问尚未初始化的UART或I2C硬件。 */
 void CarDisplay_Init(void)
@@ -25,6 +26,7 @@ void CarDisplay_Init(void)
     H7LcdDisplay_Init();
 #endif
     g_carDisplayLocalOledReady = 0U;
+    g_carDisplayLocalTimerSeconds = 0xFFFFFFFFUL;
 }
 
 /* 系统时钟稳定后初始化本地OLED；失败时保留不可用状态供Board层报错。 */
@@ -65,6 +67,7 @@ void CarDisplay_Clear(void)
         OLED_Clear();
     }
 #endif
+    g_carDisplayLocalTimerSeconds = 0xFFFFFFFFUL;
 }
 
 #if CAR_LIBRARY_LOCAL_OLED_ENABLED
@@ -104,12 +107,43 @@ void CarDisplay_ShowLine(uint8_t row, const char *text)
     H7LcdDisplay_ShowLine(row, text);
 #endif
 #if CAR_LIBRARY_LOCAL_OLED_ENABLED
+    g_carDisplayLocalTimerSeconds = 0xFFFFFFFFUL;
     CarDisplay_ShowLocalOledLine(row, text);
 #endif
 #if !CAR_LIBRARY_DISPLAY_ENABLED
     (void)row;
     (void)text;
 #endif
+}
+
+void CarDisplay_ShowTimer(uint32_t elapsedMs)
+{
+    uint32_t totalSeconds = elapsedMs / 1000U;
+    uint32_t minutes = totalSeconds / 60U;
+    char text[6];
+
+    if (minutes > 99U) {
+        minutes = 99U;
+        totalSeconds = (99U * 60U) + 59U;
+    }
+    text[0] = (char)('0' + (minutes / 10U));
+    text[1] = (char)('0' + (minutes % 10U));
+    text[2] = ':';
+    text[3] = (char)('0' + ((totalSeconds / 10U) % 6U));
+    text[4] = (char)('0' + (totalSeconds % 10U));
+    text[5] = '\0';
+#if CAR_LIBRARY_H7_LCD_ENABLED
+    H7LcdDisplay_ShowTimer(totalSeconds);
+#endif
+#if CAR_LIBRARY_LOCAL_OLED_ENABLED
+    if ((g_carDisplayLocalOledReady != 0U) &&
+        (g_carDisplayLocalTimerSeconds != totalSeconds)) {
+        OLED_ClearBuffer();
+        OLED_ShowString(34U, 20U, (uint8_t *)text, 24U);
+        g_carDisplayLocalTimerSeconds = totalSeconds;
+    }
+#endif
+    (void)text;
 }
 
 /* H7只发送脏行；本地OLED发送完整显存，调用方不得放在控制周期内。 */

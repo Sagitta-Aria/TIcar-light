@@ -313,7 +313,7 @@ static void RtosApp_UpdateControlTaskState(void)
 
 /*
  * Input（优先级 4）：GPIO 按键边沿从 ISR 唤醒本任务。任务被唤醒后每
- * 1 ms 执行消抖/长按检测，直到按键释放且事件取空，再无限期阻塞。
+ * 1 ms 检查释放边沿，直到按键释放且事件取空，再无限期阻塞。
  * UI 只需一次刷新通知；状态切换事件则进入队列并唤醒 Mission。
  */
 static void RtosApp_InputTask(void *parameter)
@@ -345,11 +345,16 @@ static void RtosApp_InputTask(void *parameter)
 /* Mission 通常由事件唤醒；Task3 准备期和 Task4 非循迹阶段需要 1 ms 步进。 */
 static uint8_t RtosApp_IsMissionPeriodic(void)
 {
+#if CAR_PROFILE_IS_FULL
     uint8_t missionId;
+#endif
 
     if (StateMachine_GetState() != CAR_STATE_MISSION) {
         return 0U;
     }
+#if CAR_PROFILE_IS_GMR
+    return 0U;
+#else
     missionId = StateMachine_GetMissionId();
     if (missionId == 3U) {
         return (uint8_t)(StateMachine_IsMissionGimbalPrepDone() == 0U);
@@ -359,6 +364,7 @@ static uint8_t RtosApp_IsMissionPeriodic(void)
         return 1U;
     }
     return 0U;
+#endif
 }
 
 static TickType_t RtosApp_GetMissionWaitTicks(TickType_t lastPeriodicTime)
@@ -465,6 +471,7 @@ static void RtosApp_UiTask(void *parameter)
 
         dynamicUi = (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
             ((StateMachine_GetMissionId() == 1U) ||
+                (StateMachine_GetMissionId() == 2U) ||
                 (StateMachine_GetMissionId() == 3U) ||
                 (StateMachine_GetMissionId() == 4U) ||
                 (StateMachine_GetMissionId() == 5U) ||

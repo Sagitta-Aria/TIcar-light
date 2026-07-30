@@ -6,10 +6,10 @@
 /* CarState：比赛正式版顶层状态；任务细分阶段不应再增加顶层状态。 */
 typedef enum {
     CAR_STATE_INIT = 0, /* 应用初始化尚未完成。 */
-    CAR_STATE_MENU,     /* 等待K1/K2选择比赛任务。 */
+    CAR_STATE_MENU,     /* 等待K1~K4选择比赛任务。 */
     CAR_STATE_MISSION,  /* 某个Task正在运行。 */
     CAR_STATE_FINISHED, /* 任务正常达到完成条件。 */
-    CAR_STATE_STOP,     /* 用户长按停止或任务安全停车。 */
+    CAR_STATE_STOP,     /* 用户按K3停止或任务安全停车。 */
     CAR_STATE_ERROR     /* 板级致命错误，禁止启动电机。 */
 } CarState;
 
@@ -29,7 +29,9 @@ typedef enum {
     CAR_EVENT_STOP,
     CAR_EVENT_MENU,
     CAR_EVENT_ERROR,
-    CAR_EVENT_CLEAR_ERROR
+    CAR_EVENT_CLEAR_ERROR,
+    CAR_EVENT_MISSION_4_MODE_TOGGLE,
+    CAR_EVENT_MISSION_4_RUN_TOGGLE
 } CarEvent;
 
 /* CarMission4Stage：Task4 内部阶段，不增加顶层状态。 */
@@ -47,7 +49,7 @@ typedef enum {
     CAR_MISSION4_ROUTE_COUNT
 } CarMission4Route;
 
-/* 底盘调试模式；GMR Task1 / Full Task6使用。 */
+/* 底盘调试模式；GMR Task5 / Full Task6使用。 */
 typedef enum {
     CAR_CHASSIS_DRIVE_OPEN_LOOP = 0,
     CAR_CHASSIS_DRIVE_CLOSED_LOOP
@@ -77,6 +79,9 @@ const char *StateMachine_GetStateName(CarState state);
 /* StateMachine_GetMissionId：读取当前任务编号，0 表示未进入任务。 */
 uint8_t StateMachine_GetMissionId(void);
 
+/* 读取GMR Task2从启动到当前或结束时锁存的耗时，单位ms。 */
+uint32_t StateMachine_GetMission2ElapsedMs(void);
+
 /* 按 library_config.h 的当前组合判断某个比赛任务是否可以进入。 */
 uint8_t StateMachine_IsMissionAvailable(uint8_t missionId);
 
@@ -85,6 +90,10 @@ void StateMachine_SetMission1LapCount(uint8_t lapCount);
 
 /* StateMachine_GetMission1LapCount：读取 Task 1 当前目标圈数。 */
 uint8_t StateMachine_GetMission1LapCount(void);
+
+/* 设置GMR Task4左右闭环目标，单位为count/20ms。 */
+void StateMachine_SetMission4Targets(uint16_t leftTarget,
+    uint16_t rightTarget);
 
 /* 设置/读取 Task4 子菜单路线。 */
 void StateMachine_SetMission4Route(CarMission4Route route);

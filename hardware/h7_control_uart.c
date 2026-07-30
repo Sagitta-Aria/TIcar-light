@@ -15,6 +15,7 @@
 
 static char g_h7ControlLine[H7_CONTROL_LINE_SIZE];
 static uint8_t g_h7ControlLineLength;
+static uint8_t g_h7ControlBinaryBytesRemaining;
 static volatile H7ControlCommand g_h7ControlPendingCommand;
 static volatile uint8_t g_h7ControlTxBusy;
 
@@ -62,6 +63,18 @@ static void H7ControlUart_CompleteLine(void)
 {
     if (H7ControlUart_LineEquals("@START=1") != 0U) {
         g_h7ControlPendingCommand = H7_CONTROL_COMMAND_START_ATTITUDE;
+    } else if (H7ControlUart_LineEquals("@START=2") != 0U) {
+        g_h7ControlPendingCommand = H7_CONTROL_COMMAND_START_GRAY_FOLLOW;
+    } else if (H7ControlUart_LineEquals("@START=3") != 0U) {
+        g_h7ControlPendingCommand = H7_CONTROL_COMMAND_START_ENCODER;
+    } else if (H7ControlUart_LineEquals("@START=4") != 0U) {
+        g_h7ControlPendingCommand = H7_CONTROL_COMMAND_START_DRIVE;
+    } else if (H7ControlUart_LineEquals("@START=5") != 0U) {
+        g_h7ControlPendingCommand = H7_CONTROL_COMMAND_START_DIRECTION;
+    } else if (H7ControlUart_LineEquals("@START=6") != 0U) {
+        g_h7ControlPendingCommand = H7_CONTROL_COMMAND_START_GRAY;
+    } else if (H7ControlUart_LineEquals("@START=7") != 0U) {
+        g_h7ControlPendingCommand = H7_CONTROL_COMMAND_START_LINE_FOLLOW;
     } else if (H7ControlUart_LineEquals("@STOP") != 0U) {
         g_h7ControlPendingCommand = H7_CONTROL_COMMAND_STOP;
     }
@@ -70,6 +83,29 @@ static void H7ControlUart_CompleteLine(void)
 
 static void H7ControlUart_ConsumeByte(uint8_t data)
 {
+    if (g_h7ControlBinaryBytesRemaining > 0U) {
+        --g_h7ControlBinaryBytesRemaining;
+        return;
+    }
+    if (data == 0x55U) {
+        /* H7 inserts text commands only between complete 11-byte JY61 frames. */
+        g_h7ControlBinaryBytesRemaining = 10U;
+        g_h7ControlLineLength = 0U;
+        return;
+    }
+    if (data == (uint8_t)'@') {
+        g_h7ControlLine[0] = (char)data;
+        g_h7ControlLineLength = 1U;
+        return;
+    }
+    if (g_h7ControlLineLength == 0U) {
+        return;
+    }
+    if ((data < 0x20U) && (data != (uint8_t)'\r') &&
+        (data != (uint8_t)'\n')) {
+        g_h7ControlLineLength = 0U;
+        return;
+    }
     if (data == (uint8_t)'\r') {
         return;
     }
@@ -87,6 +123,7 @@ static void H7ControlUart_ConsumeByte(uint8_t data)
 void H7ControlUart_Init(void)
 {
     g_h7ControlLineLength = 0U;
+    g_h7ControlBinaryBytesRemaining = 0U;
     g_h7ControlPendingCommand = H7_CONTROL_COMMAND_NONE;
     g_h7ControlTxBusy = 0U;
 

@@ -126,7 +126,7 @@
 #define CAR_CHASSIS_LEFT_REVERSE       (0U) /* 1反转左轮命令方向；0保持驱动接线方向。 */
 #define CAR_CHASSIS_RIGHT_REVERSE      (1U) /* 1反转右轮命令方向；当前实车右轮需反转。 */
 
-/* K1/K2 按键：低电平按下，正式版不保留按键诊断日志。 */
+/* 按键低电平按下；天猛星启用K1~K4，正式版不保留诊断日志。 */
 #define CAR_KEY_ACTIVE_LOW             (1U) /* 1表示按下为低电平；接线改变后才允许修改。 */
 
 /*

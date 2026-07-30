@@ -1,5 +1,5 @@
 /*
- * 比赛菜单与运行状态显示：把K1/K2选择转换成CarEvent，并渲染统一显示行。
+ * 比赛菜单与运行状态显示：把K1~K4选择转换成CarEvent，并渲染统一显示行。
  * 只允许UI/Input任务上下文调用，不能在ISR刷新显示；关闭的库会让依赖任务自动跳过。
  * 菜单只修改任务选择参数，不直接运行底盘、云台或视觉控制器。
  */
@@ -285,7 +285,7 @@ static void Menu_RenderTask1LapMenu(void)
     write = Menu_AppendText(write, end, "Lap ");
     (void)Menu_AppendUnsigned(write, end, g_task1LapCount);
 
-    Menu_RenderLines("Task 1", optionLine, lapLine, "K2 Start");
+    Menu_RenderLines("Task 1", optionLine, lapLine, "K2 Go K3 Back");
 }
 
 static void Menu_BuildTask4RouteLine(char line[MENU_LINE_SIZE],
@@ -332,6 +332,14 @@ static uint16_t Menu_NextDriveSpeed(uint16_t speed)
         (uint16_t)CHASSIS_DEBUG_SPEED_MIN : speed;
 }
 
+static uint16_t Menu_PreviousDriveSpeed(uint16_t speed)
+{
+    if (speed <= (uint16_t)CHASSIS_DEBUG_SPEED_MIN) {
+        return (uint16_t)CHASSIS_DEBUG_SPEED_MAX;
+    }
+    return (uint16_t)(speed - (uint16_t)CHASSIS_DEBUG_SPEED_STEP);
+}
+
 static void Menu_RenderDriveModeMenu(uint8_t missionId)
 {
     char title[MENU_LINE_SIZE];
@@ -350,7 +358,7 @@ static void Menu_RenderDriveModeMenu(uint8_t missionId)
         (void)Menu_AppendText(optionLine,
             &optionLine[MENU_LINE_SIZE - 1U], "Closed [Open]");
     }
-    Menu_RenderLines(title, optionLine, "K1 Select", "K2 Speed");
+    Menu_RenderLines(title, optionLine, "K1/K4 Select", "K2 Go K3 Back");
 }
 
 static void Menu_RenderDriveSpeedMenu(uint8_t missionId)
@@ -374,7 +382,7 @@ static void Menu_RenderDriveSpeedMenu(uint8_t missionId)
     (void)Menu_AppendChar(write, end, ']');
     Menu_RenderLines(title, speedLine,
         (mode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
-            "count/20ms" : "PWM percent", "K2 Start");
+            "count/20ms" : "PWM percent", "K2 Go K3 Back");
 }
 
 static void Menu_RenderTask5(void)
@@ -613,14 +621,18 @@ static void Menu_RenderTask9Encoder(void)
 static void Menu_RenderMission(void)
 {
     char line[MENU_LINE_SIZE];
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     char lapLine[MENU_LINE_SIZE];
     char turnLine[MENU_LINE_SIZE];
+#endif
     char *write = line;
     char *end = &line[MENU_LINE_SIZE - 1U];
     uint8_t missionId = StateMachine_GetMissionId();
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     uint8_t targetLaps;
     uint32_t turnCount;
     uint32_t targetTurns;
+#endif
 
     write = Menu_AppendText(write, end, "Task ");
     (void)Menu_AppendUnsigned(write, end, missionId);
@@ -683,6 +695,7 @@ static void Menu_RenderMission(void)
         return;
     }
 
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
     targetLaps = StateMachine_GetMission1LapCount();
     turnCount = MotorNoYaw_GetTurnCount();
     targetTurns = (uint32_t)targetLaps * 4U;
@@ -702,6 +715,10 @@ static void Menu_RenderMission(void)
     (void)Menu_AppendUnsigned(write, end, targetTurns);
 
     Menu_RenderLines(line, lapLine, turnLine, "NO YAW");
+#else
+    Menu_RenderLines(line, "Line tracking", "Corner turn off",
+        "K3 Exit");
+#endif
 }
 
 static void Menu_RenderSimple(const char *title)
@@ -710,6 +727,7 @@ static void Menu_RenderSimple(const char *title)
 }
 
 /* 作用：Task1 完成后保留圈数和转向计数，便于区分真完成与异常进入 Finished。 */
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
 static void Menu_RenderTask1Finished(void)
 {
     char lapLine[MENU_LINE_SIZE];
@@ -736,6 +754,7 @@ static void Menu_RenderTask1Finished(void)
 
     Menu_RenderLines("Finished", "Task 1", lapLine, turnLine);
 }
+#endif
 
 static void Menu_RenderByState(CarState state)
 {
@@ -757,11 +776,15 @@ static void Menu_RenderByState(CarState state)
         Menu_RenderMission();
         break;
     case CAR_STATE_FINISHED:
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
         if (StateMachine_GetMissionId() == 1U) {
             Menu_RenderTask1Finished();
         } else {
             Menu_RenderSimple("Finished");
         }
+#else
+        Menu_RenderSimple("Finished");
+#endif
         break;
     case CAR_STATE_STOP:
         if (MotorNoYaw_GetStopReason() ==
@@ -829,6 +852,31 @@ void Menu_Next(void)
     Menu_RequestRefresh();
 }
 
+void Menu_Previous(void)
+{
+    if (g_menuPage == MENU_PAGE_TASK1_LAPS) {
+        g_task1LapCount = (g_task1LapCount <= 1U) ? 5U :
+            (uint8_t)(g_task1LapCount - 1U);
+    } else if (g_menuPage == MENU_PAGE_TASK4_ROUTE) {
+        g_task4Route = (g_task4Route == 0) ?
+            (CarMission4Route)(MENU_TASK4_ROUTE_COUNT - 1U) :
+            (CarMission4Route)((uint8_t)g_task4Route - 1U);
+    } else if (g_menuPage == MENU_PAGE_TASK6_MODE) {
+        g_task6DriveMode = (g_task6DriveMode ==
+            CAR_CHASSIS_DRIVE_CLOSED_LOOP) ?
+            CAR_CHASSIS_DRIVE_OPEN_LOOP : CAR_CHASSIS_DRIVE_CLOSED_LOOP;
+    } else if (g_menuPage == MENU_PAGE_TASK6_SPEED) {
+        if (g_task6DriveMode == CAR_CHASSIS_DRIVE_CLOSED_LOOP) {
+            g_task6ClosedSpeed = Menu_PreviousDriveSpeed(g_task6ClosedSpeed);
+        } else {
+            g_task6OpenSpeed = Menu_PreviousDriveSpeed(g_task6OpenSpeed);
+        }
+    } else {
+        g_taskIndex = Menu_FindPreviousAvailableTask(g_taskIndex);
+    }
+    Menu_RequestRefresh();
+}
+
 /*
  * 确认当前菜单项并生成比赛事件。
  * Task2/3/7采用视觉长度自动拟合，主菜单确认后直接启动，不再进入距离页。
@@ -859,9 +907,13 @@ CarEvent Menu_Confirm(void)
         return CAR_EVENT_MISSION_6_START;
     }
     if (g_taskIndex == 0U) {
+#if CAR_LIBRARY_RIGHT_ANGLE_TURN_ENABLED
         g_menuPage = MENU_PAGE_TASK1_LAPS;
         Menu_RequestRefresh();
         return CAR_EVENT_NONE;
+#else
+        return CAR_EVENT_MISSION_1_START;
+#endif
     }
     if (g_taskIndex == 3U) {
         g_menuPage = MENU_PAGE_TASK4_ROUTE;

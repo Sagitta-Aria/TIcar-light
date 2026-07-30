@@ -82,9 +82,9 @@
 #define PIN_STEPPER_GIMBAL_PITCH_DIR         STEPPER_GIMBAL_1_DIR_PIN
 
 /* K1/K2沿用SysConfig的KEY组；有效电平在board_config.h配置。 */
-#define PIN_KEY_PORT                    KEY_PORT /* 两个按键共用的GPIO端口。 */
-#define PIN_KEY_1                       KEY_1_PIN /* K1：切换菜单项。 */
-#define PIN_KEY_2                       KEY_2_PIN /* K2：确认/长按停止。 */
+#define PIN_KEY_PORT                    KEY_PORT /* 当前按键共用的GPIO端口。 */
+#define PIN_KEY_1                       KEY_1_PIN /* K1：下一项。 */
+#define PIN_KEY_2                       KEY_2_PIN /* K2：确认/启动。 */
 #define PIN_KEY_1_IOMUX                 KEY_1_IOMUX
 #define PIN_KEY_2_IOMUX                 KEY_2_IOMUX
 #define PIN_KEY_1_EDGE_RISE_FALL        KEY_1_EDGE_RISE_FALL
@@ -135,15 +135,34 @@
 #define PIN_GRAY_ADC0                   GRAY_ADC0_INST /* S4至S7所在ADC实例。 */
 #define PIN_GRAY_ADC1                   GRAY_ADC1_INST /* S1至S3所在ADC实例。 */
 
-/* 数字灰度从车头朝前按左到右排列：S1,S2,S3,S4,S5,S6,S7。 */
-#define PIN_GRAY_DIGITAL_PORT           GPIOA          /* 七路数字灰度当前全部位于GPIOA。 */
-#define PIN_GRAY_1                      DL_GPIO_PIN_15  /* S1：最左侧，左转出弯检测。 */
-#define PIN_GRAY_2                      DL_GPIO_PIN_16  /* S2：左侧直角组合检测。 */
-#define PIN_GRAY_3                      DL_GPIO_PIN_17  /* S3：左侧普通循迹修正。 */
-#define PIN_GRAY_4                      DL_GPIO_PIN_24  /* S4：中间循迹基准。 */
-#define PIN_GRAY_5                      DL_GPIO_PIN_25  /* S5：右侧普通循迹修正。 */
-#define PIN_GRAY_6                      DL_GPIO_PIN_26  /* S6：右侧直角组合检测。 */
-#define PIN_GRAY_7                      DL_GPIO_PIN_27  /* S7：最右侧，右转出弯检测。 */
+/* 八路红外循迹从车头朝前按左到右排列，全部使用GPIOA数字输入。 */
+#define PIN_INFRARED_TRACK_PORT         GPIOA
+#define PIN_INFRARED_TRACK_1            DL_GPIO_PIN_15
+#define PIN_INFRARED_TRACK_2            DL_GPIO_PIN_16
+#define PIN_INFRARED_TRACK_3            DL_GPIO_PIN_17
+#define PIN_INFRARED_TRACK_4            DL_GPIO_PIN_24
+#define PIN_INFRARED_TRACK_5            DL_GPIO_PIN_25
+#define PIN_INFRARED_TRACK_6            DL_GPIO_PIN_26
+#define PIN_INFRARED_TRACK_7            DL_GPIO_PIN_27
+#define PIN_INFRARED_TRACK_8            DL_GPIO_PIN_14
+#define PIN_INFRARED_TRACK_1_IOMUX      GRAY_S1_IOMUX
+#define PIN_INFRARED_TRACK_2_IOMUX      GRAY_S2_IOMUX
+#define PIN_INFRARED_TRACK_3_IOMUX      GRAY_S3_IOMUX
+#define PIN_INFRARED_TRACK_4_IOMUX      GRAY_S4_IOMUX
+#define PIN_INFRARED_TRACK_5_IOMUX      GRAY_S5_IOMUX
+#define PIN_INFRARED_TRACK_6_IOMUX      GRAY_S6_IOMUX
+#define PIN_INFRARED_TRACK_7_IOMUX      GRAY_S7_IOMUX
+#define PIN_INFRARED_TRACK_8_IOMUX      IOMUX_PINCM36
+
+/* 七路旧灰度接口保留为别名，Full Profile仍可选择原来的GPIO7方法。 */
+#define PIN_GRAY_DIGITAL_PORT           PIN_INFRARED_TRACK_PORT
+#define PIN_GRAY_1                      PIN_INFRARED_TRACK_1
+#define PIN_GRAY_2                      PIN_INFRARED_TRACK_2
+#define PIN_GRAY_3                      PIN_INFRARED_TRACK_3
+#define PIN_GRAY_4                      PIN_INFRARED_TRACK_4
+#define PIN_GRAY_5                      PIN_INFRARED_TRACK_5
+#define PIN_GRAY_6                      PIN_INFRARED_TRACK_6
+#define PIN_GRAY_7                      PIN_INFRARED_TRACK_7
 
 /* 每路GPIO输入复用值沿用GRAY_Sx的SysConfig名称。 */
 #define PIN_GRAY_1_IOMUX                GRAY_S1_IOMUX
@@ -173,24 +192,21 @@
 #define PIN_TIANMENG_EXTENSIONS_AVAILABLE  (1U)
 
 #define PIN_KEY_3_PORT                  GPIOB
-#define PIN_KEY_3                       DL_GPIO_PIN_21
-#define PIN_KEY_3_IOMUX                 IOMUX_PINCM49
+#define PIN_KEY_3                       DL_GPIO_PIN_11
+#define PIN_KEY_3_IOMUX                 IOMUX_PINCM28
+#define PIN_KEY_3_EDGE_RISE_FALL        DL_GPIO_PIN_11_EDGE_RISE_FALL
 #define PIN_KEY_4_PORT                  GPIOB
 #define PIN_KEY_4                       DL_GPIO_PIN_10
 #define PIN_KEY_4_IOMUX                 IOMUX_PINCM27
+#define PIN_KEY_4_EDGE_RISE_FALL        DL_GPIO_PIN_10_EDGE_RISE_FALL
 #define PIN_KEY_5_PORT                  GPIOB
-#define PIN_KEY_5                       DL_GPIO_PIN_11
-#define PIN_KEY_5_IOMUX                 IOMUX_PINCM28
+#define PIN_KEY_5                       DL_GPIO_PIN_21
+#define PIN_KEY_5_IOMUX                 IOMUX_PINCM49
+#define PIN_KEY_5_EDGE_RISE_FALL        DL_GPIO_PIN_21_EDGE_RISE_FALL
 
 #define PIN_RELAY_CTRL_PORT             GPIOB
 #define PIN_RELAY_CTRL                  DL_GPIO_PIN_27
 #define PIN_RELAY_CTRL_IOMUX            IOMUX_PINCM58
-
-#define PIN_AUX_PWM_PORT                GPIOA
-#define PIN_AUX_PWM                     DL_GPIO_PIN_14
-#define PIN_AUX_PWM_IOMUX               IOMUX_PINCM36
-#define PIN_AUX_PWM_FUNC                IOMUX_PINCM36_PF_TIMG12_CCP0
-#define PIN_AUX_PWM_CC_INDEX            DL_TIMER_CC_0_INDEX
 
 #define PIN_EXTERNAL_LED_1_PORT         GPIOB
 #define PIN_EXTERNAL_LED_1              DL_GPIO_PIN_23

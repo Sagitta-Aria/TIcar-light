@@ -5,9 +5,9 @@
 #define CAR_BLUETOOTH_ROLE_MASTER        (1U)
 #define CAR_BLUETOOTH_ROLE_SLAVE         (2U)
 
-/* Normal project builds target the Dimeng car's HC-05 slave module. */
+/* Bluetooth is opt-in because the default GMR and Full UART maps reserve it. */
 #ifndef CAR_BLUETOOTH_ROLE
-#define CAR_BLUETOOTH_ROLE               CAR_BLUETOOTH_ROLE_SLAVE
+#define CAR_BLUETOOTH_ROLE               CAR_BLUETOOTH_ROLE_DISABLED
 #endif
 
 #if ((CAR_BLUETOOTH_ROLE != CAR_BLUETOOTH_ROLE_DISABLED) && \

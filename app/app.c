@@ -53,8 +53,8 @@ typedef enum {
 } AppCameraLaserStage;
 
 /*
- * 作用：把两个实体按键翻译成比赛菜单事件。
- * 说明：K1 在菜单里切换任务/参数；K2 确认；长按 K2 停止或返回上一级。
+ * 作用：把四个实体按键翻译成比赛菜单事件。
+ * 说明：K1/K4 下一项/上一项，K2 确认启动，K3 退出或停止；全部为短按。
  */
 static CarEvent App_HandleKeyEvent(KeyEvent event)
 {
@@ -66,7 +66,7 @@ static CarEvent App_HandleKeyEvent(KeyEvent event)
 
     state = StateMachine_GetState();
 
-    if (event == KEY_EVENT_2_LONG) {
+    if (event == KEY_EVENT_3) {
         if (state == CAR_STATE_MENU) {
             (void)Menu_Back();
             return CAR_EVENT_NONE;
@@ -80,15 +80,12 @@ static CarEvent App_HandleKeyEvent(KeyEvent event)
     if (state == CAR_STATE_MENU) {
         if (event == KEY_EVENT_1) {
             Menu_Next();
+        } else if (event == KEY_EVENT_4) {
+            Menu_Previous();
         } else if (event == KEY_EVENT_2) {
             return Menu_Confirm();
         }
         return CAR_EVENT_NONE;
-    }
-
-    if (((state == CAR_STATE_STOP) || (state == CAR_STATE_FINISHED) ||
-        (state == CAR_STATE_ERROR)) && (event == KEY_EVENT_2)) {
-        return CAR_EVENT_MENU;
     }
     return CAR_EVENT_NONE;
 }

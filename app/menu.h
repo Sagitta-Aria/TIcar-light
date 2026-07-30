@@ -9,6 +9,9 @@ void Menu_Init(void);
 /* Menu_Next：菜单状态下切换任务入口或子项。 */
 void Menu_Next(void);
 
+/* Menu_Previous：菜单状态下反向切换任务入口或子项。 */
+void Menu_Previous(void);
+
 /* Menu_Confirm：确认当前任务入口，返回状态机事件。 */
 CarEvent Menu_Confirm(void);
 

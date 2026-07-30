@@ -15,7 +15,7 @@ CarEvent App_InputStep(void);
 /* 返回上一轮App_InputStep是否产生事件；供Input任务决定是否唤醒UI。 */
 uint8_t App_InputHadEvent(void);
 
-/* K1/K2仍按住或有待处理事件时返回1，决定Input任务是否保持1ms轮询。 */
+/* 任一按键仍按住或有待处理事件时返回1，决定Input任务是否保持1ms轮询。 */
 uint8_t App_InputIsActive(void);
 
 /* Mission任务上下文中分发状态机事件；不要从GPIO中断直接调用。 */
