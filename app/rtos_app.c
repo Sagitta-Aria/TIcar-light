@@ -470,13 +470,13 @@ static void RtosApp_UiTask(void *parameter)
         }
 
         dynamicUi = (uint8_t)((StateMachine_GetState() == CAR_STATE_MISSION) &&
-            ((StateMachine_GetMissionId() == 1U) ||
-                (StateMachine_GetMissionId() == 2U) ||
+            ((StateMachine_IsTaskMenuMission(
+                StateMachine_GetMissionId()) != 0U) ||
+                (StateMachine_GetMissionId() == 1U) ||
                 (StateMachine_GetMissionId() == 3U) ||
                 (StateMachine_GetMissionId() == 4U) ||
                 (StateMachine_GetMissionId() == 5U) ||
                 (StateMachine_GetMissionId() == 6U) ||
-                (StateMachine_GetMissionId() == 8U) ||
                 (StateMachine_GetMissionId() == 9U)));
         if (dynamicUi == 0U) {
             lastDynamicUiTime = now;

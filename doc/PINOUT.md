@@ -46,7 +46,7 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 | 本地OLED（当前启用） | I2C0 SDA / SCL | PA0 / PA1 | SSD1306菜单显示 |
 | K1 / K2 / K3 / K4 / K5 | 按键 | PB0 / PB1 / PB11 / PB10 / PB21 | 低有效，内部上拉；K5已纳入按键驱动 |
 | 状态灯 | LED | PB22 | 天猛星板载USER_LED，高电平点亮 |
-| Gmr H7 LCD / 任务控制 | UART2 TX / RX | PB15 / PB16 | 115200 8-N-1；TX/RX交叉 |
+| Gmr H7 LCD / 任务控制 | UART2 TX | PB15 | 115200 8-N-1；接H7 PE7 RX，PB16不用连接 |
 | Full H7云台反馈 / LCD输出 | UART0 TX / RX | PA10 / PA11 | 仅Full使用 |
 | 外部M0姿态 / K230视觉 | UART3 TX / RX | PB2 / PB3 | GMR默认接M0姿态，Full接K230；115200 |
 | 板载JY61底座前馈 | UART1 TX / RX | PB4 / PB5 | 仅Full默认启用 |
@@ -54,30 +54,37 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 | HFXT | 晶振 | PA5 / PA6 | 当前软件使用内部32 MHz SYSOSC，硬件位仍保留 |
 | SWD | SWDIO / SWCLK | PA19 / PA20 | 禁止复用 |
 
-当前Gmr固定为天猛星：UART2连接H7，UART3连接外部M0；UART0、UART1、蓝牙和
-云台STEP资源不初始化。Full仍使用UART0连接H7、UART3连接K230。模块必须共地。
+当前Gmr固定为天猛星：UART2 PB15单向发送到H7，UART3连接外部M0；UART2 RX、
+UART0、UART1、蓝牙和云台STEP资源不初始化。Full仍使用UART0连接H7、UART3
+连接K230。模块必须共地。
 | BSL invoke | 输入 | PA18 | 不要连接会在启动时拉低的外设 |
 
-## 默认七路数字灰度
+## Gmr默认八路红外巡线
 
-`CAR_LIBRARY_GRAY_INPUT_METHOD`当前选择
-`CAR_LIBRARY_GRAY_INPUT_DIGITAL_GPIO_7`，`GRAY_DIGITAL_ACTIVE_HIGH = 1`。
+Gmr的`CAR_LIBRARY_GRAY_INPUT_METHOD`选择
+`CAR_LIBRARY_GRAY_INPUT_INFRARED_GPIO_8`，`GRAY_DIGITAL_ACTIVE_HIGH = 1`。
+模块的IR1～IR8从车头朝前按左到右排列，高电平为黑线、低电平为白底。
+模块按官方资料使用5 V供电并与主控共地；接入前必须实测各IR输出高电平不超过
+3.3 V。MCU内部上拉不能把外部5 V高电平降到安全范围。
 
-| 灰度 | MCU管脚 | bit |
+| 红外 | MCU管脚 | bit |
 | --- | --- | --- |
-| S1 | PA15 | `0x40` |
-| S2 | PA16 | `0x20` |
-| S3 | PA17 | `0x10` |
-| S4 | PA24 | `0x08` |
-| S5 | PA25 | `0x04` |
-| S6 | PA26 | `0x02` |
-| S7 | PA27 | `0x01` |
+| IR1 | PA15 | `0x80` |
+| IR2 | PA16 | `0x40` |
+| IR3 | PA17 | `0x20` |
+| IR4 | PA24 | `0x10` |
+| IR5 | PA25 | `0x08` |
+| IR6 | PA26 | `0x04` |
+| IR7 | PA27 | `0x02` |
+| IR8 | PB9 | `0x01` |
 
-八路红外驱动仍保留，预留S8为PA14；默认构建不会初始化PA14，也不会读取S8。
+Full Profile的原七路数字灰度仍保留，不会读取IR8。PB9同时连接天猛星板载Flash
+SCK网络，并曾作为IMU660RX SPI1 SCK；Gmr不初始化IMU660RX，且禁止与八路红外
+同时启用。
 
 ## 端口冲突核对
 
-当前底盘十个信号与四路UART、七路灰度、五个按键、状态灯、云台STEP/DIR、SWD和HFXT均没有重复PINCM。本地OLED使用PA0/PA1。特别注意以下旧定义已经失效：
+当前底盘十个信号与四路UART、八路红外、五个按键、状态灯、云台STEP/DIR、SWD和HFXT均没有重复PINCM。本地OLED使用PA0/PA1。特别注意以下旧定义已经失效：
 
 - PA12/PA22 不再是底盘 STEP/DIR，而是 PWMB/PWMA。
 - PA13/PB24 不再是底盘 STEP/DIR，而是 Encoder2 A/B。
@@ -96,7 +103,7 @@ PA31 和 PB19 原来分别连接两路云台 EN，现在已经改作 AIN1 和 En
 | 板载状态灯 | PA14 | PB22 | 使用天猛星 USER_LED |
 | HC-05 UART TX / RX | PB2 / PB3（UART3） | PB15 / PB16（UART2） | 地猛星UART3与外部M0姿态互斥 |
 
-底盘PWM、编码器、云台STEP/DIR、灰度、OLED、UART0和UART3保持同名脚位。
+底盘PWM、编码器、云台STEP/DIR、IR1～IR7、OLED、UART0和UART3保持同名脚位。
 左右轮按当前TB6612实际通道语义保持，不按旧HTML表的行名再交换一次。
 
 天猛星在`pin_map.h`定义的扩展脚：

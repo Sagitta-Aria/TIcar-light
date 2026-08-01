@@ -1,6 +1,9 @@
 #ifndef GMR_CONTROL_CONFIG_H
 #define GMR_CONTROL_CONFIG_H
 
+#include "library_config.h"
+#include "gmr_task_line_follow_config.h"
+
 /* TIMA0 底盘 PWM，开环百分比按 0..1200 raw count 换算。 */
 #define CHASSIS_PWM_PERIOD_COUNTS             (1600U)
 #define CHASSIS_PWM_HARDWARE_MAX_COUNTS       (CHASSIS_PWM_PERIOD_COUNTS - 1U)
@@ -49,36 +52,28 @@
 #define GMR_MISSION5_DIRECTION_PWM_PERCENT          (20U)
 #define GMR_MISSION5_DIRECTION_SPEED_COUNTS_PER_PERIOD (20U)
 
-/* Task2/6/7共用灰度加权差速；默认七路，八路红外保留独立权重。 */
-#define GMR_MISSION2_LEFT_STOP_COUNT                 (36100L)
+/* Task9：K5每次松开后在正负绝对位置之间切换，并把三项参数发送给H7。 */
+#define GMR_MISSION9_POSITION_STEPS                 (1600L)
+#define GMR_MISSION9_SPEED_RPM                      (500U)
+#define GMR_MISSION9_ACCELERATION                   (100U)
+
+/* TASK子菜单第1项的起步和终点；循迹参数在独立配置头文件中。 */
+#define GMR_MISSION2_LEFT_STOP_COUNT                 (35600L)
 #define GMR_MISSION2_RIGHT_STOP_COUNT                (45600L)
 #define GMR_MISSION2_START_SPEED_COUNTS_PER_PERIOD       (12)
 #define GMR_MISSION2_START_RAMP_MS                    (2000U)
-#define GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD  (35)
-#define GMR_LINE_FOLLOW_MIN_SPEED_COUNTS_PER_PERIOD   (0)
-#define GMR_LINE_FOLLOW_MAX_SPEED_COUNTS_PER_PERIOD  (42)
-#define GMR_LINE_FOLLOW_GAIN                         (2)
-#define GMR_LINE_FOLLOW_CORRECTION_LIMIT_COUNTS     (15)
-#define GMR_LINE_FOLLOW_LOST_HOLD_MS              (2000U)
 
-#if CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8
-#define GMR_LINE_FOLLOW_S1_WEIGHT                   (14)
-#define GMR_LINE_FOLLOW_S2_WEIGHT                   (10)
-#define GMR_LINE_FOLLOW_S3_WEIGHT                    (6)
-#define GMR_LINE_FOLLOW_S4_WEIGHT                    (2)
-#define GMR_LINE_FOLLOW_S5_WEIGHT                   (-2)
-#define GMR_LINE_FOLLOW_S6_WEIGHT                   (-6)
-#define GMR_LINE_FOLLOW_S7_WEIGHT                  (-10)
-#define GMR_LINE_FOLLOW_S8_WEIGHT                  (-14)
-#else
-#define GMR_LINE_FOLLOW_S1_WEIGHT                   (13)
-#define GMR_LINE_FOLLOW_S2_WEIGHT                    (7)
-#define GMR_LINE_FOLLOW_S3_WEIGHT                    (3)
-#define GMR_LINE_FOLLOW_S4_WEIGHT                    (0)
-#define GMR_LINE_FOLLOW_S5_WEIGHT                   (-3)
-#define GMR_LINE_FOLLOW_S6_WEIGHT                   (-7)
-#define GMR_LINE_FOLLOW_S7_WEIGHT                  (-13)
-#endif
+/*
+ * OTHER/Ramp Tilt Test：任务启动时把有符号固定步数发给H7，同时按Task4/5的加速度直行3秒。
+ * 只需修改POSITION_STEPS；正负号选择上下方向，绝对值不得超过H7的600步限位。
+ */
+#define GMR_RAMP_TILT_TEST_DURATION_MS                 (3000U)
+#define GMR_RAMP_TILT_TEST_POSITION_STEPS                 (500L)
+#define GMR_RAMP_TILT_TEST_STEPPER_SPEED_RPM               (200U)
+#define GMR_RAMP_TILT_TEST_STEPPER_ACCELERATION            (150U)
+#define GMR_RAMP_TILT_TEST_FINAL_SPEED_COUNTS_PER_PERIOD \
+    ((GMR_TASK45_LINE_FOLLOW_ACCELERATION_UNITS_PER_SECOND * \
+        GMR_RAMP_TILT_TEST_DURATION_MS) / 1000U)
 
 /* 旧双车功能的未链接参数，当前GMR Task2/7普通巡线不使用。 */
 #define GMR_BLUETOOTH_MISSION_SAMPLE_PERIOD_MS (50U)
@@ -196,35 +191,95 @@
 #error "GMR Mission5 direction-test command is outside the valid range"
 #endif
 
-#if ((GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD <= 0) || \
-    (GMR_LINE_FOLLOW_MIN_SPEED_COUNTS_PER_PERIOD < 0) || \
-    (GMR_LINE_FOLLOW_MIN_SPEED_COUNTS_PER_PERIOD > \
-        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
-    (GMR_LINE_FOLLOW_MAX_SPEED_COUNTS_PER_PERIOD < \
-        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
-    (GMR_LINE_FOLLOW_MAX_SPEED_COUNTS_PER_PERIOD > \
-        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
-    (GMR_LINE_FOLLOW_GAIN <= 0) || \
-    (GMR_LINE_FOLLOW_CORRECTION_LIMIT_COUNTS <= 0) || \
-    (GMR_LINE_FOLLOW_CORRECTION_LIMIT_COUNTS > \
-        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
-    (GMR_LINE_FOLLOW_LOST_HOLD_MS < CHASSIS_CONTROL_PERIOD_MS) || \
-    ((GMR_LINE_FOLLOW_LOST_HOLD_MS % CHASSIS_CONTROL_PERIOD_MS) != \
-        0U))
-#error "GMR line-follow gray differential limits are invalid"
+#if ((GMR_MISSION9_POSITION_STEPS <= 0L) || \
+    (GMR_MISSION9_SPEED_RPM == 0U) || \
+    (GMR_MISSION9_SPEED_RPM > 5000U) || \
+    (GMR_MISSION9_ACCELERATION > 255U))
+#error "GMR Mission9 stepper command is outside the valid range"
 #endif
+
+#define GMR_LINE_FOLLOW_CONFIG_INVALID(prefix) \
+    ((prefix##_BASE_SPEED_COUNTS_PER_PERIOD <= 0) || \
+    (prefix##_MIN_SPEED_COUNTS_PER_PERIOD < 0) || \
+    (prefix##_MIN_SPEED_COUNTS_PER_PERIOD > \
+        prefix##_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (prefix##_MAX_SPEED_COUNTS_PER_PERIOD < \
+        prefix##_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (prefix##_MAX_SPEED_COUNTS_PER_PERIOD > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (prefix##_GAIN <= 0) || \
+    (prefix##_CORRECTION_LIMIT_COUNTS <= 0) || \
+    (prefix##_CORRECTION_LIMIT_COUNTS > \
+        prefix##_BASE_SPEED_COUNTS_PER_PERIOD) || \
+    (prefix##_LOST_HOLD_MS < CHASSIS_CONTROL_PERIOD_MS) || \
+    ((prefix##_LOST_HOLD_MS % CHASSIS_CONTROL_PERIOD_MS) != 0U))
+
+#if GMR_LINE_FOLLOW_CONFIG_INVALID(GMR_TASK1_LINE_FOLLOW)
+#error "GMR Task1 line-follow configuration is invalid"
+#endif
+
+#if GMR_LINE_FOLLOW_CONFIG_INVALID(GMR_TASK4_LINE_FOLLOW)
+#error "GMR Task4 line-follow configuration is invalid"
+#endif
+
+#if GMR_LINE_FOLLOW_CONFIG_INVALID(GMR_TASK5_LINE_FOLLOW)
+#error "GMR Task5 line-follow configuration is invalid"
+#endif
+
+#undef GMR_LINE_FOLLOW_CONFIG_INVALID
 
 #if ((GMR_MISSION2_LEFT_STOP_COUNT <= 0L) || \
     (GMR_MISSION2_RIGHT_STOP_COUNT <= 0L))
 #error "GMR Mission2 encoder stop counts must be positive"
 #endif
 
+#if ((GMR_TASK4_LINE_FOLLOW_LEFT_STOP_COUNT <= 0L) || \
+    (GMR_TASK4_LINE_FOLLOW_RIGHT_STOP_COUNT <= 0L))
+#error "GMR Task4 encoder stop counts must be positive"
+#endif
+
+#if ((GMR_TASK5_LINE_FOLLOW_LEFT_STOP_COUNT <= 0L) || \
+    (GMR_TASK5_LINE_FOLLOW_RIGHT_STOP_COUNT <= 0L))
+#error "GMR Task5 encoder stop counts must be positive"
+#endif
+
+#if ((GMR_TASK45_LINE_FOLLOW_ACCELERATION_UNITS_PER_SECOND == 0U) || \
+    (GMR_TASK45_LINE_FOLLOW_ACCELERATION_UNITS_PER_SECOND > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (GMR_TASK45_LINE_FOLLOW_DECELERATION_UNITS_PER_SECOND == 0U) || \
+    (GMR_TASK45_LINE_FOLLOW_DECELERATION_UNITS_PER_SECOND > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (GMR_TASK45_LINE_FOLLOW_DECEL_LEAD_COUNTS == 0U) || \
+    (GMR_TASK45_LINE_FOLLOW_DECEL_LEAD_COUNTS >= \
+        GMR_TASK4_LINE_FOLLOW_LEFT_STOP_COUNT) || \
+    (GMR_TASK45_LINE_FOLLOW_DECEL_LEAD_COUNTS >= \
+        GMR_TASK4_LINE_FOLLOW_RIGHT_STOP_COUNT) || \
+    (GMR_TASK45_LINE_FOLLOW_DECEL_LEAD_COUNTS >= \
+        GMR_TASK5_LINE_FOLLOW_LEFT_STOP_COUNT) || \
+    (GMR_TASK45_LINE_FOLLOW_DECEL_LEAD_COUNTS >= \
+        GMR_TASK5_LINE_FOLLOW_RIGHT_STOP_COUNT))
+#error "GMR Task4/5 longitudinal ramp configuration is invalid"
+#endif
+
 #if ((GMR_MISSION2_START_SPEED_COUNTS_PER_PERIOD <= 0) || \
     (GMR_MISSION2_START_SPEED_COUNTS_PER_PERIOD > \
-        GMR_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
+        GMR_TASK1_LINE_FOLLOW_BASE_SPEED_COUNTS_PER_PERIOD) || \
     (GMR_MISSION2_START_RAMP_MS < CHASSIS_CONTROL_PERIOD_MS) || \
     ((GMR_MISSION2_START_RAMP_MS % CHASSIS_CONTROL_PERIOD_MS) != 0U))
 #error "GMR Mission2 startup ramp configuration is invalid"
+#endif
+
+#if ((GMR_RAMP_TILT_TEST_DURATION_MS < CHASSIS_CONTROL_PERIOD_MS) || \
+    ((GMR_RAMP_TILT_TEST_DURATION_MS % CHASSIS_CONTROL_PERIOD_MS) != 0U) || \
+    (GMR_RAMP_TILT_TEST_FINAL_SPEED_COUNTS_PER_PERIOD <= 0) || \
+    (GMR_RAMP_TILT_TEST_FINAL_SPEED_COUNTS_PER_PERIOD > \
+        CHASSIS_TARGET_LIMIT_COUNTS_PER_PERIOD) || \
+    (GMR_RAMP_TILT_TEST_POSITION_STEPS < -600L) || \
+    (GMR_RAMP_TILT_TEST_POSITION_STEPS > 600L) || \
+    (GMR_RAMP_TILT_TEST_STEPPER_SPEED_RPM == 0U) || \
+    (GMR_RAMP_TILT_TEST_STEPPER_SPEED_RPM > 5000U) || \
+    (GMR_RAMP_TILT_TEST_STEPPER_ACCELERATION > 255U))
+#error "GMR ramp-tilt test configuration is invalid"
 #endif
 
 #if ((GMR_BLUETOOTH_DISTANCE_TOLERANCE_COUNTS == 0U) || \

@@ -17,33 +17,61 @@ D:\Ti\m0-light-rtos
 功能组合分别在`config/profiles/profile_gmr.h`和`profile_full.h`；
 `config/library_config.h`只定义可选方法、派生开关和依赖检查。
 
-当前Gmr固定使用天猛星板：两路编码电机和七路数字灰度；UART2 PB15/PB16
-连接H7并输出LCD文本、接收任务命令；UART3 PB2/PB3连接外部M0姿态模块；
+当前Gmr固定使用天猛星板：两路编码电机和八路数字红外巡线；UART2 PB15单向
+连接H7并发送LCD文本和控制请求；UART3 PB2/PB3连接外部M0姿态模块；
 本地SSD1306 OLED显示姿态。UART0日志、UART1 JY61、蓝牙和云台均默认关闭。
 完整的配置归属、UART资源矩阵和新增任务步骤见`doc/PROFILES.md`，库方法目录见
 `doc/COMPETITION_LIBRARY.md`。
 
 天猛星可选的SPI1六轴模块已支持逐飞IMU660RA、IMU660RB和IMU660RC，Gmr与
 Full两个Profile均默认关闭。接线、构建选择和`IMU660RX_Read()`接口见
-`doc/IMU660RX.md`。
+`doc/IMU660RX.md`。Gmr的IR8已使用PB9，因此Gmr不能同时启用IMU660RX。
 
 旧两车HC-05协议和调参代码仍保留在仓库历史基线中，但不进入当前Gmr构建。
 
-Gmr菜单由`app/task_registry.c`集中声明，当前有七项：
+Gmr任务仍由`app/task_registry.c`集中声明。原Mission1～9调试入口保持不变，并新增
+Mission10～13承载正式Task3/4/5和BMI Y前馈测试：
 
 | 菜单项 | 实际入口 |
 | --- | --- |
 | Attitude | Mission1，被动显示外部M0的连续yaw、yaw角速度、序号和帧统计；不会驱动电机 |
-| Task2 A-A | Mission2，基础速度从12在2秒内升到35 count/20ms，连续使用七路灰度加权差速循迹；右轮count>45000且左轮count>36000时停车 |
+| Task2 A-A | Mission2，基础速度从12在2秒内升到50 count/20ms，连续使用八路红外加权差速循迹；左右停车count可在Flash菜单中独立调节 |
 | Encoder | Mission3，进入时清零左右累计编码器count，随后只读显示手推产生的带符号count；不会驱动电机 |
 | Drive Adjustable | Mission4，左右目标可分别配置，默认15/27 count/20ms |
 | Direction +20 | Mission5，在开环+20%与闭环+20 count/20ms之间检查方向 |
-| Gray Differential | Mission6，七路灰度加权差速并在丢线后保持最后目标2000 ms |
-| Line Follow | Mission7，连续使用七路灰度加权差速循迹，运行到主动停止 |
+| IR Differential | Mission6，八路红外加权差速并在丢线后保持最后目标2000 ms |
+| Line Follow | Mission7，连续使用八路红外加权差速循迹，运行到主动停止 |
+| H7 BMI Ball | Mission8，保持M0底盘停车，通过UART2向H7发送一次可选启动请求；BMI088、视觉、滚球控制和LCD状态均由H7独立执行 |
+| H7 Step Test | Mission9，向H7发送步进电机绝对位置测试命令 |
+| Task3 Ball | Mission10，底盘停车，发送`@BALL=TASK3`，由H7接收视觉帧并使用Task3独立参数滚球 |
+| Task4 Track+Ball | Mission11，清零编码器，以10 (count/20ms)/s加速并使用Task4独立八路红外循迹；接近终点后同比减速，同时发送`@BALL=TASK4`启动H7滚球 |
+| Task5 Track+Ball | Mission12，清零编码器，以10 (count/20ms)/s加速并使用Task5独立八路红外循迹；接近终点后同比减速，同时发送`@BALL=TASK5`启动H7滚球 |
+| BMI Y FF Test | Mission13，位于OTHER，发送`@BALL=IMUY`测试H7车体Y向线性加速度位置前馈 |
 
-本地K1下一项、K4上一项、K2启动、K3退出；H7命令`@START=1\n`到
-`@START=7\n`分别启动对应任务，K3或H7命令`@STOP\n`停止。所有本地按键均为短按。
+顶层菜单只显示`TASK`和`OTHER`。`TASK`保留原Task2循迹A-A和BMI滚球调试两项，
+并追加Task3视觉滚球、Task4循迹+滚球和Task5循迹+滚球；`OTHER`保留原姿态、
+编码器、底盘、红外和步进测试，并追加BMI Y前馈测试及`Stop Count Flash`参数页。
+普通菜单中K1下一项、K4上一项、K2进入或启动、K3逐级返回；`Stop Count Flash`
+中K1加100、K4减100、K2依次切换六项并在最后一项写入Flash，K3取消本次修改。
+所有按键均为短按。
 完整接口和当前保留资源见`doc/GMR_TIANMENG_CONSOLE.md`。
+
+Mission8启动时M0只发送一次`@BALL=BMI\n`，停止、退出或错误时只发送一次
+`@BALL=STOP\n`；发送失败可由通信任务重试，但成功发送后没有周期心跳。H7不依赖
+M0保活，USART10视觉帧和BMI088数据也不经过M0。M0仅提供共享菜单、可选启停请求
+和其他既有单向输出。Mission8运行或停止页由H7本地刷新，M0不等待确认，也不再
+发送LCD文本覆盖H7状态页；回到主菜单后恢复共享菜单显示。
+
+Mission10～13沿用同一生命周期，但分别发送`@BALL=TASK3`、`@BALL=TASK4`、
+`@BALL=TASK5`和`@BALL=IMUY`。Task4/5的循迹配置与TASK子菜单第1项完全分离，
+三套宏均位于`config/gmr_task_line_follow_config.h`；当前数值相同只是安全初值，
+可在不影响其他任务的前提下分别标定。Task1、Task4、Task5各自的左右停车count
+也分别占用独立Flash槽位；`GMR_MISSION2_*_STOP_COUNT`及
+`GMR_TASK4/5_LINE_FOLLOW_*_STOP_COUNT`只提供Flash无效时的默认值。记录保存在
+MSPM0G3507主Flash最后1 KB扇区，带版本、范围、CRC和写后校验。Task4/5在左右
+剩余里程都小于`GMR_TASK45_LINE_FOLLOW_DECEL_LEAD_COUNTS`后进入减速；每拍先计算
+灰度左右目标，再乘同一个递减比例。速度降到0后进入`FINISHED`并停止底盘，但不
+发送`@BALL=STOP`，H7继续平衡球；之后人工退出、停止或切换任务时才停止H7滚球。
 
 ## Full Profile 比赛任务
 
@@ -78,7 +106,7 @@ Task2/Task3/Task7不再显示距离子菜单，在主菜单按K2直接启动；�
 | Watchdog | 可配置 | 周期可配置 | 检查UI任务心跳；超时后停止喂WWDT0，由硬件复位整机 |
 | Input | 4 | GPIO按键边沿；按住期间 1 ms | 按键释放时向静态事件队列投递短按事件 |
 | Mission | 3 | 状态事件通知 | 处理任务启动、停止和状态切换 |
-| Comm | 2 | 5 ms | Gmr维护H7命令与外部M0姿态；Full维护原通信链路 |
+| Comm | 2 | 5 ms | Gmr发送H7命令并维护外部M0姿态；Full维护原通信链路 |
 | UI | 1 | UI变化通知；20 ms板级维护 | 刷新所选H7 LCD/OLED后端；状态灯保持周期维护 |
 
 关键调度配置：
@@ -149,13 +177,14 @@ Full Profile的云台反馈由达妙H7板载BMI088提供。H7完成零偏、Kalm
 PA11接H7 PE8接收姿态，PA10接H7 PE7发送LCD命令和日志。H7只处理`@`开头的显示
 命令并忽略普通日志。UART0文本RX关闭，不能再从Type-C接收在线调参命令。
 
-## 灰度快路径
+## 循迹传感器
 
-默认七路灰度为数字输入，高电平表示压线：S1～S7对应
-PA15、PA16、PA17、PA24、PA25、PA26、PA27。
+当前Gmr默认初始化八路红外模块。IR1～IR8从车头朝前按左到右排列，对应
+PA15、PA16、PA17、PA24、PA25、PA26、PA27、PB9。按模块例程，高电平表示
+黑线、低电平表示白底；读取结果的bit7～bit0依次对应IR1～IR8。
 
-当前Gmr不初始化八路红外模块，PA14不参与循迹。`infrared_track`驱动代码仅作为
-后续可选方案保留；Task2/6/7默认读取七路灰度。
+PB9原为IMU660RX的SPI1 SCK，Gmr已关闭该陀螺仪，编译期也会拒绝同时启用八路
+红外与IMU660RX。Full Profile仍可选择原七路数字灰度方案。
 
 ## 构建
 
@@ -182,11 +211,12 @@ Gmr默认关闭JY61和UART0日志，并拒绝地猛星或蓝牙组合；Full仍�
 
 ## 首次上板顺序
 
-1. 断开电机动力电源，确认OLED可滚动显示上述七个任务入口。
-2. 确认H7 UART2交叉接线，并验证H7能收到LCD文本、发出启动/停止命令。
+1. 断开电机动力电源，确认主菜单可进入`TASK`和`OTHER`并滚动显示全部入口。
+2. 确认M0 PB15 TX接H7 PE7 RX并共地，验证H7能收到LCD文本和控制请求；PB16不用连接。
 3. 接入外部M0 UART3，确认OLED的yaw、角速度、序号和帧计数持续变化。
 4. 保持电机动力断开，在`Encoder`页手推轮子，确认左右count按实际方向变化。
 5. 架空左右轮并准备物理断电，在`Drive Adjustable`页确认目标、反馈和PWM方向；确认无误后再落地测试。
+6. 在`H7 BMI Ball`页按K2，确认H7本地状态页接管LCD并运行；按K3后确认H7步进电机停止。
 
 完整接线见 `doc/PINOUT.md`。
 

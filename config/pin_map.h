@@ -98,16 +98,12 @@
 #define PIN_UART1_RX                    GPIO_JY61P_RX_PIN
 #define PIN_UART1_RX_IOMUX              GPIO_JY61P_IOMUX_RX
 
-/* Tianmeng UART2 is the competition H7 control/display link. */
+/* Tianmeng UART2 PB15 is the transmit-only H7 control/display link. */
 #if CAR_LIBRARY_BOARD_IS_TIANMENG
 #define PIN_H7_CONTROL_UART_TX_PORT       GPIOB
 #define PIN_H7_CONTROL_UART_TX            DL_GPIO_PIN_15
 #define PIN_H7_CONTROL_UART_TX_IOMUX      IOMUX_PINCM32
 #define PIN_H7_CONTROL_UART_TX_FUNC       IOMUX_PINCM32_PF_UART2_TX
-#define PIN_H7_CONTROL_UART_RX_PORT       GPIOB
-#define PIN_H7_CONTROL_UART_RX            DL_GPIO_PIN_16
-#define PIN_H7_CONTROL_UART_RX_IOMUX      IOMUX_PINCM33
-#define PIN_H7_CONTROL_UART_RX_FUNC       IOMUX_PINCM33_PF_UART2_RX
 #endif
 
 /* Legacy HC-05 UART mapping retained for non-competition builds. */
@@ -135,8 +131,15 @@
 #define PIN_GRAY_ADC0                   GRAY_ADC0_INST /* S4至S7所在ADC实例。 */
 #define PIN_GRAY_ADC1                   GRAY_ADC1_INST /* S1至S3所在ADC实例。 */
 
-/* 八路红外循迹从车头朝前按左到右排列，全部使用GPIOA数字输入。 */
-#define PIN_INFRARED_TRACK_PORT         GPIOA
+/* 八路红外从车头朝前按左到右排列；IR8复用已停用IMU660RX的PB9。 */
+#define PIN_INFRARED_TRACK_1_PORT       GPIOA
+#define PIN_INFRARED_TRACK_2_PORT       GPIOA
+#define PIN_INFRARED_TRACK_3_PORT       GPIOA
+#define PIN_INFRARED_TRACK_4_PORT       GPIOA
+#define PIN_INFRARED_TRACK_5_PORT       GPIOA
+#define PIN_INFRARED_TRACK_6_PORT       GPIOA
+#define PIN_INFRARED_TRACK_7_PORT       GPIOA
+#define PIN_INFRARED_TRACK_8_PORT       GPIOB
 #define PIN_INFRARED_TRACK_1            DL_GPIO_PIN_15
 #define PIN_INFRARED_TRACK_2            DL_GPIO_PIN_16
 #define PIN_INFRARED_TRACK_3            DL_GPIO_PIN_17
@@ -144,7 +147,7 @@
 #define PIN_INFRARED_TRACK_5            DL_GPIO_PIN_25
 #define PIN_INFRARED_TRACK_6            DL_GPIO_PIN_26
 #define PIN_INFRARED_TRACK_7            DL_GPIO_PIN_27
-#define PIN_INFRARED_TRACK_8            DL_GPIO_PIN_14
+#define PIN_INFRARED_TRACK_8            DL_GPIO_PIN_9
 #define PIN_INFRARED_TRACK_1_IOMUX      GRAY_S1_IOMUX
 #define PIN_INFRARED_TRACK_2_IOMUX      GRAY_S2_IOMUX
 #define PIN_INFRARED_TRACK_3_IOMUX      GRAY_S3_IOMUX
@@ -152,10 +155,10 @@
 #define PIN_INFRARED_TRACK_5_IOMUX      GRAY_S5_IOMUX
 #define PIN_INFRARED_TRACK_6_IOMUX      GRAY_S6_IOMUX
 #define PIN_INFRARED_TRACK_7_IOMUX      GRAY_S7_IOMUX
-#define PIN_INFRARED_TRACK_8_IOMUX      IOMUX_PINCM36
+#define PIN_INFRARED_TRACK_8_IOMUX      IOMUX_PINCM26
 
 /* 七路旧灰度接口保留为别名，Full Profile仍可选择原来的GPIO7方法。 */
-#define PIN_GRAY_DIGITAL_PORT           PIN_INFRARED_TRACK_PORT
+#define PIN_GRAY_DIGITAL_PORT           GPIOA
 #define PIN_GRAY_1                      PIN_INFRARED_TRACK_1
 #define PIN_GRAY_2                      PIN_INFRARED_TRACK_2
 #define PIN_GRAY_3                      PIN_INFRARED_TRACK_3

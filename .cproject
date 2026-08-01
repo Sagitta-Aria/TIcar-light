@@ -70,7 +70,6 @@
                                     <listOptionValue value="${CG_TOOL_ROOT}/lib"/>
                                 </option>
                                 <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.LIBRARY.1200047357" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.linkerID.LIBRARY" valueType="libs">
-                                    <listOptionValue value="ti/devices/msp/m0p/linker_files/ticlang/mspm0g3507.cmd"/>
                                     <listOptionValue value="ti/driverlib/lib/ticlang/m0p/mspm0g1x0x_g3x0x/driverlib.a"/>
                                     <listOptionValue value="libc.a"/>
                                 </option>

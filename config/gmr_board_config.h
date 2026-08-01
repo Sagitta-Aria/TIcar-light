@@ -1,7 +1,7 @@
 #ifndef GMR_BOARD_CONFIG_H
 #define GMR_BOARD_CONFIG_H
 
-/* GMR 保留编码底盘、按键、显示、UART0调参和Task5数字灰度差速。 */
+/* GMR 保留编码底盘、按键、显示、UART0调参和八路红外差速。 */
 #define CAR_RECOVERY_SAFE_BUILD        (0U)
 
 /* UART0/PA10、PA11只用于可选日志；GMR发布目标默认不初始化。 */
@@ -122,11 +122,11 @@
 #define CAR_MOTOR_NO_YAW_RETURN_CONFIRM_SAMPLES                         (2U)
 #define CAR_MOTOR_NO_YAW_TURN_TARGET_ANGLE_X100                         (1U)
 
-/* 默认七路数字灰度：bit6..bit0对应S1..S7，高电平表示压线。 */
+/* 八路红外：bit7..bit0对应IR1..IR8，模块高电平表示黑线。 */
 #define GRAY_DIGITAL_ACTIVE_HIGH       (1U)
 #define GRAY_DIGITAL_INPUT_PULL_UP     (1U)
-#define GRAY_SENSOR_COUNT              (7U)
-#define CAR_GRAY_TRACK_SENSOR_MASK     (0x7FU)
+#define GRAY_SENSOR_COUNT              (8U)
+#define CAR_GRAY_TRACK_SENSOR_MASK     (0xFFU)
 #define GRAY_ACTIVE_HIGH               (1U)
 #define GRAY_ADC_MAX_VALUE             (4095U)
 #define GRAY_DEFAULT_THRESHOLD         (2000U)

@@ -34,7 +34,7 @@ void CarDisplay_Clear(void);
  */
 void CarDisplay_ShowLine(uint8_t row, const char *text);
 
-/* Task2计时专用页面；H7使用@T协议，本地OLED使用24像素原生数字。 */
+/* TASK子菜单计时显示；H7使用@T协议，本地OLED使用24像素原生数字。 */
 void CarDisplay_ShowTimer(uint32_t elapsedMs);
 
 /* 把缓存变化输出到所有已启用后端；只能在低优先级UI/启动流程调用。 */

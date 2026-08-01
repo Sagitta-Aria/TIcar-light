@@ -15,8 +15,22 @@ static const TaskRegistryEntry g_tasks[] = {
     { "Encoder", 3U, CAR_EVENT_MISSION_3_START },
     { "Drive Adjustable", 4U, CAR_EVENT_MISSION_4_START },
     { "Direction +20", 5U, CAR_EVENT_MISSION_5_START },
-    { "Gray Differential", 6U, CAR_EVENT_MISSION_6_START },
-    { "Line Follow", 7U, CAR_EVENT_MISSION_7_START }
+    { "IR Differential", 6U, CAR_EVENT_MISSION_6_START },
+    { "Line Follow", 7U, CAR_EVENT_MISSION_7_START },
+    { "H7 BMI Ball", 8U, CAR_EVENT_MISSION_8_START },
+    { "H7 Step Test", 9U, CAR_EVENT_MISSION_9_START },
+    { "Task3 Ball", CAR_MISSION_ID_GMR_TASK3_BALL,
+        CAR_EVENT_MISSION_10_START },
+    { "Task4 Track+Ball", CAR_MISSION_ID_GMR_TASK4_TRACK_BALL,
+        CAR_EVENT_MISSION_11_START },
+    { "Task5 Track+Ball", CAR_MISSION_ID_GMR_TASK5_TRACK_BALL,
+        CAR_EVENT_MISSION_12_START },
+    { "Task6 Track+Ball", CAR_MISSION_ID_GMR_TASK6_TRACK_BALL,
+        CAR_EVENT_MISSION_15_START },
+    { "BMI Y FF Test", CAR_MISSION_ID_GMR_IMU_Y_FF_TEST,
+        CAR_EVENT_MISSION_13_START },
+    { "Ramp Tilt Test", CAR_MISSION_ID_GMR_RAMP_TILT_TEST,
+        CAR_EVENT_MISSION_14_START }
 };
 #else
 static const TaskRegistryEntry g_tasks[] = {

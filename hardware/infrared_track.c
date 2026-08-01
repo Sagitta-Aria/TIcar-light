@@ -13,20 +13,29 @@
 #endif
 
 typedef struct {
+    GPIO_Regs *port;
     uint32_t pin;
     uint32_t iomux;
 } InfraredTrackSlot;
 
 static const InfraredTrackSlot g_infraredTrackMap[
     INFRARED_TRACK_SENSOR_COUNT] = {
-    {PIN_INFRARED_TRACK_1, PIN_INFRARED_TRACK_1_IOMUX},
-    {PIN_INFRARED_TRACK_2, PIN_INFRARED_TRACK_2_IOMUX},
-    {PIN_INFRARED_TRACK_3, PIN_INFRARED_TRACK_3_IOMUX},
-    {PIN_INFRARED_TRACK_4, PIN_INFRARED_TRACK_4_IOMUX},
-    {PIN_INFRARED_TRACK_5, PIN_INFRARED_TRACK_5_IOMUX},
-    {PIN_INFRARED_TRACK_6, PIN_INFRARED_TRACK_6_IOMUX},
-    {PIN_INFRARED_TRACK_7, PIN_INFRARED_TRACK_7_IOMUX},
-    {PIN_INFRARED_TRACK_8, PIN_INFRARED_TRACK_8_IOMUX},
+    {PIN_INFRARED_TRACK_1_PORT, PIN_INFRARED_TRACK_1,
+        PIN_INFRARED_TRACK_1_IOMUX},
+    {PIN_INFRARED_TRACK_2_PORT, PIN_INFRARED_TRACK_2,
+        PIN_INFRARED_TRACK_2_IOMUX},
+    {PIN_INFRARED_TRACK_3_PORT, PIN_INFRARED_TRACK_3,
+        PIN_INFRARED_TRACK_3_IOMUX},
+    {PIN_INFRARED_TRACK_4_PORT, PIN_INFRARED_TRACK_4,
+        PIN_INFRARED_TRACK_4_IOMUX},
+    {PIN_INFRARED_TRACK_5_PORT, PIN_INFRARED_TRACK_5,
+        PIN_INFRARED_TRACK_5_IOMUX},
+    {PIN_INFRARED_TRACK_6_PORT, PIN_INFRARED_TRACK_6,
+        PIN_INFRARED_TRACK_6_IOMUX},
+    {PIN_INFRARED_TRACK_7_PORT, PIN_INFRARED_TRACK_7,
+        PIN_INFRARED_TRACK_7_IOMUX},
+    {PIN_INFRARED_TRACK_8_PORT, PIN_INFRARED_TRACK_8,
+        PIN_INFRARED_TRACK_8_IOMUX},
 };
 
 static uint8_t InfraredTrack_BitForIndex(uint32_t index)
@@ -54,15 +63,12 @@ uint8_t InfraredTrack_ReadMask(void)
 {
     uint8_t mask = 0U;
     uint32_t index;
-    uint32_t pins = DL_GPIO_readPins(PIN_INFRARED_TRACK_PORT,
-        PIN_INFRARED_TRACK_1 | PIN_INFRARED_TRACK_2 |
-        PIN_INFRARED_TRACK_3 | PIN_INFRARED_TRACK_4 |
-        PIN_INFRARED_TRACK_5 | PIN_INFRARED_TRACK_6 |
-        PIN_INFRARED_TRACK_7 | PIN_INFRARED_TRACK_8);
 
     for (index = 0U; index < INFRARED_TRACK_SENSOR_COUNT; ++index) {
         uint8_t levelHigh =
-            ((pins & g_infraredTrackMap[index].pin) != 0U) ? 1U : 0U;
+            ((DL_GPIO_readPins(g_infraredTrackMap[index].port,
+                 g_infraredTrackMap[index].pin) &
+                g_infraredTrackMap[index].pin) != 0U) ? 1U : 0U;
 
 #if GRAY_DIGITAL_ACTIVE_HIGH
         if (levelHigh != 0U) {

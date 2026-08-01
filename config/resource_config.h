@@ -54,7 +54,7 @@
 #define CAR_M0_ATTITUDE_UART_RX_IOMUX   GPIO_Exchange_IOMUX_RX
 #define CAR_M0_ATTITUDE_UART_RX_IOMUX_FUNC GPIO_Exchange_IOMUX_RX_FUNC
 
-/* H7 uses independent UART2 on Tianmeng GMR and UART0 on Full. */
+/* Gmr sends to H7 on UART2 TX only; Full keeps its independent UART0 link. */
 #if CAR_PROFILE_IS_GMR
 #if !CAR_LIBRARY_BOARD_IS_TIANMENG
 #error "Competition GMR profile requires the Tianmeng board"
@@ -62,13 +62,10 @@
 #define CAR_H7_UART_REQUIRED \
     (CAR_LIBRARY_H7_IMU_ENABLED || CAR_LIBRARY_H7_LCD_ENABLED)
 #define CAR_H7_UART_INST                UART2
-#define CAR_H7_UART_INST_INT_IRQN       UART2_INT_IRQn
 #define CAR_H7_UART_BAUD_RATE           (115200U)
 #define CAR_H7_UART_FREQUENCY           (32000000U)
 #define CAR_H7_UART_TX_PORT             PIN_H7_CONTROL_UART_TX_PORT
 #define CAR_H7_UART_TX_PIN              PIN_H7_CONTROL_UART_TX
-#define CAR_H7_UART_RX_PORT             PIN_H7_CONTROL_UART_RX_PORT
-#define CAR_H7_UART_RX_PIN              PIN_H7_CONTROL_UART_RX
 #else
 #define CAR_H7_UART_REQUIRED \
     (CAR_LIBRARY_H7_IMU_ENABLED || CAR_LIBRARY_H7_LCD_ENABLED)

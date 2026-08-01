@@ -52,6 +52,11 @@ static CarEvent App_HandleKeyEvent(KeyEvent event)
             return CAR_EVENT_MISSION_4_RUN_TOGGLE;
         }
     }
+    if ((state == CAR_STATE_MISSION) &&
+        (StateMachine_GetMissionId() == 9U) &&
+        (event == KEY_EVENT_5)) {
+        return CAR_EVENT_MISSION_9_POSITION_TOGGLE;
+    }
     return CAR_EVENT_NONE;
 }
 
@@ -86,29 +91,11 @@ uint8_t App_InputHadEvent(void)
 
 void App_CommStep(void)
 {
-    H7ControlCommand command;
-
+    H7ControlUart_ServiceTx(
+        StateMachine_GetForwardAccelerationX100(), 5U);
 #if CAR_M0_ATTITUDE_UART_REQUIRED
     M0AttitudeUart_Task(5U);
 #endif
-    command = H7ControlUart_TakeCommand();
-    if (command == H7_CONTROL_COMMAND_START_ATTITUDE) {
-        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_1_START);
-    } else if (command == H7_CONTROL_COMMAND_START_GRAY_FOLLOW) {
-        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_2_START);
-    } else if (command == H7_CONTROL_COMMAND_START_ENCODER) {
-        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_3_START);
-    } else if (command == H7_CONTROL_COMMAND_START_DRIVE) {
-        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_4_START);
-    } else if (command == H7_CONTROL_COMMAND_START_DIRECTION) {
-        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_5_START);
-    } else if (command == H7_CONTROL_COMMAND_START_GRAY) {
-        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_6_START);
-    } else if (command == H7_CONTROL_COMMAND_START_LINE_FOLLOW) {
-        (void)RtosApp_PostEvent(CAR_EVENT_MISSION_7_START);
-    } else if (command == H7_CONTROL_COMMAND_STOP) {
-        (void)RtosApp_PostEvent(CAR_EVENT_STOP);
-    }
 }
 
 void App_GimbalStep(void)

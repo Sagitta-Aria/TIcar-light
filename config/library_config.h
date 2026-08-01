@@ -370,6 +370,12 @@
 #error "IMU660RX SPI library requires the Tianmeng 64P board profile"
 #endif
 
+/* 八路红外的IR8与IMU660RX SCK共用PB9，二者不能同时初始化。 */
+#if (CAR_LIBRARY_GRAY_INPUT_IS_INFRARED_8 && \
+    CAR_LIBRARY_IMU660RX_ENABLED)
+#error "Eight-channel infrared IR8 on PB9 conflicts with IMU660RX SPI SCK"
+#endif
+
 /* 双IMU云台姿态方案必须有H7反馈，板载JY61不能单独替代它。 */
 #if (CAR_LIBRARY_GIMBAL_ATTITUDE_ENABLED && \
     !CAR_LIBRARY_H7_IMU_ENABLED)
@@ -387,7 +393,7 @@
 #if ((CAR_LIBRARY_LINE_FOLLOW_METHOD == \
         CAR_LIBRARY_LINE_FOLLOW_DIGITAL_WEIGHTED) && \
     !CAR_LIBRARY_GRAY_INPUT_IS_DIGITAL)
-#error "Digital weighted line follow requires the 7-channel digital gray input"
+#error "Digital weighted line follow requires a digital line-sensor input"
 #endif
 
 /* 直角转向依赖循迹状态，关闭循迹后不能单独启用直角转向。 */

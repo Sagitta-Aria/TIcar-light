@@ -793,6 +793,12 @@ uint8_t StateMachine_GetMissionId(void)
     return g_missionId;
 }
 
+uint8_t StateMachine_IsTaskMenuMission(uint8_t missionId)
+{
+    /* Full Profile沿用公共UI修改前需要周期刷新的Mission2和Mission8。 */
+    return (uint8_t)(((missionId == 2U) || (missionId == 8U)) ? 1U : 0U);
+}
+
 void StateMachine_SetMission1LapCount(uint8_t lapCount)
 {
     g_mission1LapCount = StateMachine_ClampMission1LapCount(lapCount);

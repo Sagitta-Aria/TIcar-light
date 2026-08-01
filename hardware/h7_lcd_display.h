@@ -18,7 +18,7 @@ void H7LcdDisplay_Clear(void);
 /* 更新固定行0~9；只缓存ASCII前33字符，不在调用点阻塞发送。 */
 void H7LcdDisplay_ShowLine(uint8_t row, const char *text);
 
-/* 缓存Task2计时页面；刷新时发送@T=MM:SS专用命令。 */
+/* 缓存TASK任务计时；刷新时发送@T=MM:SS，H7按当前页面选择全屏或标题栏显示。 */
 void H7LcdDisplay_ShowTimer(uint32_t elapsedSeconds);
 
 /* 发送本次变更；每条@命令独占H7 TX，发送失败的行会保留待重试。 */

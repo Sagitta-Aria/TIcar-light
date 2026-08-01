@@ -1,12 +1,11 @@
 /*
- * H7云台姿态链路：GMR在UART3/PB2/PB3收发，普通配置沿用UART0/PA10/PA11。
+ * H7云台姿态链路只在选中H7 IMU输入库时启用。
  * UART ISR校验并更新共享缓存，Gimbal任务通过原子快照读取；本模块不做二次姿态融合。
- * GMR的UART0保持为独立调参口，H7二进制数据不会进入Task2/Task5文本解析器。
  */
 #include "resource_config.h"
 #include "h7_gyro_link.h"
 
-#if CAR_H7_UART_REQUIRED
+#if CAR_LIBRARY_H7_IMU_ENABLED
 
 #include "FreeRTOS.h"
 #include "task.h"

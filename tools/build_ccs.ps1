@@ -154,7 +154,7 @@ $ToolRoot = Join-Path $CcsDir "tools\compiler\ti-cgt-armllvm_4.0.4.LTS"
 $Compiler = Join-Path $ToolRoot "bin\tiarmclang.exe"
 $SdkStartup = Join-Path $SdkDir "source\ti\devices\msp\m0p\startup_system_files\ticlang\startup_mspm0g350x_ticlang.c"
 $ProjectStartup = Join-Path $ProjectDir "generated\startup_mspm0g350x_ticlang.c"
-$LinkerCmd = Join-Path $SdkDir "source\ti\devices\msp\m0p\linker_files\ticlang\mspm0g3507.cmd"
+$LinkerCmd = Join-Path $ProjectDir "mspm0g3507_app.cmd"
 
 Assert-DirExists $ProjectDir
 Assert-DirExists $SdkDir
@@ -236,6 +236,7 @@ $gmrOnlySources = @(
     "app\gmr_app.c",
     "app\gmr_menu.c",
     "app\gmr_state_machine.c",
+    "app\gmr_stop_count_store.c",
     "hardware\gmr_motor.c"
 )
 $legacyGmrSources = @(

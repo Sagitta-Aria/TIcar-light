@@ -3,6 +3,13 @@
 
 #include <stdint.h>
 
+#define CAR_MISSION_ID_GMR_TASK3_BALL       (10U)
+#define CAR_MISSION_ID_GMR_TASK4_TRACK_BALL (11U)
+#define CAR_MISSION_ID_GMR_TASK5_TRACK_BALL (12U)
+#define CAR_MISSION_ID_GMR_IMU_Y_FF_TEST    (13U)
+#define CAR_MISSION_ID_GMR_RAMP_TILT_TEST   (14U)
+#define CAR_MISSION_ID_GMR_TASK6_TRACK_BALL (15U)
+
 /* CarState：比赛正式版顶层状态；任务细分阶段不应再增加顶层状态。 */
 typedef enum {
     CAR_STATE_INIT = 0, /* 应用初始化尚未完成。 */
@@ -25,13 +32,20 @@ typedef enum {
     CAR_EVENT_MISSION_7_START,
     CAR_EVENT_MISSION_8_START,
     CAR_EVENT_MISSION_9_START,
+    CAR_EVENT_MISSION_10_START,
+    CAR_EVENT_MISSION_11_START,
+    CAR_EVENT_MISSION_12_START,
+    CAR_EVENT_MISSION_13_START,
+    CAR_EVENT_MISSION_14_START,
+    CAR_EVENT_MISSION_15_START,
     CAR_EVENT_FINISHED,
     CAR_EVENT_STOP,
     CAR_EVENT_MENU,
     CAR_EVENT_ERROR,
     CAR_EVENT_CLEAR_ERROR,
     CAR_EVENT_MISSION_4_MODE_TOGGLE,
-    CAR_EVENT_MISSION_4_RUN_TOGGLE
+    CAR_EVENT_MISSION_4_RUN_TOGGLE,
+    CAR_EVENT_MISSION_9_POSITION_TOGGLE
 } CarEvent;
 
 /* CarMission4Stage：Task4 内部阶段，不增加顶层状态。 */
@@ -79,8 +93,26 @@ const char *StateMachine_GetStateName(CarState state);
 /* StateMachine_GetMissionId：读取当前任务编号，0 表示未进入任务。 */
 uint8_t StateMachine_GetMissionId(void);
 
-/* 读取GMR Task2从启动到当前或结束时锁存的耗时，单位ms。 */
-uint32_t StateMachine_GetMission2ElapsedMs(void);
+/* 读取TASK子菜单当前任务从启动到当前或结束时锁存的耗时，单位ms。 */
+uint32_t StateMachine_GetTaskElapsedMs(void);
+
+/* missionId属于TASK子菜单六个正式任务之一时返回1。 */
+uint8_t StateMachine_IsTaskMenuMission(uint8_t missionId);
+
+/* 读取Task9最近一次发送的绝对位置；尚未按K5时返回0。 */
+int32_t StateMachine_GetMission9TargetPosition(void);
+
+/* 读取斜坡倾斜测试的固定有符号步数。 */
+int32_t StateMachine_GetRampTiltTestPosition(void);
+
+/* 读取斜坡倾斜测试当前两轮共同速度目标，单位为count/20ms。 */
+int16_t StateMachine_GetRampTiltTestSpeedTarget(void);
+
+/*
+ * 读取共同前进基准速度的有符号加速度，单位为0.01 (count/20ms)/s，减速为负。
+ * 红外循迹产生的左右差速不计入；没有纵向速度斜坡时返回0。
+ */
+int32_t StateMachine_GetForwardAccelerationX100(void);
 
 /* 按 library_config.h 的当前组合判断某个比赛任务是否可以进入。 */
 uint8_t StateMachine_IsMissionAvailable(uint8_t missionId);
